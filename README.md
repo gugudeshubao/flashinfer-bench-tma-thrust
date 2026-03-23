@@ -4,48 +4,82 @@
 [![Contest](https://img.shields.io/badge/MLSys-2026-red)](https://mlsys.org/)
 [![GPU](https://img.shields.io/badge/NVIDIA-B200-green)](https://www.nvidia.com/)
 
-**Team**: TMA Thrust (Independent Researcher)  
-**Track**: Gated Delta Net Optimization  
-**Hardware Target**: NVIDIA Blackwell (B200) via Modal  
+**Team**: TMA Thrust (Independent Researcher)
+**Track**: C — Gated Delta Net (Track C)
+**Hardware Target**: NVIDIA B200 (sm100) via Modal
+**Kernels**: `gdn_decode_qk4_v8_d128_k_last` · `gdn_prefill_qk4_v8_d128_k_last`
 
-## Overview
+## Quick Start
 
-This repository contains optimized CUDA kernels for **Gated DeltaNet** attention mechanism, submitted to the [MLSys 2026 FlashInfer-Bench Contest](https://mlsys.org/) (NVIDIA Track).
+### 1. Setup Modal volume (first time)
 
-Gated DeltaNet combines:
-- **Gating mechanism** (rapid memory erasure via decay factor α)
-- **Delta rule** (selective memory update via β coefficients)
+```bash
+# Create volume and upload synthetic workloads
+modal run scripts/setup_volume.py
 
-Our implementation targets the NVIDIA B200 architecture, utilizing Tensor Memory Accelerator (TMA) and Warp Group MMA (WGMMA) instructions for peak performance.
+# Or download from HuggingFace
+modal run scripts/setup_volume.py --mode hf
+```
 
-## Current Status
+### 2. Run benchmarks on B200
 
-Following our FlashAttention roadmap:
+```bash
+# Both kernels
+modal run benchmarks/bench_modal.py
 
-- ✅ **Stage 0**: CPU/CUDA naive baseline completed
-- ✅ **Stage 1**: Roofline analysis on Ampere (A100) completed
-- 🚧 **Stage 2**: Hopper TMA/WGMMA migration (in progress)
-- ⏳ **Stage 3**: Blackwell TCgen05.mma optimization (target)
+# Single kernel
+modal run benchmarks/bench_modal.py --kernel decode
+modal run benchmarks/bench_modal.py --kernel prefill
+```
 
 ## Repository Structure
 
-```text
+```
 .
-├── src/
-│   ├── kernels/          # CUDA kernel implementations
-│   │   ├── gated_delta_fwd.cu      # Forward kernel (TMA + WGMMA)
-│   │   └── gated_delta_bwd.cu      # Backward kernel (future work)
-│   ├── utils/            # Helper functions (memory management, timing)
-│   └── third_party/      # FlashInfer headers (submodule)
+├── gdn_decode_qk4_v8_d128_k_last/     # Decode kernel (Track C)
+│   ├── config.toml
+│   ├── solution/triton/kernel.py       # Implementation
+│   └── scripts/pack_solution.py
+├── gdn_prefill_qk4_v8_d128_k_last/    # Prefill kernel (Track C)
+│   ├── config.toml
+│   ├── solution/triton/kernel.py       # Implementation
+│   └── scripts/pack_solution.py
+├── flashinfer_trace/definitions/gdn/   # Kernel definitions (from contest)
+├── scripts/
+│   └── setup_volume.py                 # Modal volume setup
 ├── benchmarks/
-│   ├── bench_modal.py    # Modal cloud benchmarking script
-│   └── sweep_configs/    # JSON configs for hyperparameter sweep
-├── tests/
-│   ├── test_correctness.py    # Numerical accuracy vs reference
-│   └── test_roofline.py       # Memory/compute bound analysis
-├── docs/
-│   ├── ROOFLINE.md       # Roofline model documentation
-│   └── TECHNICAL_REPORT.md    # 4-page contest submission (WIP)
-└── scripts/
-    ├── setup_modal.sh    # Environment setup for Modal B200
-    └── build.sh          # NVCC compilation flags
+│   └── bench_modal.py                  # Main benchmark runner
+└── src/kernels/                        # Future CUDA/TMA kernels
+```
+
+## Algorithm — Gated Delta Net
+
+State layout: **k-last** `[B, H, V, K]`
+
+```
+g    = exp(-exp(A_log) * softplus(a + dt_bias))   # decay gate
+beta = sigmoid(b)                                   # update gate
+
+S     = g * S                             # apply decay
+old_v = k @ S                             # [K] × [K,V] → [V]
+new_v = beta * v + (1-beta) * old_v      # weighted merge
+S     = S + outer(k, new_v - old_v)      # delta rule update
+o     = scale * q @ S                    # output projection
+```
+
+GVA (Grouped Value Attention): `num_v_heads=8 > num_q_heads=4`, Q/K expanded by `repeat_interleave(2)`.
+
+## Development Roadmap
+
+| Stage | Status | Description |
+|-------|--------|-------------|
+| v1 | ✅ | PyTorch baseline (correctness verified) |
+| v2 | 🚧 | Triton kernel (batched matmul, no Python loop) |
+| v3 | ⏳ | CUDA/WGMMA on B200 (TMA + Blackwell instructions) |
+
+## Contest Info
+
+- **Submission deadline**: April 24, 2026 (11:59 PM AoE)
+- **Evaluation**: Biweekly on bare-metal B200, final on locked-clock B200
+- **Metric**: Arithmetic mean speedup over reference implementation
+- **Reference**: https://mlsys26.flashinfer.ai/
