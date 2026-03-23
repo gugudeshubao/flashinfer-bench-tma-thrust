@@ -1,26 +1,17 @@
 """
 GDN Prefill kernel - gdn_prefill_qk4_v8_d128_k_last
 
-Gated Delta Net prefill (chunked) with GVA (Grouped Value Attention):
-  num_q_heads=4, num_k_heads=4, num_v_heads=8, head_size=128
-
-Inputs use varlen / ragged batch format with cu_seqlens.
-State layout: k-last [N, H, V, K]
-
-Algorithm (per token t in sequence):
-  g    = exp(-exp(A_log) * softplus(a[t] + dt_bias))
-  beta = sigmoid(b[t])
-  S     = g * S
-  old_v = k[t] @ S
-  new_v = beta * v[t] + (1-beta) * old_v
-  S     = S + outer(k[t], new_v - old_v)
-  o[t]  = scale * q[t] @ S
+Direct translation of the reference implementation for correctness baseline.
 """
 
 import math
 
 import torch
 import torch.nn.functional as F
+
+
+def _matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.float() @ b.float()
 
 
 def kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale):
@@ -45,61 +36,63 @@ def kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale):
     output   : [total_seq_len, 8, 128] bfloat16
     new_state: [num_seqs, 8, 128, 128] float32, k-last [N, H, V, K]
     """
-    total_seq_len, num_q_heads, K = q.shape
+    total_seq_len, num_q_heads, head_size = q.shape
     num_v_heads = v.shape[1]
-    num_seqs = cu_seqlens.shape[0] - 1
+    num_k_heads = k.shape[1]
+    num_sab_heads = max(num_q_heads, num_v_heads)
+    num_seqs = cu_seqlens.size(0) - 1
     device = q.device
 
     if scale is None or scale == 0.0:
-        scale = 1.0 / math.sqrt(K)
+        scale = 1.0 / math.sqrt(head_size)
 
-    # Pre-compute gates for all tokens
-    x = a.float() + dt_bias.float()                               # [T, 8]
-    g_all = torch.exp(-torch.exp(A_log.float()) * F.softplus(x))  # [T, 8]
-    beta_all = torch.sigmoid(b.float())                            # [T, 8]
+    x = a.float() + dt_bias.float()
+    g = torch.exp(-torch.exp(A_log.float()) * F.softplus(x))
+    beta = torch.sigmoid(b.float())
 
-    # GVA expansion
-    ratio = num_v_heads // num_q_heads  # 2
-    q_exp = q.float().repeat_interleave(ratio, dim=1)  # [T, 8, K]
-    k_exp = k.float().repeat_interleave(ratio, dim=1)  # [T, 8, K]
-    v_f = v.float()                                    # [T, 8, K]
+    q_exp = q.repeat_interleave(num_v_heads // num_q_heads, dim=1)
+    k_exp = k.repeat_interleave(num_v_heads // num_k_heads, dim=1)
 
-    output = torch.zeros(total_seq_len, num_v_heads, K, dtype=torch.float32, device=device)
-    new_state = torch.zeros(num_seqs, num_v_heads, K, K, dtype=torch.float32, device=device)
+    output = torch.zeros(
+        (total_seq_len, num_sab_heads, head_size), dtype=torch.bfloat16, device=device
+    )
+    new_state = torch.zeros(
+        (num_seqs, num_sab_heads, head_size, head_size), dtype=torch.float32, device=device
+    )
 
     for seq_idx in range(num_seqs):
         seq_start = int(cu_seqlens[seq_idx].item())
         seq_end = int(cu_seqlens[seq_idx + 1].item())
-        if seq_end <= seq_start:
+        seq_len = seq_end - seq_start
+
+        if seq_len <= 0:
             continue
 
-        # Initial state: k-last [H, V, K] -> k-first [H, K, V]
         if state is not None:
-            S = state[seq_idx].float().transpose(-1, -2).clone()  # [8, K, V]
+            state_HKV = state[seq_idx].clone().float().transpose(-1, -2)
         else:
-            S = torch.zeros(num_v_heads, K, K, dtype=torch.float32, device=device)
+            state_HKV = torch.zeros(
+                (num_sab_heads, head_size, head_size), dtype=torch.float32, device=device
+            )
 
-        # Sequential scan over tokens in the sequence
-        for t in range(seq_start, seq_end):
-            g_t = g_all[t]          # [8]
-            beta_t = beta_all[t]    # [8]
-            k_t = k_exp[t]          # [8, K]
-            v_t = v_f[t]            # [8, K]
-            q_t = q_exp[t]          # [8, K]
+        for i in range(seq_len):
+            t = seq_start + i
+            q_H1K = q_exp[t].unsqueeze(1).float()
+            k_H1K = k_exp[t].unsqueeze(1).float()
+            v_H1V = v[t].unsqueeze(1).float()
+            g_H11 = g[t].unsqueeze(1).unsqueeze(2)
+            beta_H11 = beta[t].unsqueeze(1).unsqueeze(2)
 
-            # Decay
-            S = g_t[:, None, None] * S               # [8, K, V]
+            old_state_HKV = g_H11 * state_HKV
+            old_v_H1V = _matmul(k_H1K, old_state_HKV)
+            new_v_H1V = beta_H11 * v_H1V + (1 - beta_H11) * old_v_H1V
+            state_remove = torch.einsum('hkl,hlv->hkv', k_H1K.transpose(-1, -2), old_v_H1V)
+            state_update = torch.einsum('hkl,hlv->hkv', k_H1K.transpose(-1, -2), new_v_H1V)
+            state_HKV = old_state_HKV - state_remove + state_update
 
-            # Delta rule update
-            old_v = torch.einsum("hk,hkv->hv", k_t, S)           # [8, V]
-            new_v = beta_t[:, None] * v_t + (1.0 - beta_t[:, None]) * old_v  # [8, V]
-            delta = new_v - old_v                                   # [8, V]
-            S = S + torch.einsum("hk,hv->hkv", k_t, delta)        # [8, K, V]
+            o_H1V = scale * _matmul(q_H1K, state_HKV)
+            output[t] = o_H1V.squeeze(1).to(torch.bfloat16)
 
-            # Output
-            output[t] = scale * torch.einsum("hk,hkv->hv", q_t, S)  # [8, V]
+        new_state[seq_idx] = state_HKV.transpose(-1, -2)
 
-        new_state[seq_idx] = S.transpose(-1, -2)  # [H, K, V] -> [H, V, K] k-last
-
-    output_bf16 = output.to(torch.bfloat16)
-    return output_bf16, new_state
+    return output, new_state
