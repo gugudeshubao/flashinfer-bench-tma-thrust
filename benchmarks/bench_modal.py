@@ -2,9 +2,10 @@
 Modal benchmark runner for GDN kernels (decode + prefill).
 
 Usage:
-    modal run benchmarks/bench_modal.py              # run both
+    modal run benchmarks/bench_modal.py              # run both (solution only)
     modal run benchmarks/bench_modal.py --kernel decode
     modal run benchmarks/bench_modal.py --kernel prefill
+    modal run benchmarks/bench_modal.py --compare     # solution vs Python baseline
     modal run benchmarks/bench_modal.py --kernel decode --warmup 5 --iters 100
 
 Setup (one-time):
@@ -36,10 +37,16 @@ KERNEL_NAMES = {
 }
 
 
-# Per-kernel static config (avoids TOML parsing dependency on local Python 3.9)
 KERNEL_CONFIGS = {
     "gdn_decode_qk4_v8_d128_k_last": {
-        "name": "tma-thrust-gdn-decode-v1",
+        "solution": {
+            "name": "tma-thrust-gdn-decode-v1",
+            "subdir": "solution/triton",
+        },
+        "baseline": {
+            "name": "tma-thrust-gdn-decode-baseline",
+            "subdir": "baseline/triton",
+        },
         "definition": "gdn_decode_qk4_v8_d128_k_last",
         "author": "tma-thrust",
         "language": "triton",
@@ -47,7 +54,14 @@ KERNEL_CONFIGS = {
         "destination_passing_style": False,
     },
     "gdn_prefill_qk4_v8_d128_k_last": {
-        "name": "tma-thrust-gdn-prefill-v1",
+        "solution": {
+            "name": "tma-thrust-gdn-prefill-v1",
+            "subdir": "solution/triton",
+        },
+        "baseline": {
+            "name": "tma-thrust-gdn-prefill-baseline",
+            "subdir": "baseline/triton",
+        },
         "definition": "gdn_prefill_qk4_v8_d128_k_last",
         "author": "tma-thrust",
         "language": "triton",
@@ -57,11 +71,14 @@ KERNEL_CONFIGS = {
 }
 
 
-def build_solution_dict(kernel_dir_name: str) -> dict:
-    """Build Solution JSON dict locally (no flashinfer_bench needed)."""
+def build_solution_dict(kernel_dir_name: str, variant: str = "solution") -> dict:
+    """Build Solution JSON dict locally (no flashinfer_bench needed).
+
+    variant: 'solution' (optimized) or 'baseline' (Python reference)
+    """
     cfg = KERNEL_CONFIGS[kernel_dir_name]
     kernel_dir = REPO_ROOT / kernel_dir_name
-    source_dir = kernel_dir / "solution" / "triton"
+    source_dir = kernel_dir / cfg[variant]["subdir"]
 
     sources = []
     for py_file in sorted(source_dir.glob("*.py")):
@@ -72,7 +89,7 @@ def build_solution_dict(kernel_dir_name: str) -> dict:
         f"Entry file {entry_file!r} not found in {[s['path'] for s in sources]}"
 
     return {
-        "name": cfg["name"],
+        "name": cfg[variant]["name"],
         "definition": cfg["definition"],
         "author": cfg["author"],
         "spec": {
@@ -96,7 +113,6 @@ def run_benchmark(solution_dict: dict, config_dict: dict = None) -> dict:
     """Build solution from dict and run benchmark on Modal B200."""
     from flashinfer_bench import Benchmark, BenchmarkConfig, Solution, TraceSet
 
-    # Deserialize
     solution = Solution.model_validate(solution_dict)
 
     if config_dict is None:
@@ -116,7 +132,7 @@ def run_benchmark(solution_dict: dict, config_dict: dict = None) -> dict:
     if not workloads:
         raise ValueError(f"No workloads for '{solution.definition}'")
 
-    print(f"Running {solution.definition}: {len(workloads)} workloads")
+    print(f"Running {solution.name} ({solution.definition}): {len(workloads)} workloads")
 
     bench_trace_set = TraceSet(
         root=trace_set.root,
@@ -133,7 +149,10 @@ def run_benchmark(solution_dict: dict, config_dict: dict = None) -> dict:
     results = {}
     for trace in traces:
         if trace.evaluation:
-            entry = {"status": trace.evaluation.status.value}
+            entry = {
+                "solution_name": solution.name,
+                "status": trace.evaluation.status.value,
+            }
             if trace.evaluation.performance:
                 p = trace.evaluation.performance
                 entry["latency_ms"] = p.latency_ms
@@ -158,12 +177,13 @@ def print_results(results: dict):
             continue
         speedups = []
         for wid, r in workloads.items():
+            sol_name = r.get("solution_name", "?")
             status = r.get("status", "?")
             lat = r.get("latency_ms")
             ref_lat = r.get("reference_latency_ms")
             spdup = r.get("speedup_factor")
             abs_err = r.get("max_abs_error")
-            parts = [f"  {wid[:8]}... | {status}"]
+            parts = [f"  {wid[:8]}... | {sol_name} | {status}"]
             if lat is not None:
                 parts.append(f"{lat:.4f}ms")
             if ref_lat is not None:
@@ -179,17 +199,58 @@ def print_results(results: dict):
             print(f"\n  Average speedup: {avg:.2f}x  (N={len(speedups)})")
 
 
+def print_comparison(sol_results: dict, base_results: dict):
+    """Print side-by-side comparison of solution vs baseline."""
+    for def_name in sol_results:
+        sol_wl = sol_results.get(def_name, {})
+        base_wl = base_results.get(def_name, {})
+        all_wids = sorted(set(sol_wl) | set(base_wl))
+
+        print(f"\n{'='*72}")
+        print(f"Comparison: {def_name}")
+        print(f"{'='*72}")
+        print(f"  {'workload':10s}  {'baseline':>12s}  {'solution':>12s}  {'gain':>8s}  status")
+        print(f"  {'-'*10}  {'-'*12}  {'-'*12}  {'-'*8}  ------")
+
+        gains = []
+        for wid in all_wids:
+            b = base_wl.get(wid, {})
+            s = sol_wl.get(wid, {})
+            b_lat = b.get("latency_ms")
+            s_lat = s.get("latency_ms")
+            s_status = s.get("status", "?")
+            b_status = b.get("status", "?")
+
+            b_str = f"{b_lat:.2f}ms" if b_lat is not None else "n/a"
+            s_str = f"{s_lat:.2f}ms" if s_lat is not None else "n/a"
+
+            if b_lat and s_lat:
+                gain = b_lat / s_lat
+                gain_str = f"{gain:.2f}x"
+                gains.append(gain)
+            else:
+                gain_str = "n/a"
+
+            print(f"  {wid[:10]}  {b_str:>12s}  {s_str:>12s}  {gain_str:>8s}  {s_status}")
+
+        if gains:
+            avg = sum(gains) / len(gains)
+            print(f"\n  Average gain over Python baseline: {avg:.2f}x  (N={len(gains)})")
+
+
 @app.local_entrypoint()
 def main(
     kernel: str = "both",
     warmup: int = 3,
     iters: int = 100,
     trials: int = 5,
+    compare: bool = False,
 ):
     """
     Run GDN kernel benchmarks on Modal B200.
 
-    --kernel: decode | prefill | both  (default: both)
+    --kernel:  decode | prefill | both  (default: both)
+    --compare: also run Python baseline and show side-by-side latency comparison
     """
     config_dict = {"warmup_runs": warmup, "iterations": iters, "num_trials": trials}
 
@@ -201,20 +262,46 @@ def main(
         print(f"Unknown kernel '{kernel}'. Use: decode | prefill | both")
         sys.exit(1)
 
-    futures = {}
+    # Spawn solution jobs
+    sol_futures = {}
     for k in targets:
         dir_name = KERNEL_NAMES[k]
-        print(f"Packing {k} kernel ({dir_name})...")
-        sol_dict = build_solution_dict(dir_name)
+        print(f"Packing {k} solution ({dir_name})...")
+        sol_dict = build_solution_dict(dir_name, variant="solution")
         print(f"  -> {sol_dict['name']}")
-        futures[k] = run_benchmark.spawn(sol_dict, config_dict)
+        sol_futures[k] = run_benchmark.spawn(sol_dict, config_dict)
 
-    all_results = {}
-    for k, fut in futures.items():
-        print(f"Waiting for {k} results...")
-        result = fut.get()
-        all_results.update(result)
+    # Optionally spawn baseline jobs in parallel
+    base_futures = {}
+    if compare:
+        for k in targets:
+            dir_name = KERNEL_NAMES[k]
+            print(f"Packing {k} baseline ({dir_name})...")
+            base_dict = build_solution_dict(dir_name, variant="baseline")
+            print(f"  -> {base_dict['name']}")
+            base_futures[k] = run_benchmark.spawn(base_dict, config_dict)
 
-    print("\n" + "="*60)
-    print("BENCHMARK RESULTS")
-    print_results(all_results)
+    # Collect solution results
+    sol_all = {}
+    for k, fut in sol_futures.items():
+        print(f"Waiting for {k} solution results...")
+        sol_all.update(fut.get())
+
+    print("\n" + "=" * 60)
+    print("SOLUTION RESULTS")
+    print_results(sol_all)
+
+    # Collect and compare baseline results
+    if compare:
+        base_all = {}
+        for k, fut in base_futures.items():
+            print(f"Waiting for {k} baseline results...")
+            base_all.update(fut.get())
+
+        print("\n" + "=" * 60)
+        print("BASELINE RESULTS")
+        print_results(base_all)
+
+        print("\n" + "=" * 60)
+        print("SOLUTION vs BASELINE COMPARISON")
+        print_comparison(sol_all, base_all)
