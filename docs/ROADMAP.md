@@ -18,7 +18,7 @@
 
 ---
 
-## v2 · Triton Kernel 🚧
+## v2 · Triton Kernel ✅ (2026-03-27)
 
 **Goal**: eliminate Python loop overhead, fuse all per-head ops.
 

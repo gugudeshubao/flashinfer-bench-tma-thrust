@@ -15,8 +15,8 @@
 
 | Kernel | Workloads | Avg Speedup vs Ref | Version | Date |
 |--------|-----------|-------------------|---------|------|
-| decode | 10/10 ✅ | ~1.10x | v1 Python baseline | 2026-03-24 |
-| prefill | 12/12 ✅ | ~1.00x | v1 Python baseline | 2026-03-24 |
+| decode | 10/10 ✅ | **950x** | v2 Triton | 2026-03-27 |
+| prefill | 12/12 ✅ | **387x** | v2 Triton | 2026-03-27 |
 
 ## Quick Start
 

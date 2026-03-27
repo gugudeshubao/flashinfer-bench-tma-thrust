@@ -1,98 +1,133 @@
 """
-GDN Prefill kernel - gdn_prefill_qk4_v8_d128_k_last
+GDN Prefill — v2 Triton kernel
+gdn_prefill_qk4_v8_d128_k_last
 
-Direct translation of the reference implementation for correctness baseline.
+Grid: (N=num_seqs, H=8)  — one Triton program per (sequence, v_head).
+The 128×128 state matrix lives in registers throughout the token loop,
+so it is only loaded/stored once from HBM regardless of sequence length.
+Per-token cost = 3 vector loads (k/v/q, 128×bf16 each) + register ops.
+
+GVA: num_q_heads=4, num_v_heads=8  →  qk_head = v_head // 2
+State layout: k-last  [N, H, V=128, K=128]  float32
 """
 
 import math
 
 import torch
-import torch.nn.functional as F
+import triton
+import triton.language as tl
 
 
-def _matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
-    return a.float() @ b.float()
+@triton.jit
+def _prefill_kernel(
+    Q_ptr, K_ptr, V_ptr, State_ptr,
+    A_log_ptr, A_ptr, DtBias_ptr, B_ptr,
+    CuSeq_ptr, Out_ptr, NewState_ptr,
+    scale,
+    stride_q_t, stride_q_h,          # Q   [T, 4, D]
+    stride_k_t, stride_k_h,          # K   [T, 4, D]
+    stride_v_t, stride_v_h,          # V   [T, 8, D]
+    stride_s_n, stride_s_h, stride_s_v,  # State [N,8,D,D] k-last
+    stride_a_t,                       # a   [T, 8]
+    stride_b_t,                       # b   [T, 8]
+    stride_o_t, stride_o_h,           # Out [T, 8, D]
+    stride_ns_n, stride_ns_h, stride_ns_v,
+    D: tl.constexpr,                  # head_size = 128
+):
+    n    = tl.program_id(0)   # sequence index
+    h    = tl.program_id(1)   # v_head index
+    qk_h = h // 2             # GVA: 2 v-heads per qk-head
+
+    # ── sequence bounds ──────────────────────────────────────────────────────
+    t_start = tl.load(CuSeq_ptr + n    ).to(tl.int32)
+    t_end   = tl.load(CuSeq_ptr + n + 1).to(tl.int32)
+    seq_len = t_end - t_start
+
+    # ── head-level constants ─────────────────────────────────────────────────
+    alog   = tl.load(A_log_ptr   + h)
+    dt_val = tl.load(DtBias_ptr  + h)
+
+    # ── load initial state  [D, D] ───────────────────────────────────────────
+    vi = tl.arange(0, D)[:, None]   # [D, 1]  — V index
+    ki = tl.arange(0, D)[None, :]   # [1, D]  — K index
+    s_ptr = State_ptr + n * stride_s_n + h * stride_s_h
+    S = tl.load(s_ptr + vi * stride_s_v + ki)   # [D, D] f32
+
+    di = tl.arange(0, D)            # reused for 1-D vector loads
+
+    # ── sequential token scan ────────────────────────────────────────────────
+    for i in range(seq_len):
+        t = t_start + i
+
+        # per-token gate scalars
+        a_val = tl.load(A_ptr + t * stride_a_t + h).to(tl.float32)
+        b_val = tl.load(B_ptr + t * stride_b_t + h).to(tl.float32)
+
+        x  = a_val + dt_val
+        sp = tl.where(x > 20.0, x, tl.log(1.0 + tl.exp(x)))  # softplus
+        g    = tl.exp(-tl.exp(alog) * sp)
+        beta = tl.sigmoid(b_val)
+
+        # k / v / q vectors  [D]
+        kv = tl.load(K_ptr + t * stride_k_t + qk_h * stride_k_h + di).to(tl.float32)
+        vv = tl.load(V_ptr + t * stride_v_t + h    * stride_v_h + di).to(tl.float32)
+        qv = tl.load(Q_ptr + t * stride_q_t + qk_h * stride_q_h + di).to(tl.float32)
+
+        # GDN delta-rule
+        S     = g * S
+        old_v = tl.sum(S * kv[None, :], axis=1)        # S @ k  [D]
+        delta = beta * (vv - old_v)                     # [D]
+        S     = S + delta[:, None] * kv[None, :]        # rank-1 update
+
+        # output  o = scale * S @ q
+        ov = scale * tl.sum(S * qv[None, :], axis=1)   # [D]
+        tl.store(Out_ptr + t * stride_o_t + h * stride_o_h + di,
+                 ov.to(tl.bfloat16))
+
+    # ── store final state ────────────────────────────────────────────────────
+    ns_ptr = NewState_ptr + n * stride_ns_n + h * stride_ns_h
+    tl.store(ns_ptr + vi * stride_ns_v + ki, S)
 
 
 def kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale):
-    """
-    GDN prefill variable-length batched forward pass.
-
-    Parameters
-    ----------
-    q         : [total_seq_len, 4, 128] bfloat16
-    k         : [total_seq_len, 4, 128] bfloat16
-    v         : [total_seq_len, 8, 128] bfloat16
-    state     : [num_seqs, 8, 128, 128] float32, k-last [N, H, V, K]  (optional)
-    A_log     : [8] float32
-    a         : [total_seq_len, 8] bfloat16
-    dt_bias   : [8] float32
-    b         : [total_seq_len, 8] bfloat16
-    cu_seqlens: [num_seqs+1] int64
-    scale     : scalar float32
-
-    Returns
-    -------
-    output   : [total_seq_len, 8, 128] bfloat16
-    new_state: [num_seqs, 8, 128, 128] float32, k-last [N, H, V, K]
-    """
-    total_seq_len, num_q_heads, head_size = q.shape
+    T, num_q_heads, D = q.shape
     num_v_heads = v.shape[1]
-    num_k_heads = k.shape[1]
-    num_sab_heads = max(num_q_heads, num_v_heads)
-    num_seqs = cu_seqlens.size(0) - 1
+    N = cu_seqlens.shape[0] - 1
     device = q.device
 
     if scale is None or scale == 0.0:
-        scale = 1.0 / math.sqrt(head_size)
+        scale = 1.0 / math.sqrt(D)
 
-    x = a.float() + dt_bias.float()
-    g = torch.exp(-torch.exp(A_log.float()) * F.softplus(x))
-    beta = torch.sigmoid(b.float())
+    q_c  = q.contiguous()    # [T, 4, D]
+    k_c  = k.contiguous()    # [T, 4, D]
+    v_c  = v.contiguous()    # [T, 8, D]
+    a_c  = a.contiguous()    # [T, 8]
+    b_c  = b.contiguous()    # [T, 8]
+    cu   = cu_seqlens.contiguous()
 
-    q_exp = q.repeat_interleave(num_v_heads // num_q_heads, dim=1)
-    k_exp = k.repeat_interleave(num_v_heads // num_k_heads, dim=1)
+    if state is not None:
+        S = state.contiguous()   # [N, 8, D, D] k-last
+    else:
+        S = torch.zeros(N, num_v_heads, D, D, dtype=torch.float32, device=device)
 
-    output = torch.zeros(
-        (total_seq_len, num_sab_heads, head_size), dtype=torch.bfloat16, device=device
+    out   = torch.empty(T, num_v_heads, D, dtype=torch.bfloat16, device=device)
+    new_S = torch.empty_like(S)
+
+    _prefill_kernel[(N, num_v_heads)](
+        q_c, k_c, v_c, S,
+        A_log, a_c, dt_bias, b_c,
+        cu, out, new_S,
+        float(scale),
+        q_c.stride(0), q_c.stride(1),
+        k_c.stride(0), k_c.stride(1),
+        v_c.stride(0), v_c.stride(1),
+        S.stride(0), S.stride(1), S.stride(2),
+        a_c.stride(0),
+        b_c.stride(0),
+        out.stride(0), out.stride(1),
+        new_S.stride(0), new_S.stride(1), new_S.stride(2),
+        D=128,
+        num_warps=4,
     )
-    new_state = torch.zeros(
-        (num_seqs, num_sab_heads, head_size, head_size), dtype=torch.float32, device=device
-    )
 
-    for seq_idx in range(num_seqs):
-        seq_start = int(cu_seqlens[seq_idx].item())
-        seq_end = int(cu_seqlens[seq_idx + 1].item())
-        seq_len = seq_end - seq_start
-
-        if seq_len <= 0:
-            continue
-
-        if state is not None:
-            state_HKV = state[seq_idx].clone().float().transpose(-1, -2)
-        else:
-            state_HKV = torch.zeros(
-                (num_sab_heads, head_size, head_size), dtype=torch.float32, device=device
-            )
-
-        for i in range(seq_len):
-            t = seq_start + i
-            q_H1K = q_exp[t].unsqueeze(1).float()
-            k_H1K = k_exp[t].unsqueeze(1).float()
-            v_H1V = v[t].unsqueeze(1).float()
-            g_H11 = g[t].unsqueeze(1).unsqueeze(2)
-            beta_H11 = beta[t].unsqueeze(1).unsqueeze(2)
-
-            old_state_HKV = g_H11 * state_HKV
-            old_v_H1V = _matmul(k_H1K, old_state_HKV)
-            new_v_H1V = beta_H11 * v_H1V + (1 - beta_H11) * old_v_H1V
-            state_remove = torch.einsum('hkl,hlv->hkv', k_H1K.transpose(-1, -2), old_v_H1V)
-            state_update = torch.einsum('hkl,hlv->hkv', k_H1K.transpose(-1, -2), new_v_H1V)
-            state_HKV = old_state_HKV - state_remove + state_update
-
-            o_H1V = scale * _matmul(q_H1K, state_HKV)
-            output[t] = o_H1V.squeeze(1).to(torch.bfloat16)
-
-        new_state[seq_idx] = state_HKV.transpose(-1, -2)
-
-    return output, new_state
+    return out, new_S

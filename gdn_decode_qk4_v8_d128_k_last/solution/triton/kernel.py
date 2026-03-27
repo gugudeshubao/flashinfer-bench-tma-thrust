@@ -1,100 +1,119 @@
 """
-GDN Decode kernel - gdn_decode_qk4_v8_d128_k_last
+GDN Decode — v2 Triton kernel
+gdn_decode_qk4_v8_d128_k_last
 
-Gated Delta Net single-token decode with GVA (Grouped Value Attention):
-  num_q_heads=4, num_k_heads=4, num_v_heads=8, head_size=128
+Grid: (B, H=8)  — one Triton program per (batch, v_head).
+Each program loads the full 128×128 state tile, applies the GDN delta-rule
+update in registers, writes state back, and emits the output vector.
+No Python-level loops; all per-head compute is fused in one kernel launch.
 
-State layout: k-last [B, H, V, K]
-
-Algorithm:
-  g    = exp(-exp(A_log) * softplus(a + dt_bias))  # decay gate per head
-  beta = sigmoid(b)                                  # update gate per head
-
-  # Working in k-first layout [K, V]:
-  S     = g * S                            # apply decay
-  old_v = k @ S                            # [K] @ [K,V] -> [V]
-  new_v = beta * v + (1-beta) * old_v     # weighted update
-  S     = S + outer(k, new_v - old_v)     # delta rule
-  o     = scale * q @ S                   # [K] @ [K,V] -> [V]
+GVA: num_q_heads=4, num_v_heads=8  →  qk_head = v_head // 2
+State layout: k-last  [B, H, V=128, K=128]  float32
 """
 
 import math
 
 import torch
-import torch.nn.functional as F
+import triton
+import triton.language as tl
+
+
+@triton.jit
+def _decode_kernel(
+    Q_ptr, K_ptr, V_ptr, State_ptr,
+    A_log_ptr, A_ptr, DtBias_ptr, B_ptr,
+    Out_ptr, NewState_ptr,
+    scale,
+    # tensor strides (post-squeeze, contiguous layout assumed)
+    stride_q_b, stride_q_h,        # Q  [B, 4, D]
+    stride_k_b, stride_k_h,        # K  [B, 4, D]
+    stride_v_b, stride_v_h,        # V  [B, 8, D]
+    stride_s_b, stride_s_h, stride_s_v,  # State [B,8,D,D] k-last
+    stride_a_b,                    # a  [B, 8]
+    stride_b_b,                    # b  [B, 8]
+    stride_o_b, stride_o_h,        # Out [B, 8, D]
+    stride_ns_b, stride_ns_h, stride_ns_v,
+    D: tl.constexpr,               # head_size = 128
+):
+    b    = tl.program_id(0)
+    h    = tl.program_id(1)
+    qk_h = h // 2                  # GVA expansion
+
+    # ── gates (scalar per program) ──────────────────────────────────────────
+    a_val  = tl.load(A_ptr     + b * stride_a_b + h).to(tl.float32)
+    dt_val = tl.load(DtBias_ptr + h)
+    alog   = tl.load(A_log_ptr  + h)
+    b_val  = tl.load(B_ptr     + b * stride_b_b + h).to(tl.float32)
+
+    x = a_val + dt_val
+    sp = tl.where(x > 20.0, x, tl.log(1.0 + tl.exp(x)))   # softplus, stable
+    g    = tl.exp(-tl.exp(alog) * sp)
+    beta = tl.sigmoid(b_val)
+
+    # ── q / k / v vectors  [D] ──────────────────────────────────────────────
+    d = tl.arange(0, D)
+    q = tl.load(Q_ptr + b * stride_q_b + qk_h * stride_q_h + d).to(tl.float32)
+    k = tl.load(K_ptr + b * stride_k_b + qk_h * stride_k_h + d).to(tl.float32)
+    v = tl.load(V_ptr + b * stride_v_b + h    * stride_v_h + d).to(tl.float32)
+
+    # ── state  [D, D]  (V rows = dim-0, K cols = dim-1) ────────────────────
+    v_idx = tl.arange(0, D)[:, None]   # [D, 1]
+    k_idx = tl.arange(0, D)[None, :]   # [1, D]
+    s_ptr = State_ptr + b * stride_s_b + h * stride_s_h
+    S = tl.load(s_ptr + v_idx * stride_s_v + k_idx)  # [D, D] f32
+
+    # ── GDN delta-rule update ───────────────────────────────────────────────
+    S       = g * S                                  # decay
+    old_v   = tl.sum(S * k[None, :], axis=1)        # [D]  S @ k
+    delta   = beta * (v - old_v)                    # [D]
+    S       = S + delta[:, None] * k[None, :]       # rank-1 update
+    out     = scale * tl.sum(S * q[None, :], axis=1)  # [D]  scale * S @ q
+
+    # ── store outputs ────────────────────────────────────────────────────────
+    tl.store(Out_ptr + b * stride_o_b + h * stride_o_h + d,
+             out.to(tl.bfloat16))
+    ns_ptr = NewState_ptr + b * stride_ns_b + h * stride_ns_h
+    tl.store(ns_ptr + v_idx * stride_ns_v + k_idx, S)
 
 
 def kernel(q, k, v, state, A_log, a, dt_bias, b, scale):
-    """
-    GDN decode single-token forward pass.
-
-    Parameters
-    ----------
-    q      : [B, 1, 4, 128] bfloat16
-    k      : [B, 1, 4, 128] bfloat16
-    v      : [B, 1, 8, 128] bfloat16
-    state  : [B, 8, 128, 128] float32, k-last layout [B, H, V, K]  (optional)
-    A_log  : [8] float32
-    a      : [B, 1, 8] bfloat16
-    dt_bias: [8] float32
-    b      : [B, 1, 8] bfloat16
-    scale  : scalar float32
-
-    Returns
-    -------
-    output   : [B, 1, 8, 128] bfloat16
-    new_state: [B, 8, 128, 128] float32, k-last layout [B, H, V, K]
-    """
-    B, T, num_q_heads, K = q.shape
+    B, _, num_q_heads, D = q.shape
     num_v_heads = v.shape[2]
     device = q.device
 
     if scale is None or scale == 0.0:
-        scale = 1.0 / math.sqrt(K)
+        scale = 1.0 / math.sqrt(D)
 
-    # Compute decay and update gates
-    # a: [B, 1, 8], dt_bias: [8], A_log: [8]
-    x = a.float() + dt_bias.float()               # [B, 1, 8]
-    g = torch.exp(-torch.exp(A_log.float()) * F.softplus(x))  # [B, 1, 8]
-    beta = torch.sigmoid(b.float())                # [B, 1, 8]
+    # squeeze T=1, ensure contiguous
+    q_c = q.squeeze(1).contiguous()   # [B, 4, D]
+    k_c = k.squeeze(1).contiguous()   # [B, 4, D]
+    v_c = v.squeeze(1).contiguous()   # [B, 8, D]
+    a_c = a.squeeze(1).contiguous()   # [B, 8]
+    b_c = b.squeeze(1).contiguous()   # [B, 8]
 
-    # Squeeze seq dim, promote to float32
-    q_f = q.float().squeeze(1)       # [B, 4, K]
-    k_f = k.float().squeeze(1)       # [B, 4, K]
-    v_f = v.float().squeeze(1)       # [B, 8, K]
-    g_f = g.squeeze(1)               # [B, 8]
-    beta_f = beta.squeeze(1)         # [B, 8]
-
-    # GVA expansion: repeat q,k from 4 heads to 8 heads
-    ratio = num_v_heads // num_q_heads  # 2
-    q_exp = q_f.repeat_interleave(ratio, dim=1)  # [B, 8, K]
-    k_exp = k_f.repeat_interleave(ratio, dim=1)  # [B, 8, K]
-
-    # State: k-last [B, H, V, K] -> k-first [B, H, K, V]
     if state is not None:
-        S = state.float().transpose(-1, -2).clone()  # [B, 8, K, V]
+        S = state.contiguous()        # [B, 8, D, D] k-last
     else:
-        S = torch.zeros(B, num_v_heads, K, K, dtype=torch.float32, device=device)
+        S = torch.zeros(B, num_v_heads, D, D, dtype=torch.float32, device=device)
 
-    # Apply decay gate: g_f [B, 8] -> broadcast over [B, 8, K, V]
-    S = g_f[:, :, None, None] * S                     # [B, 8, K, V]
+    out    = torch.empty(B, num_v_heads, D, dtype=torch.bfloat16, device=device)
+    new_S  = torch.empty_like(S)
 
-    # old_v = k @ S  : bmm over [B*8, 1, K] x [B*8, K, V] -> [B*8, 1, V]
-    # Equivalent: einsum('bhk,bhkv->bhv', k_exp, S)
-    old_v = torch.einsum("bhk,bhkv->bhv", k_exp, S)   # [B, 8, V]
+    _decode_kernel[(B, num_v_heads)](
+        q_c, k_c, v_c, S,
+        A_log, a_c, dt_bias, b_c,
+        out, new_S,
+        float(scale),
+        q_c.stride(0), q_c.stride(1),
+        k_c.stride(0), k_c.stride(1),
+        v_c.stride(0), v_c.stride(1),
+        S.stride(0), S.stride(1), S.stride(2),
+        a_c.stride(0),
+        b_c.stride(0),
+        out.stride(0), out.stride(1),
+        new_S.stride(0), new_S.stride(1), new_S.stride(2),
+        D=128,
+        num_warps=4,
+    )
 
-    # new_v = beta * v + (1-beta) * old_v
-    new_v = beta_f[:, :, None] * v_f + (1.0 - beta_f[:, :, None]) * old_v  # [B, 8, V]
-
-    # State update: S += outer(k, new_v - old_v)
-    delta = new_v - old_v                              # [B, 8, V]
-    S = S + torch.einsum("bhk,bhv->bhkv", k_exp, delta)  # [B, 8, K, V]
-
-    # Output: o = scale * q @ S
-    out = scale * torch.einsum("bhk,bhkv->bhv", q_exp, S)  # [B, 8, V]
-
-    # Pack outputs
-    output = out.unsqueeze(1).to(torch.bfloat16)          # [B, 1, 8, 128]
-    new_state = S.transpose(-1, -2)                        # [B, 8, V, K] k-last
-
-    return output, new_state
+    return out.unsqueeze(1), new_S   # [B,1,8,D], [B,8,D,D]
