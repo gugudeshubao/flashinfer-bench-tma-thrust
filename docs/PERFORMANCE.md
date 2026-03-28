@@ -5,7 +5,51 @@ Full benchmark config: `--warmup 3 --iters 100 --trials 5`
 
 ---
 
-## Latest: v2 — Triton Kernel (2026-03-27)
+## Latest: v3 — Triton V-Split (2026-03-27)
+
+Grid (B, H=8, V_BLOCKS=4) for decode · Grid (N, H=8, V_BLOCKS=4) for prefill.
+V dimension split across 4 programs (BLOCK_V=32), 4× more SM occupancy.
+State slice [32, 128] per program vs [128, 128] in v2.
+
+### Decode — `gdn_decode_qk4_v8_d128_k_last`
+
+| batch | solution (ms) | ref (ms) | speedup |
+|-------|--------------|----------|---------|
+| 1 | 0.0484 | 1.2853 | 26.55x |
+| 2 | 0.0484 | 2.2652 | 46.82x |
+| 4 | 0.0487 | 4.3647 | 89.57x |
+| 8 | 0.0476 | 8.7567 | 183.93x |
+| 16 | 0.0517 | 16.799 | 325.02x |
+| 32 | 0.0483 | 33.442 | 692.35x |
+| 64 | 0.0489 | 66.486 | 1359.66x |
+| 128 | 0.0605 | 131.52 | 2172.74x |
+| 256 | 0.0832 | 264.34 | 3177.75x |
+| 512 | 0.1304 | 531.90 | 4079.21x |
+
+**10/10 PASSED · avg speedup 1215.36x**
+
+### Prefill — `gdn_prefill_qk4_v8_d128_k_last`
+
+| total_seq_len | num_seqs | solution (ms) | ref (ms) | speedup |
+|---------------|----------|--------------|----------|---------|
+| 64 | 1 | 0.1024 | 10.454 | 102.07x |
+| 128 | 1 | 0.1684 | 20.669 | 122.73x |
+| 256 | 1 | 0.3020 | 40.798 | 135.11x |
+| 512 | 1 | 0.5707 | 81.099 | 142.10x |
+| 1024 | 1 | 1.1104 | 165.13 | 148.72x |
+| 128 | 4 | 0.0751 | 21.836 | 290.85x |
+| 256 | 4 | 0.1112 | 41.252 | 371.04x |
+| 512 | 4 | 0.1770 | 82.064 | 463.73x |
+| 1024 | 4 | 0.3221 | 165.00 | 512.20x |
+| 2048 | 8 | 0.3380 | 349.18 | 1033.11x |
+| 4096 | 8 | 0.6165 | 652.61 | 1058.61x |
+| 8192 | 16 | 0.7732 | 1324.2 | 1712.63x |
+
+**12/12 PASSED · avg speedup 507.74x**
+
+---
+
+## v2 — Triton Kernel (2026-03-27)
 
 Grid (B, H=8) for decode · Grid (N, H=8) for prefill.
 128×128 state lives in registers; no Python loop overhead.
@@ -83,7 +127,8 @@ Pure-PyTorch reference translation. Correctness only, no performance.
 
 | Version | Date | Decode avg | Prefill avg | Notes |
 |---------|------|-----------|-------------|-------|
-| v2 | 2026-03-27 | **950.56x** | **386.57x** | Triton: fused delta-rule, state in registers |
+| v3 | 2026-03-27 | **1215.36x** | **507.74x** | Triton V-split: BLOCK_V=32, 4× programs, 4× smaller state |
+| v2 | 2026-03-27 | 950.56x | 386.57x | Triton: fused delta-rule, state in registers |
 | v1 | 2026-03-24 | ~1.10x | ~0.98x | PyTorch reference translation |
 
 ---
@@ -97,15 +142,16 @@ Key numbers for B200:
 - Memory bandwidth: ~8 TB/s (HBM3e)
 - Ridge point: ~281 FLOP/byte
 
-### v2 decode analysis
+### v3 decode analysis
 
-Decode at batch=512: 0.175ms, state I/O = 512×8×128²×4B = 268MB
-Effective BW = 268MB / 0.175ms ≈ **1.53 TB/s** (19% of peak 8TB/s).
-Room to improve: better memory access patterns, persistent kernel, TMA.
+Decode at batch=512: 0.130ms, state I/O = 512×8×128²×4B = 268MB
+Effective BW = 268MB / 0.130ms ≈ **2.06 TB/s** (26% of peak 8TB/s).
+V-split reduces per-program register pressure: 32×128×4B = 16KB vs 64KB in v2.
+Room to improve: persistent kernel across batch, TMA bulk load/store.
 
-### v2 prefill analysis
+### v3 prefill analysis
 
-Prefill (8192,16): 0.995ms, 16×8 = 128 parallel (seq,head) programs.
-Per program handles up to 512 tokens with [128,128] state in registers.
-Register pressure: 128×128×4B = 64KB per program.
-Next: chunked matmul with tl.dot() for tensor-core utilization.
+Prefill (8192,16): 0.773ms, 16×8×4 = 512 parallel programs (vs 128 in v2).
+Register pressure per program: 32×128×4B = 16KB (vs 64KB in v2).
+Single-seq workloads: 4 programs per head (vs 1), ~1.4× improvement observed.
+Next: tl.dot() for tensor-core utilization in the inner token loop.

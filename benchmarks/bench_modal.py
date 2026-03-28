@@ -27,7 +27,8 @@ TRACE_SET_PATH = "/data"
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("flashinfer-bench", "torch", "triton", "numpy")
+    .apt_install("ninja-build", "build-essential")  # For CUDA JIT compilation
+    .pip_install("flashinfer-bench", "torch", "triton", "numpy", "ninja", "numba")
 )
 
 
@@ -43,6 +44,10 @@ KERNEL_CONFIGS = {
             "name": "tma-thrust-gdn-decode-v1",
             "subdir": "solution/triton",
         },
+        "cuda": {
+            "name": "tma-thrust-gdn-decode-cuda-v5",
+            "subdir": "solution/cuda",
+        },
         "baseline": {
             "name": "tma-thrust-gdn-decode-baseline",
             "subdir": "baseline/triton",
@@ -57,6 +62,10 @@ KERNEL_CONFIGS = {
         "solution": {
             "name": "tma-thrust-gdn-prefill-v1",
             "subdir": "solution/triton",
+        },
+        "cuda": {
+            "name": "tma-thrust-gdn-prefill-cuda-v5",
+            "subdir": "solution/cuda",
         },
         "baseline": {
             "name": "tma-thrust-gdn-prefill-baseline",
@@ -245,12 +254,14 @@ def main(
     iters: int = 100,
     trials: int = 5,
     compare: bool = False,
+    cuda: bool = False,
 ):
     """
     Run GDN kernel benchmarks on Modal B200.
 
     --kernel:  decode | prefill | both  (default: both)
     --compare: also run Python baseline and show side-by-side latency comparison
+    --cuda:    run CUDA v5 kernel instead of Triton v4
     """
     config_dict = {"warmup_runs": warmup, "iterations": iters, "num_trials": trials}
 
@@ -262,12 +273,23 @@ def main(
         print(f"Unknown kernel '{kernel}'. Use: decode | prefill | both")
         sys.exit(1)
 
+    # Determine variant
+    variant = "cuda" if cuda else "solution"
+
     # Spawn solution jobs
     sol_futures = {}
     for k in targets:
         dir_name = KERNEL_NAMES[k]
-        print(f"Packing {k} solution ({dir_name})...")
-        sol_dict = build_solution_dict(dir_name, variant="solution")
+        use_variant = variant
+        cfg = KERNEL_CONFIGS[dir_name]
+        
+        # Check if variant exists
+        if use_variant not in cfg:
+            print(f"Warning: {use_variant} not available for {k}, using solution")
+            use_variant = "solution"
+        
+        print(f"Packing {k} {use_variant} ({dir_name})...")
+        sol_dict = build_solution_dict(dir_name, variant=use_variant)
         print(f"  -> {sol_dict['name']}")
         sol_futures[k] = run_benchmark.spawn(sol_dict, config_dict)
 

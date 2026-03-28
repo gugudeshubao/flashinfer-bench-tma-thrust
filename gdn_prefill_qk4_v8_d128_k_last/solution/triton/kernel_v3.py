@@ -1,12 +1,14 @@
 """
-GDN Prefill — v4 Triton kernel
+GDN Prefill — v3 Triton kernel
 gdn_prefill_qk4_v8_d128_k_last
 
-Grid: (N=num_seqs, H=8, V_BLOCKS) — one program per (seq, v_head, V-tile).
+Grid: (N=num_seqs, H=8, V_BLOCKS=4) — one program per (seq, v_head, V-tile).
 
-v4: Adaptive BLOCK_V based on num_seqs for optimal SM occupancy:
-  - Few sequences (N <= 4): BLOCK_V=16, more programs, better occupancy
-  - More sequences (N > 4): BLOCK_V=32, balanced register usage
+v3 vs v2: split the V (output) dimension across V_BLOCKS=4 programs.
+Each program handles state[BLOCK_V=32, K=128] instead of [128,128].
+  - 4× more programs → much better SM occupancy at small N or batch=1
+  - 4× smaller register state per program → more blocks can run per SM
+  - V dimension is fully independent: old_v[v0:v0+BV] = S[v0:v0+BV,:] @ k
 
 GVA: num_q_heads=4, num_v_heads=8  →  qk_head = v_head // 2
 State layout: k-last  [N, H, V=128, K=128]  float32
@@ -34,7 +36,7 @@ def _prefill_kernel(
     stride_o_t, stride_o_h,           # Out [T, 8, D]
     stride_ns_n, stride_ns_h, stride_ns_v,
     D: tl.constexpr,                  # head_size = 128
-    BLOCK_V: tl.constexpr,            # V-tile size (adaptive)
+    BLOCK_V: tl.constexpr,            # V-tile size = 32
 ):
     n    = tl.program_id(0)   # sequence index
     h    = tl.program_id(1)   # v_head index
@@ -100,13 +102,8 @@ def kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale):
     N = cu_seqlens.shape[0] - 1
     device = q.device
 
-    # Adaptive BLOCK_V based on num_seqs
-    if N <= 4:
-        BLOCK_V = 16   # More parallelism for few sequences
-    else:
-        BLOCK_V = 32   # Balanced register usage
-
-    V_BLOCKS = D // BLOCK_V
+    BLOCK_V  = 32
+    V_BLOCKS = D // BLOCK_V    # 4
 
     if scale is None or scale == 0.0:
         scale = 1.0 / math.sqrt(D)

@@ -1,13 +1,14 @@
 """
-GDN Decode — v4 Triton kernel
+GDN Decode — v3 Triton kernel
 gdn_decode_qk4_v8_d128_k_last
 
-Grid: (B, H=8, V_BLOCKS)  — one program per (batch, v_head, V-tile).
+Grid: (B, H=8, V_BLOCKS=4)  — one program per (batch, v_head, V-tile).
 
-v4: Adaptive BLOCK_V based on batch size for optimal SM occupancy:
-  - Small batch (B <= 16): BLOCK_V=16, more programs, better occupancy
-  - Medium batch (B <= 128): BLOCK_V=32, balanced
-  - Large batch (B > 128): BLOCK_V=64, reduced launch overhead
+v3 vs v2: split the V (output) dimension across V_BLOCKS=4 programs.
+Each program handles state[BLOCK_V=32, K=128] instead of [128,128].
+  - 4× more programs → much better SM occupancy at small batch
+  - 4× smaller register state per program → more blocks can run per SM
+  - V dimension is fully independent: each slice is correct standalone
 
 GVA: num_q_heads=4, num_v_heads=8  →  qk_head = v_head // 2
 State layout: k-last  [B, H, V=128, K=128]  float32
@@ -23,7 +24,7 @@ import triton.language as tl
 @triton.jit
 def _decode_kernel(
     Q, K, V, State,
-    A_log, A, DtBias, B_gate,
+    A_log, A, DtBias, B,
     Out, NewState,
     scale,
     stride_q_b, stride_q_h,          # Q  [B, 4, K]
@@ -35,7 +36,7 @@ def _decode_kernel(
     stride_o_b, stride_o_h,           # Out [B, 8, D]
     stride_ns_b, stride_ns_h, stride_ns_v,
     D: tl.constexpr,                  # head_size = 128
-    BLOCK_V: tl.constexpr,            # V-tile size (adaptive)
+    BLOCK_V: tl.constexpr,            # V-tile size = 32
 ):
     b    = tl.program_id(0)
     h    = tl.program_id(1)
@@ -47,7 +48,7 @@ def _decode_kernel(
     a_val  = tl.load(A     + b * stride_a_b + h).to(tl.float32)
     dt_val = tl.load(DtBias + h)
     alog   = tl.load(A_log  + h)
-    b_val  = tl.load(B_gate + b * stride_b_b + h).to(tl.float32)
+    b_val  = tl.load(B     + b * stride_b_b + h).to(tl.float32)
 
     x  = a_val + dt_val
     sp = tl.where(x > 20.0, x, tl.log(1.0 + tl.exp(x)))
@@ -87,15 +88,8 @@ def kernel(q, k, v, state, A_log, a, dt_bias, b, scale):
     num_v_heads = v.shape[2]
     device = q.device
 
-    # Adaptive BLOCK_V based on batch size
-    if B <= 16:
-        BLOCK_V = 16   # More parallelism for small batch
-    elif B <= 128:
-        BLOCK_V = 32   # Balanced
-    else:
-        BLOCK_V = 64   # Reduced overhead for large batch
-
-    V_BLOCKS = D // BLOCK_V
+    BLOCK_V  = 32
+    V_BLOCKS = D // BLOCK_V           # 4
 
     if scale is None or scale == 0.0:
         scale = 1.0 / math.sqrt(D)
