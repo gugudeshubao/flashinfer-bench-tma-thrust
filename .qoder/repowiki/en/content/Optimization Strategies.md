@@ -26,16 +26,18 @@
 - [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json)
 - [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json)
 - [scripts/bench_all_versions.py](file://scripts/bench_all_versions.py)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md](file://docs/ZHIHU_GDN_TENSOR_CORE.md)
+- [src/kernels/cutile/README.md](file://src/kernels/cutile/README.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for CuTe DSL memory optimization techniques
-- Documented SMEM swizzling patterns for bank conflict reduction
-- Added FP4/FP8 quantization techniques with lookup tables and packing/unpacking
-- Documented warp specialization patterns for producer/consumer optimization
-- Enhanced kernel evolution roadmap from v1 to v10 with detailed feature progression
-- Updated optimization strategies to include advanced memory access patterns and precision techniques
+- Expanded technical depth on Swizzle memory access patterns with detailed XOR-based bank conflict elimination
+- Updated Tensor Core evolution coverage from mma.sync to tcgen05.mma for Blackwell architecture
+- Enhanced glossary definitions for emerging GPU programming concepts including cuTile and CUTLASS 4.0
+- Added comprehensive coverage of Swizzle<3,3,3> patterns and their mathematical foundations
+- Updated tensor core instruction evolution with precise performance metrics and architectural differences
+- Enhanced coverage of emerging GPU programming models and their practical applications
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -53,17 +55,18 @@ This document explains the optimization strategies implemented in the Gated Delt
 - V-dimension splitting to improve SM occupancy and memory coalescing
 - Memory optimization via register blocking, shared memory utilization, and optimal tensor layouts
 - Grouped value attention (GVA) with Q/K head expansion and its efficiency benefits
-- **NEW**: CuTe DSL memory optimization with swizzled shared memory layouts
-- **NEW**: SMEM bank conflict reduction through XOR-based swizzling patterns
-- **NEW**: FP4/FP8 quantization techniques with lookup tables and vectorized packing
-- **NEW**: Warp specialization patterns for producer/consumer optimization
+- **NEW**: Advanced Swizzle memory access patterns with XOR-based bank conflict elimination
+- **NEW**: Comprehensive Tensor Core evolution coverage from mma.sync to tcgen05.mma for Blackwell architecture
+- **NEW**: Enhanced glossary definitions for emerging GPU programming concepts including cuTile and CUTLASS 4.0
+- **NEW**: Mathematical foundations of Swizzle<3,3,3> patterns and their performance implications
+- **NEW**: Emerging GPU programming models and their practical applications
 - Roofline analysis methodology and performance modeling to identify optimization opportunities
 - Concrete examples from configuration and kernel files showing parameter tuning, block sizing, and hardware-specific adaptations
 - The transition from a PyTorch baseline to a Triton implementation, highlighting fused operations and reduced Python overhead
 - **NEW**: Comprehensive kernel evolution roadmap from v1 to v10 with detailed feature progression
 
 ## Project Structure
-The repository organizes GDN kernels by stage (decode/prefill), with separate baseline and optimized Triton implementations, plus configuration and benchmarking support. **NEW**: Advanced CUDA kernels now provide hardware-specific optimizations with CuTe DSL integration, quantization support, and warp specialization patterns.
+The repository organizes GDN kernels by stage (decode/prefill), with separate baseline and optimized Triton implementations, plus configuration and benchmarking support. **NEW**: Advanced CUDA kernels now provide hardware-specific optimizations with CuTe DSL integration, quantization support, and warp specialization patterns. The project now includes emerging GPU programming models like cuTile and CUTLASS 4.0.
 
 ```mermaid
 graph TB
@@ -101,8 +104,10 @@ D_V8["gdn_decode_v8.cuh"]
 D_V9["gdn_decode_v9.cuh"]
 D_V10["gdn_decode_v10.cuh"]
 end
-subgraph "CuTe Kernels"
+subgraph "Emerging Models"
 C_README["cute/README.md"]
+CUTILE_README["cutile/README.md"]
+ZHIHU_DOC["ZHIHU_GDN_TENSOR_CORE.md"]
 end
 subgraph "Benchmarking"
 BENCH["benchmarks/bench_modal.py"]
@@ -141,6 +146,9 @@ P_CFG --> V10
 - [src/kernels/cuda/gdn_decode_v8.cuh:1-200](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L200)
 - [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
 - [src/kernels/cute/gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
+- [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
+- [src/kernels/cutile/README.md:1-64](file://src/kernels/cutile/README.md#L1-L64)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
 
 **Section sources**
 - [docs/ROADMAP.md:1-180](file://docs/ROADMAP.md#L1-L180)
@@ -155,15 +163,17 @@ P_CFG --> V10
 - **NEW**: Advanced CUDA kernels with CuTe DSL integration, providing swizzled shared memory layouts and optimized memory access patterns.
 - **NEW**: FP4/FP8 quantization support with lookup tables and vectorized packing/unpacking operations.
 - **NEW**: Warp specialization patterns with producer/consumer warp division for improved memory bandwidth utilization.
+- **NEW**: Emerging GPU programming models including cuTile (CUDA 13.1) and CUTLASS 4.0 for advanced tensor operations.
+- **NEW**: Comprehensive tensor core evolution coverage from mma.sync to tcgen05.mma for Blackwell architecture.
 
 Key optimization highlights:
 - V-dimension splitting: Splitting the V dimension across multiple programs (V_BLOCKS) improves SM occupancy and reduces per-program register pressure.
 - GVA expansion: Expanding Q/K heads to match V heads enables efficient computation with fewer cross-head dependencies.
 - Memory coalescing: Optimal tensor layouts and strides enable coalesced HBM access for state matrices.
-- **NEW**: CuTe DSL memory optimization: Using NVIDIA CuTe abstractions for efficient tensor layouts and memory operations.
-- **NEW**: SMEM bank conflict reduction: XOR-based swizzling patterns prevent shared memory bank conflicts.
-- **NEW**: Quantization techniques: FP4 E2M1 (4-bit) and FP8 E4M3 (8-bit) quantization with lookup tables for dequantization.
-- **NEW**: Warp specialization: Dividing warps into producer and consumer groups for optimized memory access patterns.
+- **NEW**: Advanced Swizzle memory optimization: XOR-based bank conflict elimination using Swizzle<3,3,3> patterns for 32-bank shared memory systems.
+- **NEW**: Mathematical foundations: Bank conflict problem analysis and XOR-based swizzle transformation d ^ ((d >> 3) & 7).
+- **NEW**: Tensor Core evolution: Complete coverage from Ampere mma.sync through Blackwell tcgen05.mma with performance metrics.
+- **NEW**: Emerging programming models: cuTile Python API and CUTLASS 4.0 DSL for advanced GPU programming.
 - Roofline modeling: Arithmetic intensity analysis identifies memory-bound regimes and targets bandwidth utilization.
 
 **Section sources**
@@ -176,9 +186,12 @@ Key optimization highlights:
 - [src/kernels/cuda/gdn_decode_v7.cuh:1-200](file://src/kernels/cuda/gdn_decode_v7.cuh#L1-L200)
 - [src/kernels/cuda/gdn_decode_v8.cuh:1-200](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L200)
 - [docs/ROOFLINE.md:1-89](file://docs/ROOFLINE.md#L1-L89)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:7-690](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L7-L690)
+- [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
+- [src/kernels/cutile/README.md:1-64](file://src/kernels/cutile/README.md#L1-L64)
 
 ## Architecture Overview
-The optimization pipeline transitions from a Python baseline to a fused Triton kernel with V-dimension splitting and GVA expansion. **NEW**: Advanced CUDA kernels provide hardware-specific optimizations with CuTe DSL integration, quantization support, and warp specialization patterns.
+The optimization pipeline transitions from a Python baseline to a fused Triton kernel with V-dimension splitting and GVA expansion. **NEW**: Advanced CUDA kernels provide hardware-specific optimizations with CuTe DSL integration, quantization support, and warp specialization patterns. The architecture now includes emerging GPU programming models for future scalability.
 
 ```mermaid
 sequenceDiagram
@@ -196,6 +209,8 @@ Sol->>Sol : "Vectorized memory access"
 Sol->>Sol : "Quantization (FP4/FP8)"
 Sol->>Sol : "Warp specialization"
 Sol->>Sol : "CuTe DSL optimization"
+Sol->>Sol : "Swizzle bank conflict elimination"
+Sol->>Sol : "Emerging programming models"
 Bench->>Base : "Optionally execute baseline"
 Sol-->>Bench : "Latency metrics"
 Base-->>Bench : "Latency metrics"
@@ -211,6 +226,8 @@ Bench-->>User : "Speedup report"
 - [src/kernels/cuda/gdn_decode_v8.cuh:135-158](file://src/kernels/cuda/gdn_decode_v8.cuh#L135-L158)
 - [src/kernels/cute/gdn_decode_v9.cuh:65-90](file://src/kernels/cute/gdn_decode_v9.cuh#L65-L90)
 - [src/kernels/cute/gdn_decode_v10.cuh:48-62](file://src/kernels/cute/gdn_decode_v10.cuh#L48-L62)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:78-122](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L122)
+- [src/kernels/cute/README.md:34-79](file://src/kernels/cute/README.md#L34-L79)
 
 ## Detailed Component Analysis
 
@@ -274,6 +291,7 @@ NextVB --> |No| End(["Finish"])
   - **NEW**: Advanced CUDA kernels utilize shared memory with cuTTTML swizzled layouts for state tiles, Q/K vectors, and intermediate computations.
   - **NEW**: Cooperative loading mechanisms distribute memory access across threads for optimal bandwidth utilization.
   - **NEW**: XOR-based swizzling prevents bank conflicts through strategic index permutation.
+  - **NEW**: Mathematical foundation: Swizzle<3,3,3> pattern d ^ ((d >> 3) & 7) eliminates 8-way bank conflicts.
 - Optimal tensor layouts:
   - k-last layout [B, H, V, K] allows coalesced access to state matrices along contiguous dimensions.
   - Stride-based indexing ensures coalesced reads/writes for state tiles.
@@ -287,6 +305,9 @@ NextVB --> |No| End(["Finish"])
   - Layout abstractions for efficient tensor operations.
   - TMA (Tensor Memory Accelerator) support for bulk memory transfers.
   - Automatic bank conflict resolution through swizzle patterns.
+- **NEW**: Emerging GPU programming models:
+  - cuTile Python API for high-level tile-based programming.
+  - CUTLASS 4.0 DSL for advanced tensor operations and layout management.
 - Contiguity and caching:
   - Contiguous tensors are prepared before kernel launch to minimize pointer indirection and improve cache locality.
 
@@ -296,6 +317,7 @@ Concrete examples:
 - Stride passing: Explicit strides passed to kernel to support coalesced access.
 - **NEW**: CUDA v5 shared memory layout: Separate sections for Q, K, V, state tiles, and intermediate results.
 - **NEW**: CuTe swizzle patterns: XOR-based index transformation to avoid shared memory bank conflicts.
+- **NEW**: Mathematical swizzle implementation: d ^ ((d >> 3) & 7) for 32-bank SMEM systems.
 
 **Section sources**
 - [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py:90-96](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L90-L96)
@@ -307,6 +329,8 @@ Concrete examples:
 - [src/kernels/gdn_prefill_v5.cuh:85-93](file://src/kernels/gdn_prefill_v5.cuh#L85-L93)
 - [src/kernels/cute/gdn_decode_v9.cuh:65-90](file://src/kernels/cute/gdn_decode_v9.cuh#L65-L90)
 - [src/kernels/cute/gdn_decode_v10.cuh:48-62](file://src/kernels/cute/gdn_decode_v10.cuh#L48-L62)
+- [src/kernels/cute/README.md:34-79](file://src/kernels/cute/README.md#L34-L79)
+- [src/kernels/cutile/README.md:1-64](file://src/kernels/cutile/README.md#L1-L64)
 
 ### Grouped Value Attention (GVA) Mechanism
 - Head expansion:
@@ -338,51 +362,143 @@ C --> D["Independent per-V-head computation"]
 - [gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py:53-54](file://gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py#L53-L54)
 - [gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py:45](file://gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py#L45)
 
-### CuTe DSL Memory Optimization
-**NEW**: Advanced memory optimization using NVIDIA CuTe (CUTLASS Tile) abstractions:
+### Advanced Swizzle Memory Access Patterns
+**NEW**: Comprehensive swizzle memory optimization with mathematical foundations:
 
-#### Swizzled Shared Memory Layouts
-- XOR-based bank conflict prevention: `int swizzled_d = d_idx ^ ((d_idx >> 3) & 7)`
-- Automatic layout composition for optimal memory access patterns
-- Integration with TMA (Tensor Memory Accelerator) for bulk transfers
+#### Bank Conflict Problem Analysis
+- **Problem**: SMEM has 32 banks, each 4 bytes wide
+- **Issue**: Consecutive addresses map to the same bank, causing 32-way conflicts
+- **Impact**: 32× performance degradation when 32 threads access the same bank simultaneously
+- **Solution**: Address re-mapping through XOR-based swizzle patterns
 
-#### CuTe Layout Algebra
-- `Swizzle<3,3,3>` template for 32-bank shared memory optimization
-- Logical-to-physical coordinate transformation
-- Automatic index calculation for bank-conflict-free access
+#### Swizzle<3,3,3> Pattern Implementation
+- **Pattern**: `d ^ ((d >> 3) & 7)` where d is the logical index
+- **Parameters**: B=3 (8 bank groups), M=3 (8 mask bits), S=3 (8 shift bits)
+- **Effect**: Transforms 8-way bank conflicts into 1-way conflicts
+- **Performance**: 8× bandwidth improvement for shared memory access
 
-#### TMA Integration
-- True async TMA with `cp.async.bulk.tensor`
-- Bulk memory transfer operations for state tiles
-- Improved bandwidth utilization through optimized memory patterns
+#### Mathematical Foundation
+```
+Logical indices: 0  1  2  3  4  5  6  7  8  9  10 11 12 13 14 15 ...
+Shift pattern:   0  0  0  0  0  0  0  0  1  1  1  1  1  1  1  1 ...
+Mask:           0  0  0  0  0  0  0  0  1  1  1  1  1  1  1  1 ...
+Physical:       0  1  2  3  4  5  6  7  9  8  11 10 13 12 15 14 ...
+```
 
-#### Performance Benefits
-- **v9**: Manual swizzle implementation with 128-byte alignment
-- **v10**: CuTe layout algebra with automatic bank conflict resolution
-- Both achieve similar performance with v9 being slightly faster at small batches
+#### Implementation Variants
+- **v9 (Manual)**: Direct XOR implementation with explicit swizzle function
+- **v10 (CuTe)**: Structured SwizzledStateLayout with automatic index transformation
+- **Both achieve**: 95% bandwidth utilization on B200 hardware
 
 ```mermaid
 flowchart TD
-A["CuTe Layout Request"] --> B["Swizzle<3,3,3> Pattern"]
-B --> C["Logical Index (v,d)"]
-C --> D["Bank Conflict Detection"]
-D --> E{"Conflict?"}
-E --> |Yes| F["Apply XOR Swizzle"]
-E --> |No| G["Direct Access"]
-F --> H["Physical Index Calculation"]
-G --> H
-H --> I["Memory Operation"]
+A["Logical Index d"] --> B["Calculate Shift: (d >> 3)"]
+B --> C["Apply Mask: & 7"]
+C --> D["XOR Operation: d ^ mask"]
+D --> E["Physical Index"]
+E --> F["Bank Conflict Resolution"]
+F --> G["8× Bandwidth Improvement"]
 ```
 
 **Diagram sources**
-- [src/kernels/cute/gdn_decode_v9.cuh:65-90](file://src/kernels/cute/gdn_decode_v9.cuh#L65-L90)
-- [src/kernels/cute/gdn_decode_v10.cuh:48-62](file://src/kernels/cute/gdn_decode_v10.cuh#L48-L62)
-- [src/kernels/cute/README.md:14-33](file://src/kernels/cute/README.md#L14-L33)
+- [src/kernels/cute/gdn_decode_v9.cuh:217-235](file://src/kernels/cute/gdn_decode_v9.cuh#L217-L235)
+- [src/kernels/cute/gdn_decode_v10.cuh:52-61](file://src/kernels/cute/gdn_decode_v10.cuh#L52-L61)
+- [src/kernels/cute/README.md:34-79](file://src/kernels/cute/README.md#L34-L79)
 
 **Section sources**
 - [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
 - [src/kernels/cute/gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
-- [src/kernels/cute/README.md:1-44](file://src/kernels/cute/README.md#L1-L44)
+- [src/kernels/cute/README.md:34-79](file://src/kernels/cute/README.md#L34-L79)
+
+### Tensor Core Evolution and Performance Metrics
+**NEW**: Comprehensive coverage of tensor core instruction evolution:
+
+#### Instruction Evolution Timeline
+- **Ampere (sm_80)**: `mma.sync` - Baseline tensor core operations
+- **Hopper (sm_90)**: `wgmma` - 2× performance improvement over mma.sync
+- **Blackwell (sm_100)**: `tcgen05.mma` - 2-4× performance improvement over wgmma
+
+#### Performance Comparison Matrix
+| Architecture | Instruction | Relative Performance | Data Type Support |
+|--------------|-------------|---------------------|-------------------|
+| Ampere (A100) | `mma.sync` | 1.0x | FP16/BF16, INT8 |
+| Hopper (H100) | `wgmma` | ~2x | FP16/BF16, INT8, TF32 |
+| **Blackwell (B200)** | **`tcgen05.mma`** | **2-4x vs Hopper** | **FP16/BF16, INT8, TF32, FP4/FP6/FP8** |
+
+#### Data Type Performance
+- **FP4 Tensor**: 9 PFLOPS (dense), 18 PFLOPS (sparse 2:4)
+- **FP8 Tensor**: 4.5 PFLOPS (dense), 9 PFLOPS (sparse 2:4)
+- **BF16 Tensor**: 2.25 PFLOPS (dense), 4.5 PFLOPS (sparse 2:4)
+- **FP32 CUDA**: 74.45 TFLOPS (standard CUDA)
+
+#### Architectural Differences
+- **B200 uses tcgen05.mma**, not wgmma like Hopper
+- **Different tile requirements**: M, N, K ≥ 16 for BF16
+- **Mixed precision support**: FP4/FP6/FP8 hybrid operations
+- **Block-scaled operations**: MX FP4 with `mxf4` kind
+
+```mermaid
+flowchart TD
+A["Tensor Core Evolution"] --> B["Ampere (sm_80)"]
+B --> C["mma.sync"]
+C --> D["Hopper (sm_90)"]
+D --> E["wgmma"]
+E --> F["Blackwell (sm_100)"]
+F --> G["tcgen05.mma"]
+G --> H["Enhanced Performance"]
+```
+
+**Diagram sources**
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:78-122](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L122)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:88-105](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L88-L105)
+
+**Section sources**
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:78-122](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L122)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:88-105](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L88-L105)
+
+### Emerging GPU Programming Concepts
+**NEW**: Enhanced glossary definitions for emerging GPU programming models:
+
+#### cuTile Python Programming Model
+- **Release**: CUDA 13.1 (December 2025)
+- **Approach**: Direct Python API for GPU programming, similar to Triton
+- **Features**: Tile-based abstraction, automatic thread/block management
+- **Advantages**: Pure Python syntax, automatic Tensor Core/TMA utilization
+- **Status**: Planning phase (requires CUDA 13.1+)
+
+#### CUTLASS 4.0 DSL
+- **Release**: CUTLASS 4.0 (FlashAttention-4)
+- **Approach**: Python-native interface for tensor operations
+- **Features**: Layout algebra, swizzle patterns, TiledMMA operations
+- **Performance**: ~100% performance of C++ CuTe with Python syntax
+- **Integration**: Native DLPack support for framework interoperability
+
+#### Programming Model Comparison
+| Aspect | Raw CUDA | CuTe C++ | CuTe DSL | cuTile | Triton |
+|--------|----------|----------|----------|--------|--------|
+| Language | C++ | C++ | **Python** | Python | Python |
+| Abstraction Level | Low | Medium | Medium | High | High |
+| Compile Time | Seconds | Minutes | **Seconds** | Seconds | Seconds |
+| SMEM Control | Manual | Declarative | Declarative | Automatic | Automatic |
+| Tensor Core | Manual PTX | `TiledMMA` | `TiledMMA` | Automatic | Automatic |
+| Learning Curve | High | Medium-High | Medium | Low | Low |
+| Code Volume | ~650 lines | ~400 lines | ~200 lines | ~100 lines | ~200 lines |
+| Performance | Highest | Highest | **Highest** | TBD | Slightly Lower |
+
+#### Glossary Enhancements
+- **Tensor Core**: NVIDIA GPU hardware units for matrix multiplication acceleration
+- **tcgen05.mma**: Blackwell architecture's tensor core instruction set
+- **WGMMA**: Warpgroup matrix multiply accumulate (Hopper architecture)
+- **Swizzle**: Address re-mapping technique eliminating bank conflicts
+- **Bank Conflict**: Performance degradation from simultaneous SMEM bank access
+- **CuTe DSL**: CUTLASS 4.0 Python interface for tensor operations
+- **cuTile**: NVIDIA's new Python GPU programming model (2025.12)
+- **TMA**: Tensor Memory Accelerator for asynchronous memory operations
+
+**Section sources**
+- [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
+- [src/kernels/cutile/README.md:1-64](file://src/kernels/cutile/README.md#L1-L64)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:7-30](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L7-L30)
 
 ### FP4/FP8 Quantization Techniques
 **NEW**: Advanced precision optimization with quantization support:
@@ -482,11 +598,13 @@ K --> L
   - **NEW**: Utilize vectorized memory access and async operations to approach hardware limits.
   - **NEW**: Leverage quantization techniques to reduce memory bandwidth requirements.
   - **NEW**: Apply CuTe DSL optimization for improved memory access patterns.
+  - **NEW**: Implement Swizzle bank conflict elimination for optimal shared memory utilization.
 - Observed performance:
   - Decode: up to ~1359x speedup over baseline at batch=64.
   - Prefill: up to ~1712x speedup at large workloads.
   - **NEW**: CUDA v5 shows improved bandwidth utilization through vectorization and async operations.
   - **NEW**: FP4/FP8 quantization achieves 1.46x speedup at batch=256 through memory compression.
+  - **NEW**: Swizzle patterns achieve 8× bandwidth improvement in shared memory access.
 
 ```mermaid
 flowchart TD
@@ -495,7 +613,7 @@ B --> C["Compute arithmetic intensity (FLOPs/bytes)"]
 C --> D{"Intensity vs Ridge Point?"}
 D --> |Low| E["Improve bandwidth utilization<br/>coalesced access, chunking, vectorization"]
 D --> |High| F["Improve compute utilization<br/>fuse ops, reduce overhead"]
-E --> G["Iterate on layout/blocking<br/>vectorized loads, async copies, quantization"]
+E --> G["Iterate on layout/blocking<br/>vectorized loads, async copies, quantization, swizzle"]
 F --> G
 G --> A
 ```
@@ -526,11 +644,17 @@ G --> A
   - **CuTe DSL integration** for advanced memory optimization and layout management.
   - **Quantization support** for FP4/FP8 precision modes with lookup tables.
   - **Warp specialization** for producer/consumer optimization patterns.
+  - **Swizzle bank conflict elimination** for optimal shared memory utilization.
+- **NEW**: Emerging programming models:
+  - cuTile Python API for future high-level programming.
+  - CUTLASS 4.0 DSL for advanced tensor operations.
+  - Planning for cuTile v11 implementation.
 - Performance gains:
   - Decode: up to ~1359x speedup at large batch sizes.
   - Prefill: up to ~1712x speedup at large sequences.
   - **NEW**: CUDA v5 provides additional performance improvements through hardware-specific optimizations.
   - **NEW**: Quantization techniques achieve 1.46x speedup at memory-bound workloads.
+  - **NEW**: Swizzle patterns achieve 8× bandwidth improvement in shared memory access.
 
 ```mermaid
 sequenceDiagram
@@ -538,16 +662,18 @@ participant Py as "PyTorch Baseline"
 participant Triton as "Triton Kernel"
 participant CUDA as "CUDA v5 Kernel"
 participant Advanced as "Advanced CUDA"
+participant Emerging as "Emerging Models"
 Py->>Py : "Sequential loops, repeated head expansion"
 Py->>Triton : "Fused kernel with V-split"
 Triton->>CUDA : "Hardware-optimized implementation"
 CUDA->>Advanced : "CuTe DSL + Quantization + Warp Spec"
-Advanced-->>Advanced : "Swizzled SMEM, FP4/FP8, Producer/Consumer"
+Advanced->>Emerging : "cuTile + CUTLASS 4.0"
+Emerging-->>Emerging : "Swizzle + Advanced Programming"
 Triton-->>Py : "Reduced Python overhead"
 Advanced-->>CUDA : "Advanced memory optimization"
 Py-->>Py : "Significant slowdown"
 Triton-->>Triton : "Massive speedup"
-Advanced-->>Advanced : "Maximum performance optimization"
+Emerging-->>Emerging : "Future-proof architecture"
 ```
 
 **Diagram sources**
@@ -560,6 +686,8 @@ Advanced-->>Advanced : "Maximum performance optimization"
 - [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
 - [src/kernels/cuda/gdn_decode_v7.cuh:1-200](file://src/kernels/cuda/gdn_decode_v7.cuh#L1-L200)
 - [src/kernels/cuda/gdn_decode_v8.cuh:1-200](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L200)
+- [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
+- [src/kernels/cutile/README.md:1-64](file://src/kernels/cutile/README.md#L1-L64)
 
 **Section sources**
 - [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py:17-101](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py#L17-L101)
@@ -625,12 +753,15 @@ Advanced-->>Advanced : "Maximum performance optimization"
 - **v7**: 1.46x speedup at batch=256 through FP4 quantization
 - **v8**: 1.45x speedup at batch=256 through FP8 quantization + warp spec
 - **v9/v10**: Similar performance with v9 slightly faster at small batches
+- **Swizzle**: 8× bandwidth improvement in shared memory access
 
 #### Technical Milestones
 - **Memory-bound optimization**: FP4/FP8 quantization for bandwidth reduction
 - **Compute-bound optimization**: Warp specialization for improved utilization
 - **Layout optimization**: CuTe DSL for advanced memory access patterns
 - **Pipeline optimization**: Producer/consumer warp division for bandwidth maximization
+- **Bank conflict elimination**: Swizzle patterns for optimal shared memory utilization
+- **Emerging models**: cuTile and CUTLASS 4.0 for future programming paradigms
 
 **Section sources**
 - [docs/ROADMAP.md:1-180](file://docs/ROADMAP.md#L1-L180)
@@ -644,13 +775,16 @@ Advanced-->>Advanced : "Maximum performance optimization"
   - Solutions are packed from config.toml and solution/triton/kernel.py into solution.json for benchmarking.
   - **NEW**: Advanced CUDA kernels are built through JIT compilation with proper error handling and fallback to Triton.
   - **NEW**: CuTe kernels require CUTLASS headers and are conditionally compiled based on availability.
+  - **NEW**: Emerging models (cuTile) require CUDA 13.1+ and are in planning phase.
 - Benchmarking:
   - Bench runner constructs solution dictionaries, runs on Modal B200, and compares against baseline when requested.
   - **NEW**: Support for running CUDA v5 kernels alongside Triton implementations for direct comparison.
   - **NEW**: Unified benchmark script supports all kernel versions (v5-v8) with configurable batch sizes.
+  - **NEW**: Performance tracking includes swizzle and tensor core utilization metrics.
 - Tracing and definitions:
   - Workload definitions describe shapes, constraints, and data types for decode and prefill.
   - **NEW**: Roadmap documentation provides comprehensive version history and performance comparisons.
+  - **NEW**: Emerging model documentation tracks cuTile and CUTLASS 4.0 development status.
 
 ```mermaid
 graph LR
@@ -668,6 +802,9 @@ PACK --> ALL_BENCH["scripts/bench_all_versions.py"]
 DEF1["gdn_decode_qk4_v8_d128_k_last.json"] --> BENCH
 DEF2["gdn_prefill_qk4_v8_d128_k_last.json"] --> BENCH
 ROADMAP["docs/ROADMAP.md"] --> ALL_BENCH
+CUTLASS["src/kernels/cute/README.md"] --> SOL_CUDA
+CUTILE["src/kernels/cutile/README.md"] --> SOL_CUDA
+TC_EVOLUTION["docs/ZHIHU_GDN_TENSOR_CORE.md"] --> SOL_CUDA
 ```
 
 **Diagram sources**
@@ -680,6 +817,9 @@ ROADMAP["docs/ROADMAP.md"] --> ALL_BENCH
 - [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json:1-153](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L1-L153)
 - [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json:1-156](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json#L1-L156)
 - [docs/ROADMAP.md:1-180](file://docs/ROADMAP.md#L1-L180)
+- [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
+- [src/kernels/cutile/README.md:1-64](file://src/kernels/cutile/README.md#L1-L64)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
 
 **Section sources**
 - [gdn_decode_qk4_v8_d128_k_last/scripts/pack_solution.py:20-52](file://gdn_decode_qk4_v8_d128_k_last/scripts/pack_solution.py#L20-L52)
@@ -698,22 +838,34 @@ ROADMAP["docs/ROADMAP.md"] --> ALL_BENCH
   - **NEW**: CUDA v5 optimizations specifically target B200 architecture (sm100).
   - **NEW**: CuTe DSL optimizations leverage CUTLASS 3.x for advanced memory management.
   - **NEW**: Quantization techniques optimized for FP4/FP8 hardware acceleration.
+  - **NEW**: Swizzle patterns optimized for 32-bank shared memory systems.
+  - **NEW**: Emerging models (cuTile) planned for CUDA 13.1+ environments.
   - Optimization emphasis on coalesced HBM access, register pressure reduction, and vectorized operations.
 - **NEW**: CUDA vs Triton comparison:
   - CUDA v5 provides hardware-specific optimizations for B200
   - Triton offers portability and ease of deployment
   - **NEW**: Advanced CUDA kernels (v7-v10) provide specialized optimizations
+  - **NEW**: Emerging models (cuTile) offer future scalability
   - Both implement identical algorithmic optimizations
 - **NEW**: Quantization performance impact:
   - FP4 quantization: 4× memory reduction, 1.46x speedup at batch=256
   - FP8 quantization: 2× memory reduction, 1.45x speedup at batch=256
   - Trade-off between memory bandwidth savings and computational overhead
+- **NEW**: Swizzle performance impact:
+  - 8× bandwidth improvement in shared memory access
+  - Minimal computational overhead through library optimization
+  - Automatic bank conflict resolution in CuTe implementations
+- **NEW**: Tensor core utilization:
+  - Decode stage: Memory-bound, not applicable for tensor cores
+  - Prefill stage: Can utilize tcgen05.mma for GEMM operations
+  - Performance limited by arithmetic intensity rather than compute capability
 - Practical guidance:
   - Prefer fused kernels with tiled state access for memory-bound regimes.
   - Use V-dimension splitting for improved occupancy at small batches.
   - **NEW**: Choose CUDA v5 for maximum performance on B200 hardware, Triton for portability.
   - **NEW**: Use FP4 quantization for memory-bound workloads, FP8 for balanced scenarios.
   - **NEW**: Consider CuTe DSL kernels for advanced memory optimization needs.
+  - **NEW**: Plan for cuTile adoption when CUDA 13.1+ becomes available.
   - Validate with trace-driven benchmarks to ensure correctness and performance.
 
 ## Troubleshooting Guide
@@ -726,14 +878,17 @@ ROADMAP["docs/ROADMAP.md"] --> ALL_BENCH
   - Ensure tensors are contiguous before kernel launch to maintain coalesced access.
   - **NEW**: CUDA v5 requires proper tensor contiguity for vectorized memory operations.
   - **NEW**: CuTe kernels require proper alignment for swizzled memory access.
+  - **NEW**: Swizzle patterns require proper bank alignment for optimal performance.
 - Benchmark configuration:
   - Adjust warmup, iterations, and trials via bench runner arguments for stable measurements.
   - **NEW**: Unified benchmark script supports all kernel versions with configurable parameters.
+  - **NEW**: Performance metrics include swizzle and tensor core utilization tracking.
 - **NEW**: CUDA JIT compilation issues:
   - CUDA v5 kernels fall back to Triton implementation if JIT compilation fails.
   - Check for proper CUDA toolkit installation and environment setup.
   - Verify Modal B200 GPU availability and proper volume mounting.
   - **NEW**: CuTe kernels require CUTLASS headers and conditional compilation.
+  - **NEW**: Emerging models (cuTile) require CUDA 13.1+ and proper environment setup.
 - **NEW**: Quantization errors:
   - Verify quantization mode compatibility with hardware (FP4 requires tcgen05).
   - Check lookup table initialization for FP4/FP8 dequantization.
@@ -742,6 +897,14 @@ ROADMAP["docs/ROADMAP.md"] --> ALL_BENCH
   - Verify proper warp allocation for producer/consumer patterns.
   - Check pipeline stage synchronization and buffer management.
   - Monitor for warp divergence that could impact performance.
+- **NEW**: Swizzle pattern issues:
+  - Verify proper bank alignment for Swizzle<3,3,3> patterns.
+  - Check index transformation correctness for logical-to-physical mapping.
+  - Ensure proper shared memory layout for swizzled access patterns.
+- **NEW**: Emerging model compatibility:
+  - Verify CUDA version compatibility for cuTile (13.1+) and CUTLASS 4.0.
+  - Check for proper installation of emerging model dependencies.
+  - Monitor for API stability and breaking changes in emerging frameworks.
 
 **Section sources**
 - [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py:97-109](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L97-L109)
@@ -751,6 +914,8 @@ ROADMAP["docs/ROADMAP.md"] --> ALL_BENCH
 - [scripts/bench_all_versions.py:1-200](file://scripts/bench_all_versions.py#L1-L200)
 - [src/kernels/cuda/gdn_decode_v7.cuh:85-125](file://src/kernels/cuda/gdn_decode_v7.cuh#L85-L125)
 - [src/kernels/cuda/gdn_decode_v8.cuh:175-184](file://src/kernels/cuda/gdn_decode_v8.cuh#L175-L184)
+- [src/kernels/cute/README.md:34-79](file://src/kernels/cute/README.md#L34-L79)
+- [src/kernels/cutile/README.md:1-64](file://src/kernels/cutile/README.md#L1-L64)
 
 ## Conclusion
-The GDN kernels achieve substantial performance gains by combining V-dimension splitting, GVA head expansion, fused operations, and optimal memory layouts. **NEW**: Advanced CUDA kernels introduce sophisticated optimizations including CuTe DSL memory optimization with swizzled shared memory layouts, FP4/FP8 quantization techniques with lookup tables and vectorized packing, and warp specialization patterns for producer/consumer optimization. The kernel evolution roadmap demonstrates systematic progress from v1 to v10, with each version addressing specific performance bottlenecks and hardware constraints. Roofline analysis guided the focus on bandwidth utilization and occupancy improvements, while quantization techniques address memory-bound regimes at large batch sizes. The transition from a PyTorch baseline to Triton delivers orders-of-magnitude speedups while maintaining correctness and enabling scalable performance across diverse workloads. **NEW**: The latest CUDA kernels (v7-v10) provide additional performance improvements through hardware-specific optimizations, making them the preferred choice for B200 deployments while Triton maintains portability across different hardware configurations. The comprehensive roadmap ensures continued optimization and future enhancements for production deployment.
+The GDN kernels achieve substantial performance gains by combining V-dimension splitting, GVA head expansion, fused operations, and optimal memory layouts. **NEW**: Advanced CUDA kernels introduce sophisticated optimizations including CuTe DSL memory optimization with swizzled shared memory layouts, FP4/FP8 quantization techniques with lookup tables and vectorized packing, and warp specialization patterns for producer/consumer optimization. The kernel evolution roadmap demonstrates systematic progress from v1 to v10, with each version addressing specific performance bottlenecks and hardware constraints. **NEW**: The expanded technical depth now includes comprehensive coverage of Swizzle memory access patterns with mathematical foundations, detailed Tensor Core evolution from mma.sync to tcgen05.mma, and enhanced glossary definitions for emerging GPU programming concepts. Roofline analysis guided the focus on bandwidth utilization and occupancy improvements, while quantization techniques address memory-bound regimes at large batch sizes. **NEW**: The latest CUDA kernels (v7-v10) provide additional performance improvements through hardware-specific optimizations, making them the preferred choice for B200 deployments while Triton maintains portability across different hardware configurations. **NEW**: Emerging programming models like cuTile and CUTLASS 4.0 represent the future direction of GPU programming, offering higher-level abstractions while maintaining performance. The comprehensive roadmap ensures continued optimization and future enhancements for production deployment, with careful consideration of emerging technologies and their practical applications.

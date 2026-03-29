@@ -5,6 +5,7 @@
 - [benchmarks/bench_modal.py](file://benchmarks/bench_modal.py)
 - [docs/PERFORMANCE.md](file://docs/PERFORMANCE.md)
 - [docs/ROOFLINE.md](file://docs/ROOFLINE.md)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md](file://docs/ZHIHU_GDN_TENSOR_CORE.md)
 - [scripts/debug_prefill.py](file://scripts/debug_prefill.py)
 - [scripts/debug_prefill2.py](file://scripts/debug_prefill2.py)
 - [scripts/setup_volume.py](file://scripts/setup_volume.py)
@@ -29,12 +30,11 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced hardware specification documentation with comprehensive NVIDIA B200 Blackwell architecture details
-- Updated Ridge Point calculations with precise arithmetic intensity values for different precisions
-- Expanded comparative performance metrics with detailed bandwidth utilization analysis
-- Added comprehensive CuTe swizzle optimization documentation with mathematical correctness validation
-- Integrated real CUDA library benchmarking with extensive cross-version performance comparisons
-- Enhanced roofline analysis with detailed memory bandwidth utilization patterns
+- Enhanced roofline analysis documentation with corrected Blackwell architecture tcgen05.mma instruction terminology
+- Updated performance metrics documentation to reflect accurate Tensor Core instruction naming
+- Corrected terminology from wgmma to tcgen05.mma for Blackwell architecture
+- Enhanced roofline analysis with detailed tcgen05.mma instruction set documentation
+- Updated Chinese documentation to reflect proper Blackwell Tensor Core instruction naming
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -51,7 +51,7 @@
 ## Introduction
 This document presents a comprehensive performance analysis and measurement methodology for the GDN kernels benchmark suite. It explains how roofline analysis characterizes kernel performance limits and identifies bottlenecks in terms of compute and memory bandwidth. It documents the performance tracking system, including metrics collection, version history management, and comparative analysis frameworks. It details the arithmetic mean speedup calculation used for contest evaluation, including reference implementation comparisons and statistical validation procedures. Practical examples demonstrate performance profiling, bottleneck identification, and optimization impact measurement. Finally, it covers performance validation ensuring correctness while maximizing speed, including edge case testing and regression prevention, and outlines debugging techniques and systematic approaches to identifying optimization opportunities.
 
-**Updated** Enhanced with comprehensive NVIDIA B200 Blackwell architecture documentation, precise Ridge Point calculations, and extensive comparative performance metrics across all kernel versions.
+**Updated** Enhanced with comprehensive Blackwell architecture documentation using correct tcgen05.mma terminology, precise Ridge Point calculations, and extensive comparative performance metrics across all kernel versions.
 
 ## Project Structure
 The repository organizes performance-critical components into modular directories and shared documentation:
@@ -92,6 +92,7 @@ end
 subgraph "Docs"
 PERF["docs/PERFORMANCE.md"]
 ROOF["docs/ROOFLINE.md"]
+ZH["docs/ZHIHU_GDN_TENSOR_CORE.md"]
 CUDER["src/kernels/cute/README.md"]
 DBG1["scripts/debug_prefill.py"]
 DBG2["scripts/debug_prefill2.py"]
@@ -111,6 +112,7 @@ BCL --> GDNK
 SV --> DEF_DEC
 SV --> DEF_PRE
 PERF --> ROOF
+PERF --> ZH
 PERF --> CUDER
 DBG1 --> BM
 DBG2 --> BM
@@ -127,7 +129,8 @@ CU10 --> GDNK
 - [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
 - [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
 - [docs/PERFORMANCE.md:1-144](file://docs/PERFORMANCE.md#L1-L144)
-- [docs/ROOFLINE.md:1-184](file://docs/ROOFLINE.md#L1-L184)
+- [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
 - [src/kernels/cute/README.md:1-44](file://src/kernels/cute/README.md#L1-L44)
 - [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
 - [src/kernels/cute/gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
@@ -140,7 +143,8 @@ CU10 --> GDNK
 - [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
 - [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
 - [docs/PERFORMANCE.md:1-144](file://docs/PERFORMANCE.md#L1-L144)
-- [docs/ROOFLINE.md:1-184](file://docs/ROOFLINE.md#L1-L184)
+- [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
 
 ## Core Components
 - Benchmark runner: builds solutions and baselines, runs workloads on Modal B200, collects latency and correctness metrics, and computes speedups.
@@ -157,7 +161,7 @@ Key responsibilities:
 - Roofline characterization: arithmetic intensity and bandwidth targets for B200 hardware.
 - Delta rule validation: ensures mathematical correctness of state update computations.
 
-**Updated** Enhanced with comprehensive cross-version benchmarking, real CUDA library integration, and CuTe swizzle optimization documentation.
+**Updated** Enhanced with comprehensive cross-version benchmarking, real CUDA library integration, and CuTe swizzle optimization documentation using correct Blackwell architecture terminology.
 
 **Section sources**
 - [benchmarks/bench_modal.py:106-330](file://benchmarks/bench_modal.py#L106-L330)
@@ -165,7 +169,8 @@ Key responsibilities:
 - [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
 - [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
 - [docs/PERFORMANCE.md:1-144](file://docs/PERFORMANCE.md#L1-L144)
-- [docs/ROOFLINE.md:1-184](file://docs/ROOFLINE.md#L1-L184)
+- [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
 
 ## Architecture Overview
 The performance measurement pipeline integrates the benchmark runner with kernel implementations and trace definitions. Workloads are generated (synthetic or from HF), uploaded to a Modal volume, and executed on B200 GPUs. The system now supports comprehensive cross-version benchmarking with real CUDA libraries and extensive correctness validation.
@@ -297,7 +302,7 @@ KernelImplementations --> LibraryValidation : "validated by"
 - Python baseline kernels for correctness validation.
 - Version history tracks improvements across v1 (Python baseline), v2 (Triton kernel), v3 (Triton V-split), v4/v5 (CUDA implementations), v7-v10 (advanced optimizations).
 
-**Updated** Enhanced with comprehensive CUDA v9/v10 implementations featuring CuTe swizzle optimization and corrected delta rule computation.
+**Updated** Enhanced with comprehensive CUDA v9/v10 implementations featuring CuTe swizzle optimization and corrected delta rule computation using proper Blackwell architecture terminology.
 
 ```mermaid
 classDiagram
@@ -416,7 +421,7 @@ The performance system exhibits clear separation of concerns with enhanced cross
 - Trace definitions provide metadata for workload generation and evaluation.
 - Debug scripts depend on the benchmark framework to validate correctness.
 
-**Updated** Enhanced dependency graph to include comprehensive CUDA library integration and cross-version benchmarking capabilities.
+**Updated** Enhanced dependency graph to include comprehensive CUDA library integration and cross-version benchmarking capabilities using correct Blackwell architecture terminology.
 
 ```mermaid
 graph LR
@@ -457,11 +462,11 @@ Roofline analysis characterizes kernel performance limits and identifies bottlen
 - Prefill stage: sequential scan is memory-bound; chunked processing improves arithmetic intensity toward the ridge point (~281 FLOP/byte).
 - Optimization strategies: fuse per-head operations, tile over batch, keep state in registers/SMEM, coalesced HBM access, vectorized loads, and CuTe swizzle optimization.
 
-**Updated** Enhanced with comprehensive CuTe swizzle optimization documentation and corrected delta rule computation methodology.
+**Updated** Enhanced with comprehensive CuTe swizzle optimization documentation, corrected Blackwell architecture terminology using tcgen05.mma, and accurate Ridge Point calculations.
 
 ```mermaid
 flowchart TD
-Start(["Start Roofline"]) --> HW["Hardware: B200 sm100<br/>BF16 TC ~2.25 PFLOPS<br/>HBM3e ~8 TB/s<br/>Ridge ~281 FLOP/byte"]
+Start(["Start Roofline"]) --> HW["Hardware: B200 sm100<br/>BF16 tcgen05.mma ~2.25 PFLOPS<br/>HBM3e ~8 TB/s<br/>Ridge ~281 FLOP/byte"]
 HW --> Decode["Decode Analysis"]
 HW --> Prefill["Prefill Analysis"]
 Decode --> MemBound["Extremely memory-bound<br/>Target: HBM bandwidth"]
@@ -479,16 +484,18 @@ PerfBoost --> End(["Optimization Plan"])
 ```
 
 **Diagram sources**
-- [docs/ROOFLINE.md:1-184](file://docs/ROOFLINE.md#L1-L184)
+- [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
 - [docs/PERFORMANCE.md:75-144](file://docs/PERFORMANCE.md#L75-L144)
 - [src/kernels/cute/gdn_decode_v9.cuh:240-278](file://src/kernels/cute/gdn_decode_v9.cuh#L240-L278)
 - [src/kernels/cute/gdn_decode_v10.cuh:159-200](file://src/kernels/cute/gdn_decode_v10.cuh#L159-L200)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:78-87](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L87)
 
 **Section sources**
-- [docs/ROOFLINE.md:1-184](file://docs/ROOFLINE.md#L1-L184)
+- [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
 - [docs/PERFORMANCE.md:75-144](file://docs/PERFORMANCE.md#L75-L144)
 - [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
 - [src/kernels/cute/gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:78-87](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L87)
 
 ## Troubleshooting Guide
 Common issues and systematic approaches:
@@ -500,7 +507,7 @@ Common issues and systematic approaches:
 - CuTe compilation: ensure CUTLASS headers are available for CuTe swizzle optimization.
 - Delta rule validation: verify mathematical correctness of state update computations.
 
-**Updated** Added CUDA-specific troubleshooting for JIT compilation failures, CuTe swizzle optimization, and delta rule computation validation.
+**Updated** Added CUDA-specific troubleshooting for JIT compilation failures, CuTe swizzle optimization, and delta rule computation validation using proper Blackwell architecture terminology.
 
 Practical steps:
 - Run correctness comparison via debug scripts to confirm numerical parity.
@@ -521,7 +528,7 @@ Practical steps:
 ## Conclusion
 The repository provides a robust performance analysis and measurement framework combining roofline modeling, structured trace definitions, optimized CUDA v5-v10 kernels with CuTe swizzle optimization, and comprehensive benchmarking on Modal B200. The documented comparative analysis and arithmetic mean speedup calculations enable rigorous contest evaluation and optimization validation. Debugging utilities and correctness checks ensure correctness while maximizing speed, with systematic approaches to identifying bottlenecks and measuring optimization impact. The addition of CUDA v9/v10 implementations with CuTe swizzle optimization demonstrates substantial performance improvements with approximately 7,600 GB/s peak bandwidth utilization (95% of B200 peak) and kernel selection recommendations based on batch size characteristics.
 
-**Updated** Enhanced conclusion to highlight the significant performance improvements achieved with CuTe swizzle optimization and comprehensive cross-version benchmarking capabilities.
+**Updated** Enhanced conclusion to highlight the significant performance improvements achieved with CuTe swizzle optimization, comprehensive cross-version benchmarking capabilities, and accurate Blackwell architecture documentation using correct tcgen05.mma terminology.
 
 ## Appendices
 
@@ -547,7 +554,7 @@ Avg --> End(["Report average speedup"])
 ### Comprehensive Version History Management
 Version history tracks improvements across all kernel versions with decode and prefill averages, highlighting kernel optimizations and occupancy improvements.
 
-**Updated** Enhanced version history to include comprehensive CUDA v7-v10 implementations with substantial performance improvements and CuTe swizzle optimization.
+**Updated** Enhanced version history to include comprehensive CUDA v7-v10 implementations with substantial performance improvements and CuTe swizzle optimization using correct Blackwell architecture terminology.
 
 ```mermaid
 flowchart TD
@@ -605,9 +612,15 @@ The system is optimized for NVIDIA B200 (Blackwell, sm_100) architecture with co
 - TF32 Tensor: 140 FLOP/byte
 - FP32 CUDA: 9.3 FLOP/byte
 
+**Tensor Core Instructions:**
+- **Blackwell (B200, sm_100)**: **tcgen05.mma** (2-4x faster than Hopper's wgmma)
+- **Hopper (H100, sm_90)**: wgmma (~2x)
+- **Ampere (A100, sm_80)**: mma.sync (1.0x base)
+
 **Section sources**
 - [docs/ROOFLINE.md:3-48](file://docs/ROOFLINE.md#L3-L48)
 - [docs/PERFORMANCE.md:3-17](file://docs/PERFORMANCE.md#L3-L17)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:78-87](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L87)
 
 ### Ridge Point Calculations and Arithmetic Intensity Analysis
 The system provides precise Ridge Point calculations for different precisions and computational modes:
@@ -622,15 +635,15 @@ The system provides precise Ridge Point calculations for different precisions an
 - Sequential scan: AI = 1 FLOP/byte → Memory-bound
 - Chunked (C=64): AI = 7.5 FLOP/byte → Near ridge point
 - Chunked (C=128): AI = 12 FLOP/byte → Compute-bound
-- Can use WGMMA: Yes (mat-mat operations)
+- Can use tcgen05.mma: Yes (mat-mat operations)
 
 **Tensor Core Utilization:**
-- Matrix-Vector (Decode): Cannot use Tensor Cores (WGMMA requires mat-mat)
+- Matrix-Vector (Decode): Cannot use Tensor Cores (tcgen05.mma requires mat-mat)
 - Chunked Prefill: Can use Tensor Cores for S@Q matrix multiply
 - Precision combinations: BF16/FP8 for optimal Tensor Core efficiency
 
 **Section sources**
-- [docs/ROOFLINE.md:62-184](file://docs/ROOFLINE.md#L62-L184)
+- [docs/ROOFLINE.md:62-186](file://docs/ROOFLINE.md#L62-L186)
 
 ### CuTe Swizzle Optimization and Delta Rule Validation
 CuTe swizzle optimization provides significant memory bandwidth improvements through bank conflict avoidance:
@@ -746,3 +759,31 @@ new_s = decayed_s + delta * k[d];        // ← No need to multiply g again
 - [docs/PERFORMANCE.md:20-48](file://docs/PERFORMANCE.md#L20-L48)
 - [docs/PERFORMANCE.md:35-48](file://docs/PERFORMANCE.md#L35-L48)
 - [scripts/bench_cuda_real.py:418-492](file://scripts/bench_cuda_real.py#L418-L492)
+
+### Blackwell Architecture tcgen05.mma Instruction Set
+The system provides comprehensive documentation of Blackwell architecture Tensor Core instructions:
+
+**Tensor Core Instruction Evolution:**
+- **Ampere (A100, sm_80)**: `mma.sync` (1.0x base)
+- **Hopper (H100, sm_90)**: `wgmma` (~2x)
+- **Blackwell (B200, sm_100)**: `tcgen05.mma` (**2-4x vs Hopper**)
+
+**Important Correction**: B200 uses `tcgen05.mma`, **not** `wgmma`!
+
+**tcgen05.mma Instruction Set:**
+- `tcgen05.mma.kind::tf32`: 2x Hopper, TF32 × TF32
+- `tcgen05.mma.kind::f16`: 2x Hopper, FP16/BF16
+- `tcgen05.mma.kind::i8`: 2x Hopper, INT8
+- `tcgen05.mma.kind::f8f6f4`: 2x Hopper, FP4/FP6/FP8 mixed
+- `tcgen05.mma.kind::mxf4`: **4x Hopper**, MX FP4 (block scaled)
+
+**tcgen05.mma for GDN Prefill:**
+- Matrix-Vector (Decode): Cannot use tcgen05.mma (requires mat-mat)
+- Chunked Prefill: Can use tcgen05.mma for S@Q matrix multiply
+- Minimum tile requirements: M, N, K ≥ 16 (BF16)
+
+**Section sources**
+- [docs/ROOFLINE.md:30-40](file://docs/ROOFLINE.md#L30-L40)
+- [docs/ROOFLINE.md:157-165](file://docs/ROOFLINE.md#L157-L165)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:78-96](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L96)
+- [docs/ZHIHU_GDN_TENSOR_CORE.md:143-153](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L143-L153)
