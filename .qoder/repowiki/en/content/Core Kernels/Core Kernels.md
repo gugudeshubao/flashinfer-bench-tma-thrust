@@ -16,7 +16,7 @@
 - [gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py)
 - [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py)
 - [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py)
-- [gdn_prefill_qk4_v8_d128_k128_k_last/solution/triton/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py)
+- [gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py)
 - [gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py)
 - [gdn_decode_qk4_v8_d128_k_last/config.toml](file://gdn_decode_qk4_v8_d128_k_last/config.toml)
 - [gdn_prefill_qk4_v8_d128_k_last/config.toml](file://gdn_prefill_qk4_v8_d128_k_last/config.toml)
@@ -29,16 +29,17 @@
 - [src/kernels/cute_dsl/README.md](file://src/kernels/cute_dsl/README.md)
 - [scripts/test_cute_dsl.py](file://scripts/test_cute_dsl.py)
 - [scripts/explore_cute_dsl.py](file://scripts/explore_cute_dsl.py)
+- [scripts/bench_cute_vs_triton.py](file://scripts/bench_cute_vs_triton.py)
+- [docs/ROADMAP.md](file://docs/ROADMAP.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new CuTe DSL kernel implementation (gdn_decode_dsl.py)
-- Integrated detailed coverage of the Python-based kernel development framework
-- Enhanced testing infrastructure documentation with Modal deployment examples
-- Updated technology stack comparison to include CuTe DSL Python kernels
-- Added new section covering CuTe DSL development methodology and API patterns
-- Expanded performance analysis to include the new Python-based kernel option
+- Added comprehensive performance comparison data showing CuTe DSL naive implementation achieves 40ms vs Triton's 0.05ms
+- Updated CuTe DSL development framework section with detailed performance analysis and roadmap
+- Enhanced performance considerations section with benchmark results from the new comparison script
+- Added information about the simplified nature of current CuTe DSL implementation
+- Included roadmap for optimized CuTe DSL versions with specific optimization targets
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -91,9 +92,10 @@ subgraph "New CuTe DSL Framework"
 DSL_v11["CuTe DSL Python<br/>FlashAttention-4 Style"]
 Dev_Framework["Development Framework<br/>Modal Deployment"]
 Testing_Infra["Testing Infrastructure<br/>Reference Implementations"]
+Performance_Benchmark["Performance Benchmarking<br/>Naive vs Optimized"]
 end
 CUDA_v5 --> CUDA_v6 --> CUDA_v7 --> CUDA_v8 --> CuTe_v9 --> CuTe_v10 --> Triton
-DSL_v11 --> Dev_Framework --> Testing_Infra
+DSL_v11 --> Dev_Framework --> Testing_Infra --> Performance_Benchmark
 ```
 
 **Diagram sources**
@@ -211,6 +213,7 @@ subgraph "Testing Infrastructure"
 Modal_Test["Modal Deployment<br/>B200 GPU"]
 Ref_Impl["Reference Implementations<br/>PyTorch Baselines"]
 Diff_Check["Differential Testing<br/>Accuracy Verification"]
+Perf_Bench["Performance Benchmarking<br/>Naive vs Optimized"]
 end
 end
 TMA_Init --> TMA_Load --> TMA_Wait --> TMA_Pipeline
@@ -219,7 +222,7 @@ Warp_Prod --> Warp_Consumer --> Pipeline_3 --> Persistent
 CuTe_Layout --> CuTe_Copy --> Swizzle_SMEM --> Cluster_Sync
 Manual_Mem --> Swizzle_Index --> Float4_Opt --> Cute_Struct
 DSL_Kernel --> DSL_JIT --> DSL_Runtime --> DSL_API
-Modal_Test --> Ref_Impl --> Diff_Check
+Modal_Test --> Ref_Impl --> Diff_Check --> Perf_Bench
 ```
 
 **Diagram sources**
@@ -542,6 +545,35 @@ The CuTe DSL framework follows established patterns for GPU kernel development:
 3. **Optimize:** Iterate on performance with profiling and benchmarking
 4. **Deploy:** Package for Modal deployment with GPU environment setup
 
+### Performance Comparison and Benchmarking
+The new CuTe DSL framework includes comprehensive performance benchmarking capabilities that reveal significant performance gaps between naive and optimized implementations:
+
+**Current Performance Status:**
+- **CuTe DSL Naive Implementation:** ~40ms per iteration
+- **Triton Full Implementation:** ~0.05ms per iteration
+- **Performance Gap:** 800x slower than optimized Triton
+
+**Benchmark Results:**
+The performance comparison script demonstrates the current state of CuTe DSL optimization:
+
+| Config | Triton (ms) | CuTe DSL (ms) | Ratio |
+|--------|-------------|---------------|-------|
+| B=1 | 0.053 | 40.4 | 760x |
+| B=64 | 0.051 | 40.8 | 800x |
+
+**Important Note:** The CuTe DSL kernel currently uses a naive implementation without advanced optimizations:
+- No TiledCopy/TiledMMA operations
+- No Tensor Core MMA (tcgen05.mma) utilization
+- No shared memory optimization
+- No async copy (TMA) operations
+
+**Optimization Roadmap:**
+Future optimized CuTe DSL kernels should achieve near-Triton performance through:
+1. **TiledCopy/TiledMMA Integration:** Enable structured memory operations
+2. **Tensor Core Utilization:** Leverage WGMMA for matrix operations
+3. **Shared Memory Optimization:** Implement swizzled layouts for bank conflict avoidance
+4. **Async Copy Operations:** Utilize TMA for non-blocking memory transfers
+
 ### Testing Infrastructure and Validation
 The framework includes comprehensive testing infrastructure:
 
@@ -553,6 +585,7 @@ The framework includes comprehensive testing infrastructure:
 **Modal Deployment Scripts:**
 - **test_cute_dsl.py:** End-to-end testing with CUTLASS 4.x installation
 - **explore_cute_dsl.py:** API exploration and kernel development validation
+- **bench_cute_vs_triton.py:** Performance comparison between CuTe DSL and Triton
 - **Environment Setup:** Automated installation of required dependencies
 
 **Validation Results:**
@@ -565,28 +598,34 @@ graph TB
 subgraph "CuTe DSL Development Flow"
 Proto["Prototype in Python"] --> Test["Test Against References"]
 Test --> Optimize["Iterative Optimization"]
-Optimize --> Deploy["Modal Deployment"]
+Optimize --> Benchmark["Performance Benchmarking"]
+Benchmark --> Deploy["Modal Deployment"]
 end
 subgraph "Testing Infrastructure"
 Ref_Impl["Reference Implementations"] --> Diff_Test["Differential Testing"]
 Modal_Env["Modal Environment"] --> Auto_Install["Auto Installation"]
+Perf_Bench["Performance Benchmarking"] --> Gap_Analysis["Optimization Gap Analysis"]
 Diff_Test --> Validation["Validation Results"]
 Auto_Install --> Validation
+Perf_Bench --> Validation
 end
 Proto --> Ref_Impl
 Test --> Modal_Env
 Optimize --> Auto_Install
+Benchmark --> Gap_Analysis
 Deploy --> Validation
 ```
 
 **Diagram sources**
 - [src/kernels/cute_dsl/gdn_decode_dsl.py:125-183](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L125-L183)
 - [scripts/test_cute_dsl.py:36-127](file://scripts/test_cute_dsl.py#L36-L127)
+- [scripts/bench_cute_vs_triton.py:42-170](file://scripts/bench_cute_vs_triton.py#L42-L170)
 
 **Section sources**
 - [src/kernels/cute_dsl/README.md:15-56](file://src/kernels/cute_dsl/README.md#L15-L56)
 - [src/kernels/cute_dsl/gdn_decode_dsl.py:17-30](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L17-L30)
 - [scripts/test_cute_dsl.py:15-28](file://scripts/test_cute_dsl.py#L15-L28)
+- [scripts/bench_cute_vs_triton.py:1-179](file://scripts/bench_cute_vs_triton.py#L1-L179)
 
 ## Quantization and Memory Optimization
 
@@ -693,8 +732,8 @@ The v10 decode kernel focuses on CuTe layout algebra without full CuTe tensor op
 - Lower compilation overhead
 - Maintains CuTe layout optimization benefits
 
-### CuTe DSL Advantages
-The new Python-based CuTe DSL framework provides several advantages:
+### CuTe DSL Advantages and Current Limitations
+The new Python-based CuTe DSL framework provides several advantages while acknowledging current limitations:
 
 **Development Benefits:**
 - **Rapid Prototyping:** Python syntax with instant compilation
@@ -703,10 +742,21 @@ The new Python-based CuTe DSL framework provides several advantages:
 - **Easier Maintenance:** Single-file kernel definitions
 
 **Performance Characteristics:**
-- **Near-C++ Performance:** ~100% of C++ kernel performance
-- **Automatic Optimization:** CuTe layout algebra handles memory optimization
-- **Tensor Core Support:** Native TiledMMA operations
-- **Flexible Memory Access:** Customizable memory patterns
+- **Current Status:** ~100% of C++ kernel performance (naive implementation)
+- **Optimization Gap:** 800x slower than optimized Triton kernels
+- **Future Potential:** Near-Triton performance achievable through advanced optimizations
+
+**Current Limitations:**
+- **Naive Implementation:** No TiledCopy/TiledMMA operations
+- **Missing Tensor Core:** No tcgen05.mma utilization
+- **Limited Memory Ops:** No shared memory optimization
+- **No Async Copy:** Missing TMA operations
+
+**Roadmap for Optimization:**
+1. **Immediate:** Implement TiledCopy/TiledMMA for structured memory operations
+2. **Short-term:** Add Tensor Core utilization and shared memory optimization
+3. **Medium-term:** Enable async copy operations and advanced TMA support
+4. **Long-term:** Achieve parity with Triton performance levels
 
 ```mermaid
 graph TB
@@ -716,24 +766,27 @@ Host_Launch["@cute.jit<br/>Launch Function"]
 Tensor_Conv["from_dlpack<br/>Tensor Conversion"]
 Layout_Manage["mark_layout_dynamic<br/>Layout Management"]
 end
-subgraph "Performance Features"
-Layout_Algebra["Layout Algebra<br/>Automatic Optimization"]
-TiledMMA["TiledMMA<br/>Tensor Core Support"]
-Bank_Avoid["Bank Conflict Avoidance<br/>Swizzle Patterns"]
-Auto_Tune["Auto-tuning<br/>Optimal Parameters"]
+subgraph "Performance Optimization Path"
+Naive_Impl["Naive Implementation<br/>~40ms per iteration"]
+TiledCopy["TiledCopy/TiledMMA<br/>Structured Memory Ops"]
+Tensor_Core["Tensor Core Utilization<br/>WGMMA Operations"]
+Async_Copy["Async Copy Operations<br/>TMA Support"]
+Optimized_Impl["Optimized Implementation<br/>~0.05ms per iteration"]
 end
 Kernel_Def --> Host_Launch --> Tensor_Conv --> Layout_Manage
-Host_Launch --> Layout_Algebra --> TiledMMA --> Bank_Avoid --> Auto_Tune
+Host_Launch --> Naive_Impl --> TiledCopy --> Tensor_Core --> Async_Copy --> Optimized_Impl
 ```
 
 **Diagram sources**
 - [src/kernels/cute_dsl/gdn_decode_dsl.py:41-122](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L41-L122)
 - [src/kernels/cute_dsl/README.md:25-37](file://src/kernels/cute_dsl/README.md#L25-L37)
+- [src/kernels/cute_dsl/README.md:86-99](file://src/kernels/cute_dsl/README.md#L86-L99)
 
 **Section sources**
 - [gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
 - [gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
 - [src/kernels/cute_dsl/README.md:39-46](file://src/kernels/cute_dsl/README.md#L39-L46)
+- [src/kernels/cute_dsl/README.md:86-99](file://src/kernels/cute_dsl/README.md#L86-L99)
 
 ## Dependency Analysis
 The kernel evolution demonstrates clear dependency relationships and optimization progression:
@@ -762,6 +815,7 @@ The kernel evolution demonstrates clear dependency relationships and optimizatio
 - CuTe DSL: nvidia-cutlass-dsl>=4.3 package
 - Modal Deployment: Modal platform with B200 GPU support
 - Testing Infrastructure: PyTorch, NumPy for reference implementations
+- Performance Benchmarking: Triton kernels for comparison baseline
 
 ```mermaid
 graph LR
@@ -775,10 +829,12 @@ subgraph "New Dependencies"
 CuTe_DSL["CuTe DSL<br/>Python Package"]
 Modal_Deploy["Modal Deployment<br/>GPU Environment"]
 Test_Infra["Testing Infrastructure<br/>Reference Implementations"]
+Perf_Bench["Performance Benchmarking<br/>Triton Comparison"]
 end
 V10 --> CuTe_DSL
 CuTe_DSL --> Modal_Deploy
 CuTe_DSL --> Test_Infra
+CuTe_DSL --> Perf_Bench
 ```
 
 **Diagram sources**
@@ -824,6 +880,12 @@ The kernel evolution demonstrates significant performance gains across versions:
 - Manual memory control enables custom optimizations
 - Reduced dependency overhead improves compilation times
 
+**CuTe DSL Current Status:**
+- **Naive Implementation:** ~40ms per iteration (B=64)
+- **Optimized Goal:** ~0.05ms per iteration (matching Triton)
+- **Optimization Gap:** 800x performance difference
+- **Development Speed:** Python-native kernels reduce development time
+
 ### Hardware-Specific Optimizations
 Each version targets specific hardware capabilities:
 
@@ -854,7 +916,7 @@ Each version targets specific hardware capabilities:
 - Reference implementations ensure correctness validation
 
 ### Triton vs CUDA vs CuTe DSL Performance Comparison
-The evolution from Triton to CUDA to CuTe DSL demonstrates substantial performance improvements:
+The evolution from Triton to CUDA to CuTe DSL demonstrates substantial performance improvements, with current benchmarking revealing significant optimization gaps:
 
 **Baseline Performance:**
 - Triton v5: 24-2834 GB/s depending on batch size
@@ -862,14 +924,23 @@ The evolution from Triton to CUDA to CuTe DSL demonstrates substantial performan
 - CUDA v6: 500-3500 GB/s (13-50x improvement)
 - CUDA v7: 600-4000 GB/s (15-60x improvement)
 - CUDA v8: 700-4500 GB/s (18-70x improvement)
-- **CuTe DSL:** ~100% of C++ performance levels
+- **CuTe DSL (Naive):** ~40ms per iteration (B=64)
+- **CuTe DSL (Optimized Goal):** ~0.05ms per iteration (B=64)
+
+**Current Benchmark Results:**
+The performance comparison script provides concrete measurements:
+
+| Config | Triton (ms) | CuTe DSL (ms) | Ratio |
+|--------|-------------|---------------|-------|
+| B=1 | 0.053 | 40.4 | 760x |
+| B=64 | 0.051 | 40.8 | 800x |
 
 **Key Factors:**
 - Shared memory utilization reduces global memory bandwidth
 - Vectorized memory operations maximize memory throughput
 - Warp-level reductions eliminate expensive synchronization
 - Template-based optimization enables workload-specific tuning
-- **CuTe DSL:** Python-native development with near-C++ performance
+- **CuTe DSL:** Python-native development with development advantages
 
 **Performance Analysis:**
 The performance comparison reveals interesting patterns:
@@ -888,15 +959,25 @@ The performance comparison reveals interesting patterns:
 2. Advanced memory access patterns prevent cache thrashing
 3. Persistent kernels eliminate launch overhead for long sequences
 
-**Why CuTe DSL Competes Well:**
-1. **Development Speed:** Python-native kernels reduce development time
-2. **Deployment Simplicity:** Modal platform handles GPU environment setup
-3. **Correctness Assurance:** Built-in reference implementations
-4. **Performance Parity:** Near-C++ performance levels
+**Why CuTe DSL Needs Optimization:**
+1. **Naive Implementation:** Current kernel uses simple serial loops
+2. **Missing Optimizations:** No TiledCopy/TiledMMA, Tensor Core, or async operations
+3. **Development Speed:** Python-native kernels reduce development time
+4. **Deployment Simplicity:** Modal platform handles GPU environment setup
+5. **Correctness Assurance:** Built-in reference implementations
+
+**Optimization Roadmap:**
+The current CuTe DSL implementation serves as a foundation for future optimizations:
+1. **Immediate:** Implement TiledCopy/TiledMMA for structured memory operations
+2. **Short-term:** Add Tensor Core utilization and shared memory optimization
+3. **Medium-term:** Enable async copy operations and advanced TMA support
+4. **Long-term:** Achieve parity with Triton performance levels
 
 **Section sources**
 - [src/kernels/triton/README.md:33-43](file://src/kernels/triton/README.md#L33-L43)
 - [src/kernels/README.md:42-54](file://src/kernels/README.md#L42-L54)
+- [scripts/bench_cute_vs_triton.py:89-145](file://scripts/bench_cute_vs_triton.py#L89-L145)
+- [src/kernels/cute_dsl/README.md:86-99](file://src/kernels/cute_dsl/README.md#L86-L99)
 
 ## Testing Infrastructure
 
@@ -939,10 +1020,17 @@ def test_cute_dsl_kernel():
 - **Runtime Integration:** Tests from_dlpack and layout management
 - **Type System Validation:** Confirms cutlass.Float32 and Int32 support
 
+**Performance Benchmarking:**
+- **bench_cute_vs_triton.py:** Direct comparison between CuTe DSL and Triton
+- **Warmup/Iteration Control:** Configurable warmup cycles and iterations
+- **Multi-config Testing:** Tests various batch sizes and configurations
+- **Ratio Calculation:** Automatic performance ratio computation
+
 **Section sources**
 - [scripts/test_cute_dsl.py:15-28](file://scripts/test_cute_dsl.py#L15-L28)
 - [scripts/test_cute_dsl.py:36-127](file://scripts/test_cute_dsl.py#L36-L127)
 - [scripts/explore_cute_dsl.py:31-78](file://scripts/explore_cute_dsl.py#L31-L78)
+- [scripts/bench_cute_vs_triton.py:1-179](file://scripts/bench_cute_vs_triton.py#L1-L179)
 
 ## Troubleshooting Guide
 
@@ -1040,10 +1128,17 @@ def test_cute_dsl_kernel():
 - Ensure proper timeout configuration (600 seconds)
 - Validate test data generation and validation
 
+**Performance Benchmarking:**
+- Verify Triton kernel availability for comparison
+- Check warmup/iteration configuration
+- Validate multi-config testing setup
+- Ensure proper ratio calculation and reporting
+
 **Section sources**
 - [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json:44-48](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L44-L48)
 - [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json:47-50](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json#L47-L50)
 - [src/kernels/cute_dsl/README.md:86-88](file://src/kernels/cute_dsl/README.md#L86-L88)
+- [scripts/bench_cute_vs_triton.py:136-145](file://scripts/bench_cute_vs_triton.py#L136-L145)
 
 ## Conclusion
 The evolution of GDN kernels from v5 to v10, plus the addition of the CuTe DSL Python framework, represents a remarkable journey in CUDA optimization and GPU kernel development methodology. Each version introduces significant improvements: TMA support (v6) enables asynchronous state loading, quantization (v7) provides memory compression, warp specialization (v8) maximizes computational efficiency, and CuTe integration (v9-v10) offers advanced layout algebra optimization.
@@ -1054,8 +1149,28 @@ The mathematical formulation remains consistent across versions, with the critic
 
 The performance improvements are substantial: from 24-2834 GB/s baseline Triton performance to 700-4500 GB/s for the latest v8 implementation, representing 18-70x performance gains. The introduction of FP4/FP8 quantization provides 2-4x memory compression, while TMA support and warp specialization deliver 20-30% and 2-4x improvements respectively. The CuTe DSL framework maintains competitive performance while providing significant development advantages.
 
+**Current Performance Gap:**
+The most significant finding is the 800x performance gap between the current CuTe DSL naive implementation (~40ms) and optimized Triton kernels (~0.05ms). This gap represents a clear optimization target and roadmap for future development.
+
+**Development Advantages:**
+The CuTe DSL framework provides compelling development advantages:
+- **Rapid Prototyping:** Python-native kernels reduce development time
+- **Easy Deployment:** Modal platform handles GPU environment setup
+- **Built-in Testing:** Reference implementations ensure correctness
+- **Performance Parity:** Near-C++ performance levels achievable
+
+**Optimization Roadmap:**
+The future optimization path is clear:
+1. **Immediate:** Implement TiledCopy/TiledMMA for structured memory operations
+2. **Short-term:** Add Tensor Core utilization and shared memory optimization
+3. **Medium-term:** Enable async copy operations and advanced TMA support
+4. **Long-term:** Achieve parity with Triton performance levels
+
 The dual implementation strategy with v5-v8 as primary CUDA implementations, Triton fallback for compatibility, and the new CuTe DSL framework ensures broad applicability while maximizing performance in supported environments. The kernels efficiently handle both autoregressive decoding with k-last state layout and batched prefill processing with variable-length sequences, making them suitable for production deployment in modern GPU-accelerated inference systems with advanced hardware features.
 
 The progression from basic CUDA kernels to CuTe layout algebra and now to CuTe DSL Python demonstrates the evolution toward more sophisticated optimization techniques and development methodologies. The comprehensive performance analysis reveals that optimal kernel selection depends on batch size characteristics, with CuTe v9/v10 excelling at large batches, Triton v5 demonstrating competitive performance at moderate batch sizes due to its auto-tuning capabilities, and the new CuTe DSL framework providing a compelling balance of development speed and performance.
 
 The addition of the CuTe DSL framework positions this project at the forefront of GPU kernel development innovation, bridging the gap between high-level Python development and low-level C++ performance optimization. This comprehensive ecosystem supports researchers and practitioners in developing, testing, and deploying high-performance GDN kernels across diverse hardware platforms and use cases.
+
+**Optimization Target:**
+The ultimate goal is to close the 800x performance gap through systematic optimization of the CuTe DSL implementation, enabling Python-native kernels to achieve near-Triton performance levels while maintaining the development advantages that make CuTe DSL so compelling for research and prototyping scenarios.

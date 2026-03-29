@@ -189,10 +189,13 @@ gdn_decode_kernel_v9_tma(
     }
     
     // ============================================================
-    // Compute Gates (warp 0)
+    // Compute Gates - BROADCAST ACROSS ALL WARPS via SMEM
     // ============================================================
-    float g, beta;
-    if (warp_id == 0 && lane_id == 0) {
+    // NOTE: __shfl_sync only works within a warp!
+    // Must use shared memory to broadcast across all 4 warps.
+    __shared__ float s_g, s_beta;
+    
+    if (tid == 0) {
         float a_val = __bfloat162float(A[b * stride_a_b + h]);
         float dt_val = DtBias[h];
         float alog = A_log[h];
@@ -200,13 +203,14 @@ gdn_decode_kernel_v9_tma(
         
         float x = a_val + dt_val;
         float sp = v9_softplus(x);
-        g = v9_fast_exp(-v9_fast_exp(alog) * sp);
-        beta = v9_sigmoid(b_val);
+        s_g = v9_fast_exp(-v9_fast_exp(alog) * sp);
+        s_beta = v9_sigmoid(b_val);
     }
+    __syncthreads();  // Wait for thread 0 to write gates
     
-    // Broadcast gates
-    g = __shfl_sync(0xffffffff, g, 0);
-    beta = __shfl_sync(0xffffffff, beta, 0);
+    // All threads read from shared memory
+    float g = s_g;
+    float beta = s_beta;
     
     // ============================================================
     // TMA-style Async State Load with Swizzle
@@ -360,9 +364,10 @@ gdn_decode_kernel_v9_fp32(
         s_v[tid] = __bfloat162float(v_ptr[tid]);
     }
     
-    // Compute gates
-    float g, beta;
-    {
+    // Compute gates - single thread, broadcast via SMEM
+    __shared__ float s_g_fp32, s_beta_fp32;
+    
+    if (tid == 0) {
         float a_val = __bfloat162float(A[b * stride_a_b + h]);
         float dt_val = DtBias[h];
         float alog = A_log[h];
@@ -370,9 +375,13 @@ gdn_decode_kernel_v9_fp32(
         
         float x = a_val + dt_val;
         float sp = v9_softplus(x);
-        g = v9_fast_exp(-v9_fast_exp(alog) * sp);
-        beta = v9_sigmoid(b_val);
+        s_g_fp32 = v9_fast_exp(-v9_fast_exp(alog) * sp);
+        s_beta_fp32 = v9_sigmoid(b_val);
     }
+    __syncthreads();
+    
+    float g = s_g_fp32;
+    float beta = s_beta_fp32;
     
     // Load state
     const float* state_ptr = State + b * stride_s_b + h * stride_s_h + v0 * stride_s_v;

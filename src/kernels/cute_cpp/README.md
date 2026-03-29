@@ -1,8 +1,19 @@
-# CuTe Kernels (v9-v10)
+# CuTe C++ Kernels (v9-v10)
 
-NVIDIA CuTe (CUTLASS Tile) DSL implementations with medium-level abstraction.
+> **CuTe C++** 是 CUTLASS 3.x 的 C++ 模板库，通过 NVCC 编译。与 CuTe DSL (MLIR) 不同，这里是纯 C++ 模板编程。
 
-## What is CuTe?
+## CuTe C++ vs CuTe DSL
+
+| 方面 | CuTe C++ (本目录) | CuTe DSL (cute_dsl/) |
+|------|-------------------|----------------------|
+| **语言** | C++ 模板 | Python |
+| **编译** | NVCC → PTX | MLIR → LLVM → PTX |
+| **抽象** | `Layout<>`, `Swizzle<>` | `@cute.kernel` |
+| **编译时间** | 分钟级 | 秒级 (JIT) |
+| **性能** | 100% | ~100% |
+| **开发效率** | 中 | 高 |
+
+## What is CuTe C++?
 
 CuTe 是 NVIDIA CUTLASS 库的核心组件，提供:
 
@@ -26,10 +37,11 @@ CuTe 是 NVIDIA CUTLASS 库的核心组件，提供:
 
 ## Files
 
-| File | Version | Key Feature |
-|------|---------|-------------|
-| `gdn_decode_v9.cuh` | v9 | Manual XOR swizzle |
-| `gdn_decode_v10.cuh` | v10 | CuTe `Swizzle<3,3,3>` |
+| File | Version | Type | Key Feature |
+|------|---------|------|-------------|
+| `gdn_decode_v9.cuh` | v9 | Decode | Manual XOR swizzle |
+| `gdn_decode_v10.cuh` | v10 | Decode | CuTe `Swizzle<3,3,3>` |
+| `gdn_prefill_v9.cuh` | v9 | **Prefill** | SMEM swizzle + chunking |
 
 ## Swizzle Explained
 
