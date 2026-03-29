@@ -1,23 +1,32 @@
 /*
- * GDN Prefill v10 — CuTe TiledMMA kernel for Tensor Core acceleration
+ * GDN Prefill v10 — Tensor Core kernel for Blackwell (sm_100)
  *
- * Key Innovation: Uses CuTe's TiledMMA abstraction for mat-mat operations
+ * Target: NVIDIA B200 (Blackwell, sm_100)
+ * Instruction: tcgen05.mma (NOT wgmma — that's Hopper sm_90)
  *
- * Tensor Core Applicability:
+ * Key Innovation: Chunked processing enables mat-mat ops for Tensor Cores
+ *
+ * Tensor Core Applicability (sm_100 tcgen05.mma):
  *   - Chunked prefill with CHUNK_SIZE=C creates matrix-matrix ops:
  *   - old_v = State @ K^T: [V, D] @ [D, C] = [V, C]
  *   - out = State @ Q:     [V, D] @ [D, C] = [V, C]
- *   - These CAN use tcgen05.mma on Blackwell (sm_100)!
+ *   - These CAN use tcgen05.mma on Blackwell!
  *
- * Performance Analysis:
- *   - AI (Arithmetic Intensity) with chunking:
+ * tcgen05.mma Performance (B200):
+ *   | Precision | Dense     | Sparse    |
+ *   |-----------|-----------|-----------|
+ *   | FP4       | 9 PFLOPS  | 18 PFLOPS |
+ *   | FP8       | 4.5 PFLOPS| 9 PFLOPS  |
+ *   | BF16      | 2.25 PFLOPS| 4.5 PFLOPS|
+ *
+ * Arithmetic Intensity Analysis:
  *   - CHUNK=8:  AI ≈ 8 FLOP/byte (near compute-bound)
  *   - CHUNK=64: AI ≈ 64 FLOP/byte (compute-bound!)
  *   - FP32 ridge point = 9.3 FLOP/byte
- *   - BF16 Tensor Core ridge = 281 FLOP/byte
+ *   - BF16 tcgen05 ridge = 281 FLOP/byte
  *
  * Grid: (N=num_seqs, H=8, V_BLOCKS)
- * Block: 128 threads (4 warps, or 1 warpgroup for WGMMA)
+ * Block: 128 threads (4 warps)
  */
 
 #pragma once

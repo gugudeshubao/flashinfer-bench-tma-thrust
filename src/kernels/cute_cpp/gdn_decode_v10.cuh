@@ -1,5 +1,8 @@
 /*
- * GDN Decode v10 — CuTe Layout Algebra kernel for B200 (sm100)
+ * GDN Decode v10 — CuTe Layout Algebra kernel for Blackwell (sm_100)
+ *
+ * Target: NVIDIA B200 (Blackwell, sm_100)
+ * HBM3e Bandwidth: 8 TB/s
  *
  * Uses NVIDIA CuTe from CUTLASS 3.x for layout algebra only:
  *
@@ -12,11 +15,14 @@
  *   - cp.async for async global->shared
  *   - Vectorized loads with float4
  *
- *   Precision Modes (Iteration 2):
+ *   Precision Modes (all memory-bound, no Tensor Core):
  *   - FP32: Full precision state (default)
  *   - BF16: 2x memory compression, ~0.6% error (recommended)
  *   - FP8 E4M3: 4x memory compression for state
  *   - FP4 E2M1: 8x memory compression for state (experimental)
+ *
+ * Note: Decode is MEMORY-BOUND (AI=1), cannot use tcgen05.mma
+ *       Tensor Cores require mat-mat ops, decode does mat-vec
  *
  * Grid: (B, H=8, V_BLOCKS)
  * Block: 128 threads (4 warps)
