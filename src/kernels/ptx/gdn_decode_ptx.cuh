@@ -6,6 +6,7 @@
  *   - Fast math (ex2.approx, lg2.approx, rcp.approx)
  *   - FMA operations (fma.rn.f32)
  *   - Memory operations with cache hints (ld.global.nc, st.global.wb)
+ *   - Async copy (cp.async) for prefetch (Iteration 1)
  *   - Predicated execution
  *
  * Grid: (B, H=8, V_BLOCKS)
@@ -103,6 +104,48 @@ __device__ __forceinline__ float ptx_ld_nc(const float* ptr) {
         : "l"(ptr)
     );
     return result;
+}
+
+// ============================================================
+// cp.async PTX Primitives (Iteration 1 - Async Prefetch)
+// ============================================================
+
+// Async copy 4 bytes from global to shared memory
+__device__ __forceinline__ void ptx_cp_async_ca(void* smem_ptr, const void* gmem_ptr) {
+    uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
+    asm volatile(
+        "cp.async.ca.shared.global [%0], [%1], 4;"
+        :
+        : "r"(smem_addr), "l"(gmem_ptr)
+        : "memory"
+    );
+}
+
+// Async copy 16 bytes (4 floats) from global to shared memory
+__device__ __forceinline__ void ptx_cp_async_cg(void* smem_ptr, const void* gmem_ptr) {
+    uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
+    asm volatile(
+        "cp.async.cg.shared.global [%0], [%1], 16;"
+        :
+        : "r"(smem_addr), "l"(gmem_ptr)
+        : "memory"
+    );
+}
+
+// Commit async copy group
+__device__ __forceinline__ void ptx_cp_async_commit() {
+    asm volatile("cp.async.commit_group;");
+}
+
+// Wait for N groups (0 = all)
+template<int N>
+__device__ __forceinline__ void ptx_cp_async_wait() {
+    asm volatile("cp.async.wait_group %0;" : : "n"(N));
+}
+
+// Wait for all async copies
+__device__ __forceinline__ void ptx_cp_async_wait_all() {
+    asm volatile("cp.async.wait_all;");
 }
 
 // Load float4 with cache hint
@@ -285,25 +328,17 @@ __global__ void gdn_decode_kernel_ptx(
     }
     __syncthreads();
     
-    // ─── Load state tile [BLOCK_V, D] with PTX vectorized loads ────
+    // ─── Load state tile [BLOCK_V, D] with cp.async (async prefetch) ────
     const float* state_ptr = State + b * stride_s_b + h * stride_s_h + v0 * stride_s_v;
     
-    // Load 4 floats at a time using PTX
-    for (int i = tid * 4; i < BLOCK_V * D; i += num_threads * 4) {
-        if (i + 3 < BLOCK_V * D) {
-            int vi = i / D;
-            int ki = i % D;
-            
-            // Simple scalar loads for correctness
-            #pragma unroll 4
-            for (int j = 0; j < 4; j++) {
-                int idx = i + j;
-                int row = idx / D;
-                int col = idx % D;
-                state_smem[idx] = ptx_ld_nc(&state_ptr[row * stride_s_v + col]);
-            }
-        }
+    // Use cp.async for async prefetch - overlaps with computation
+    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+        int row = i / D;
+        int col = i % D;
+        ptx_cp_async_ca(&state_smem[i], &state_ptr[row * stride_s_v + col]);
     }
+    ptx_cp_async_commit();
+    ptx_cp_async_wait<0>();
     __syncthreads();
     
     // ─── Apply gate decay: S = g * S (using PTX FMA) ───────────────

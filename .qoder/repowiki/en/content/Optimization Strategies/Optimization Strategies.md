@@ -17,7 +17,13 @@
 - [src/kernels/cute/gdn_decode_v10.cuh](file://src/kernels/cute/gdn_decode_v10.cuh)
 - [src/kernels/cuda/gdn_decode_v7.cuh](file://src/kernels/cuda/gdn_decode_v7.cuh)
 - [src/kernels/cuda/gdn_decode_v8.cuh](file://src/kernels/cuda/gdn_decode_v8.cuh)
+- [src/kernels/ptx/README.md](file://src/kernels/ptx/README.md)
+- [src/kernels/ptx/gdn_decode_ptx.cuh](file://src/kernels/ptx/gdn_decode_ptx.cuh)
+- [src/kernels/ptx/gdn_prefill_ptx.cuh](file://src/kernels/ptx/gdn_prefill_ptx.cuh)
 - [src/kernels/cute/README.md](file://src/kernels/cute/README.md)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py](file://src/kernels/cute_dsl/gdn_decode_dsl.py)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py)
+- [src/kernels/cute_dsl/gdn_prefill_dsl.py](file://src/kernels/cute_dsl/gdn_prefill_dsl.py)
 - [docs/ROADMAP.md](file://docs/ROADMAP.md)
 - [docs/PERFORMANCE.md](file://docs/PERFORMANCE.md)
 - [docs/ROOFLINE.md](file://docs/ROOFLINE.md)
@@ -27,6 +33,7 @@
 - [gdn_prefill_qk4_v8_d128_k_last/scripts/pack_solution.py](file://gdn_prefill_qk4_v8_d128_k_last/scripts/pack_solution.py)
 - [benchmarks/bench_modal.py](file://benchmarks/bench_modal.py)
 - [scripts/bench_all_versions.py](file://scripts/bench_all_versions.py)
+- [scripts/bench_cute_dsl_vs_cpp.py](file://scripts/bench_cute_dsl_vs_cpp.py)
 - [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json)
 - [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json)
 - [README.md](file://README.md)
@@ -34,11 +41,12 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive GDN state optimization documentation covering three critical bottlenecks (state recursion, memory bandwidth, numerical stability)
-- Updated optimization strategies to reflect detailed analysis of GDN kernel optimization challenges
-- Enhanced coverage of decode and prefill phase optimization approaches
-- Integrated new insights from state optimization research into existing documentation structure
-- Expanded technical depth on state recursion, memory-bound optimization, and numerical stability considerations
+- Added comprehensive PTX optimization techniques with embedded assembly instructions
+- Integrated CuTe DSL compilation pipeline with MLIR-based kernel generation
+- Enhanced advanced swizzle strategies with mathematical foundations
+- Documented embedded assembly optimizations and their performance benefits
+- Added detailed coverage of MLIR-based kernel compilation and optimization passes
+- Expanded benchmarking analysis comparing CuTe DSL vs CuTe C++ vs Triton
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -64,12 +72,15 @@ The document covers:
 - Advanced Swizzle memory access patterns with XOR-based bank conflict elimination
 - Comprehensive Tensor Core evolution coverage from mma.sync to tcgen05.mma for Blackwell architecture
 - Emerging GPU programming concepts including cuTile and CUTLASS 4.0
+- **NEW**: PTX optimization techniques with embedded assembly instructions for maximum performance control
+- **NEW**: CuTe DSL compilation pipeline with MLIR-based kernel generation and automatic optimization passes
+- **NEW**: Advanced embedded assembly optimizations including warp shuffle, fast math, and predicated execution
 - Roofline analysis methodology and performance modeling to identify optimization opportunities
 - Concrete examples from configuration and kernel files showing parameter tuning, block sizing, and hardware-specific adaptations
 - The transition from a PyTorch baseline to a Triton implementation, highlighting fused operations and reduced Python overhead
 
 ## Project Structure
-The repository organizes GDN kernels by stage (decode/prefill), with separate baseline and optimized Triton implementations, plus configuration and benchmarking support. The project now includes comprehensive state optimization documentation and advanced CUDA kernels with hardware-specific optimizations.
+The repository organizes GDN kernels by stage (decode/prefill), with separate baseline and optimized Triton implementations, plus configuration and benchmarking support. The project now includes comprehensive state optimization documentation, PTX optimization techniques, and advanced CuTe DSL compilation pipeline.
 
 ```mermaid
 graph TB
@@ -84,12 +95,26 @@ V7["v7 - FP4 Quantization"]
 V8["v8 - FP8 + Warp Spec"]
 V9["v9 - CuTe DSL"]
 V10["v10 - CuTe Layout Algebra"]
+V11["v11 - PTX Embedded Assembly"]
 end
 subgraph "State Optimization"
 STATE_RECURSION["State Recursion Analysis"]
 MEMORY_BANDWIDTH["Memory Bandwidth Optimization"]
 NUMERICAL_STABILITY["Numerical Stability Control"]
 end
+subgraph "PTX Optimization"
+PTX_DECODE["PTX Decode Kernel"]
+PTX_PREFILL["PTX Prefill Kernel"]
+EMBEDDED_ASM["Embedded Assembly Ops"]
+FAST_MATH["Fast Math Approximations"]
+WARP_SHUFFLE["Warp Shuffle Reductions"]
+END
+subgraph "CuTe DSL Pipeline"
+DSL_DECODE["DSL Decode Kernel"]
+DSL_PREFILL["DSL Prefill Kernel"]
+MLIR_COMPILATION["MLIR Compilation Pipeline"]
+AUTO_OPT["Automatic Optimization Passes"]
+END
 subgraph "Configuration"
 D_CFG["gdn_decode_qk4_v8_d128_k_last/config.toml"]
 P_CFG["gdn_prefill_qk4_v8_d128_k_last/config.toml"]
@@ -111,16 +136,19 @@ D_V7["gdn_decode_v7.cuh"]
 D_V8["gdn_decode_v8.cuh"]
 D_V9["gdn_decode_v9.cuh"]
 D_V10["gdn_decode_v10.cuh"]
+D_V11["gdn_decode_ptx.cuh"]
 end
 subgraph "Emerging Models"
 C_README["cute/README.md"]
 CUTILE_README["cutile/README.md"]
+DSL_README["cute_dsl/README.md"]
 ZHIHU_DOC["ZHIHU_GDN_TENSOR_CORE.md"]
 STATE_OPT["ZHIHU_GDN_STATE_OPTIMIZATION.md"]
 end
 subgraph "Benchmarking"
 BENCH["benchmarks/bench_modal.py"]
 ALL_BENCH["scripts/bench_all_versions.py"]
+DSL_BENCH["scripts/bench_cute_dsl_vs_cpp.py"]
 end
 subgraph "Roadmap"
 ROADMAP["docs/ROADMAP.md"]
@@ -136,6 +164,7 @@ D_CFG --> V7
 D_CFG --> V8
 D_CFG --> V9
 D_CFG --> V10
+D_CFG --> V11
 P_CFG --> V1
 P_CFG --> V2
 P_CFG --> V3
@@ -146,6 +175,7 @@ P_CFG --> V7
 P_CFG --> V8
 P_CFG --> V9
 P_CFG --> V10
+P_CFG --> V11
 STATE_OPT --> STATE_RECURSION
 STATE_OPT --> MEMORY_BANDWIDTH
 STATE_OPT --> NUMERICAL_STABILITY
@@ -156,6 +186,11 @@ STATE_OPT --> NUMERICAL_STABILITY
 - [docs/ZHIHU_GDN_STATE_OPTIMIZATION.md:1-507](file://docs/ZHIHU_GDN_STATE_OPTIMIZATION.md#L1-L507)
 - [gdn_decode_qk4_v8_d128_k_last/config.toml:1-10](file://gdn_decode_qk4_v8_d128_k_last/config.toml#L1-L10)
 - [gdn_prefill_qk4_v8_d128_k_last/config.toml:1-10](file://gdn_prefill_qk4_v8_d128_k_last/config.toml#L1-L10)
+- [src/kernels/ptx/README.md:1-172](file://src/kernels/ptx/README.md#L1-L172)
+- [src/kernels/ptx/gdn_decode_ptx.cuh:1-456](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L456)
+- [src/kernels/ptx/gdn_prefill_ptx.cuh:1-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [src/kernels/cute_dsl/gdn_prefill_dsl.py:1-323](file://src/kernels/cute_dsl/gdn_prefill_dsl.py#L1-L323)
 - [src/kernels/cuda/gdn_decode_v7.cuh:1-200](file://src/kernels/cuda/gdn_decode_v7.cuh#L1-L200)
 - [src/kernels/cuda/gdn_decode_v8.cuh:1-200](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L200)
 - [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
@@ -172,7 +207,7 @@ STATE_OPT --> NUMERICAL_STABILITY
 - [gdn_prefill_qk4_v8_d128_k_last/config.toml:1-10](file://gdn_prefill_qk4_v8_d128_k_last/config.toml#L1-L10)
 
 ## Core Components
-The GDN optimization strategy is built around three fundamental bottlenecks that define the optimization landscape:
+The GDN optimization strategy is built around three fundamental bottlenecks that define the optimization landscape, now enhanced with PTX optimization techniques and CuTe DSL compilation pipeline:
 
 ### Primary Bottlenecks
 
@@ -202,6 +237,8 @@ The GDN optimization strategy is built around three fundamental bottlenecks that
 - Prefill kernel: Variable-length batched forward pass with GVA and k-last state layout [N, H, V, K]
 - Baseline implementations: Pure PyTorch loops for correctness verification
 - Optimized Triton kernels: V-dimension splitting, register blocking, fused operations, and tiled state access
+- **NEW**: PTX optimization kernels with embedded assembly instructions for maximum performance control
+- **NEW**: CuTe DSL compilation pipeline with MLIR-based kernel generation and automatic optimization passes
 - Advanced CUDA kernels: Hardware-specific optimizations with CuTe DSL integration, quantization support, and warp specialization patterns
 - Emerging GPU programming models: cuTile (CUDA 13.1) and CUTLASS 4.0 for advanced tensor operations
 
@@ -209,6 +246,8 @@ Key optimization highlights:
 - V-dimension splitting: Splitting the V dimension across multiple programs (V_BLOCKS) improves SM occupancy and reduces per-program register pressure
 - GVA expansion: Expanding Q/K heads to match V heads enables efficient computation with fewer cross-head dependencies
 - Memory coalescing: Optimal tensor layouts and strides enable coalesced HBM access for state matrices
+- **NEW**: PTX embedded assembly: Direct control over warp shuffle, fast math, and memory operations for 5-10% performance gains
+- **NEW**: MLIR compilation pipeline: Automatic optimization passes including TileAndFuse, VectorizeSmem, SwizzleElimination, and AsyncCopyInsertion
 - Advanced Swizzle memory optimization: XOR-based bank conflict elimination using Swizzle<3,3,3> patterns for 32-bank shared memory systems
 - Mathematical foundations: Bank conflict problem analysis and XOR-based swizzle transformation d ^ ((d >> 3) & 7)
 - Tensor Core evolution: Complete coverage from Ampere mma.sync through Blackwell tcgen05.mma with performance metrics
@@ -221,17 +260,22 @@ Key optimization highlights:
 - [gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py:1-99](file://gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py#L1-L99)
 - [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py:1-136](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L1-L136)
 - [gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py:1-148](file://gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py#L1-L148)
-- [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
-- [src/kernels/cute/gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
+- [src/kernels/ptx/README.md:1-172](file://src/kernels/ptx/README.md#L1-L172)
+- [src/kernels/ptx/gdn_decode_ptx.cuh:1-456](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L456)
+- [src/kernels/ptx/gdn_prefill_ptx.cuh:1-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [src/kernels/cute_dsl/gdn_prefill_dsl.py:1-323](file://src/kernels/cute_dsl/gdn_prefill_dsl.py#L1-L323)
 - [src/kernels/cuda/gdn_decode_v7.cuh:1-200](file://src/kernels/cuda/gdn_decode_v7.cuh#L1-L200)
 - [src/kernels/cuda/gdn_decode_v8.cuh:1-200](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L200)
+- [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
+- [src/kernels/cute/gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
 - [docs/ROOFLINE.md:1-89](file://docs/ROOFLINE.md#L1-L89)
 - [docs/ZHIHU_GDN_TENSOR_CORE.md:7-690](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L7-L690)
 - [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
 - [src/kernels/cutile/README.md:1-64](file://src/kernels/cutile/README.md#L1-L64)
 
 ## Architecture Overview
-The optimization pipeline addresses the three fundamental GDN bottlenecks through specialized approaches for decode and prefill phases. The architecture recognizes that GDN's core resource is state rather than computation, requiring fundamentally different optimization strategies.
+The optimization pipeline addresses the three fundamental GDN bottlenecks through specialized approaches for decode and prefill phases, now enhanced with PTX optimization techniques and CuTe DSL compilation pipeline. The architecture recognizes that GDN's core resource is state rather than computation, requiring fundamentally different optimization strategies.
 
 ```mermaid
 sequenceDiagram
@@ -239,13 +283,17 @@ participant User as "User"
 participant Bench as "Bench Runner"
 participant Pack as "Pack Script"
 participant StateOpt as "State Optimization"
+participant PTX as "PTX Optimization"
+participant DSL as "CuTe DSL Pipeline"
 participant Sol as "Triton/CUDA Kernel"
 participant Base as "PyTorch Baseline"
 User->>Bench : "Run benchmark (decode/prefill)"
 Bench->>Pack : "Build solution dict"
 Pack-->>Bench : "Solution JSON"
 Bench->>StateOpt : "Apply state optimization strategies"
-StateOpt->>Sol : "Optimized kernel with bottleneck handling"
+StateOpt->>PTX : "Embed PTX assembly optimizations"
+PTX->>DSL : "MLIR compilation pipeline"
+DSL->>Sol : "Optimized kernel with bottleneck handling"
 Sol->>Sol : "Adaptive BLOCK_V sizing"
 Sol->>Sol : "Vectorized memory access"
 Sol->>Sol : "Quantization (FP4/FP8)"
@@ -265,6 +313,9 @@ Bench-->>User : "Speedup report"
 - [scripts/bench_all_versions.py:1-200](file://scripts/bench_all_versions.py#L1-L200)
 - [gdn_decode_qk4_v8_d128_k_last/scripts/pack_solution.py:20-52](file://gdn_decode_qk4_v8_d128_k_last/scripts/pack_solution.py#L20-L52)
 - [gdn_prefill_qk4_v8_d128_k_last/scripts/pack_solution.py:20-52](file://gdn_prefill_qk4_v8_d128_k_last/scripts/pack_solution.py#L20-L52)
+- [src/kernels/ptx/README.md:52-172](file://src/kernels/ptx/README.md#L52-L172)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:10-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L10-L442)
+- [scripts/bench_cute_dsl_vs_cpp.py:301-323](file://scripts/bench_cute_dsl_vs_cpp.py#L301-L323)
 - [src/kernels/cuda/gdn_decode_v7.cuh:85-125](file://src/kernels/cuda/gdn_decode_v7.cuh#L85-L125)
 - [src/kernels/cuda/gdn_decode_v8.cuh:135-158](file://src/kernels/cuda/gdn_decode_v8.cuh#L135-L158)
 - [src/kernels/cute/gdn_decode_v9.cuh:65-90](file://src/kernels/cute/gdn_decode_v9.cuh#L65-L90)
@@ -419,13 +470,15 @@ NextVB --> |No| End(["Finish"])
 - Async memory copy operations:
   - cp.async for overlapping memory transfers with computation.
   - Improved bandwidth utilization through asynchronous data movement.
-- CuTe DSL memory optimization:
-  - Layout abstractions for efficient tensor operations.
-  - TMA (Tensor Memory Accelerator) support for bulk memory transfers.
-  - Automatic bank conflict resolution through swizzle patterns.
-- Emerging GPU programming models:
-  - cuTile Python API for high-level tile-based programming.
-  - CUTLASS 4.0 DSL for advanced tensor operations and layout management.
+- **NEW**: PTX embedded assembly optimizations:
+  - Direct control over memory operations with cache hints (ld.global.nc, st.global.wb)
+  - Warp shuffle instructions for reduction without shared memory
+  - Fast math approximations (ex2.approx, lg2.approx, rcp.approx)
+  - Predicated execution for branchless operations
+- **NEW**: MLIR-based CuTe DSL compilation pipeline:
+  - Automatic optimization passes: TileAndFuse, VectorizeSmem, SwizzleElimination, AsyncCopyInsertion
+  - Python-to-MLIR-to-LLVM-to-PTX compilation chain
+  - JIT compilation with automatic performance optimization
 - Contiguity and caching:
   - Contiguous tensors are prepared before kernel launch to minimize pointer indirection and improve cache locality.
 
@@ -434,7 +487,8 @@ Concrete examples:
 - Grid sizing: (B, H=8, V_BLOCKS) for decode; (N, H=8, V_BLOCKS) for prefill.
 - Stride passing: Explicit strides passed to kernel to support coalesced access.
 - CUDA v5 shared memory layout: Separate sections for Q, K, V, state tiles, and intermediate results.
-- CuTe swizzle patterns: XOR-based index transformation to avoid shared memory bank conflicts.
+- **NEW**: PTX assembly primitives: shfl.sync.bfly.b32 for warp reductions, fma.rn.f32 for fused multiply-add.
+- **NEW**: MLIR optimization passes: Automatic bank conflict resolution, vectorization, and async copy insertion.
 - Mathematical swizzle implementation: d ^ ((d >> 3) & 7) for 32-bank SMEM systems.
 
 **Section sources**
@@ -447,6 +501,7 @@ Concrete examples:
 - [src/kernels/gdn_prefill_v5.cuh:85-93](file://src/kernels/gdn_prefill_v5.cuh#L85-L93)
 - [src/kernels/cute/gdn_decode_v9.cuh:65-90](file://src/kernels/cute/gdn_decode_v9.cuh#L65-L90)
 - [src/kernels/cute/gdn_decode_v10.cuh:48-62](file://src/kernels/cute/gdn_decode_v10.cuh#L48-L62)
+- [src/kernels/ptx/README.md:52-172](file://src/kernels/ptx/README.md#L52-L172)
 - [src/kernels/cute/README.md:34-79](file://src/kernels/cute/README.md#L34-L79)
 - [src/kernels/cutile/README.md:1-64](file://src/kernels/cutile/README.md#L1-L64)
 
@@ -591,6 +646,16 @@ Enhanced glossary definitions for emerging GPU programming models:
 - **Performance**: ~100% performance of C++ CuTe with Python syntax
 - **Integration**: Native DLPack support for framework interoperability
 
+#### **NEW**: MLIR-Based CuTe DSL Compilation Pipeline
+- **Compilation Chain**: Python DSL → MLIR → LLVM → PTX → SASS
+- **Automatic Optimization Passes**:
+  - TileAndFuse: Automatic tiling and fusion of operations
+  - VectorizeSmem: Vectorization of shared memory operations
+  - SwizzleElimination: Automatic bank conflict resolution
+  - AsyncCopyInsertion: Insertion of async memory copy operations
+- **Advantages**: Higher-level abstraction with automatic performance optimization
+- **Integration**: JIT compilation with automatic performance tuning
+
 #### Programming Model Comparison
 | Aspect | Raw CUDA | CuTe C++ | CuTe DSL | cuTile | Triton |
 |--------|----------|----------|----------|--------|--------|
@@ -612,10 +677,14 @@ Enhanced glossary definitions for emerging GPU programming models:
 - **CuTe DSL**: CUTLASS 4.0 Python interface for tensor operations
 - **cuTile**: NVIDIA's new Python GPU programming model (2025.12)
 - **TMA**: Tensor Memory Accelerator for asynchronous memory operations
+- **PTX**: NVIDIA's low-level virtual machine instruction set for maximum control
+- **MLIR**: Multi-Level Intermediate Representation for compiler optimization
 
 **Section sources**
 - [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
 - [src/kernels/cutile/README.md:1-64](file://src/kernels/cutile/README.md#L1-L64)
+- [src/kernels/ptx/README.md:52-172](file://src/kernels/ptx/README.md#L52-L172)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:10-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L10-L442)
 - [docs/ZHIHU_GDN_TENSOR_CORE.md:7-30](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L7-L30)
 
 ### FP4/FP8 Quantization Techniques
@@ -703,6 +772,99 @@ K --> L
 **Section sources**
 - [src/kernels/cuda/gdn_decode_v8.cuh:1-200](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L200)
 
+### **NEW**: PTX Optimization Techniques with Embedded Assembly
+Comprehensive PTX optimization strategies for maximum performance control:
+
+#### PTX Assembly Primitives
+- **Warp Shuffle Operations**: `shfl.sync.bfly.b32` for warp-level reductions without shared memory
+- **Fast Math Approximations**: `ex2.approx.f32`, `lg2.approx.f32`, `rcp.approx.f32` for 2-3x faster math
+- **Fused Multiply-Add**: `fma.rn.f32` for single rounding with improved precision
+- **Memory Operations**: `ld.global.nc.f32` and `st.global.wb.f32` for cache hint control
+- **Predicated Execution**: `selp.f32` for branchless conditional operations
+
+#### Embedded Assembly Benefits
+- **Direct Control**: Bypass CUDA intrinsic limitations for maximum performance
+- **Cache Behavior**: Control L1/L2 cache bypass for streaming workloads
+- **Branch-Free**: Eliminate control flow divergence for better occupancy
+- **Single Rounding**: FMA operations provide better numerical precision
+
+#### PTX Implementation Examples
+- **Decode Kernel**: Embedded PTX assembly for gates, decay, and output computation
+- **Prefill Kernel**: Chunked processing with PTX fast math for compute density
+- **Memory Operations**: Non-coherent loads and write-back stores for optimal bandwidth
+- **Warp Reductions**: Butterfly shuffle pattern for efficient intra-warp summation
+
+```mermaid
+flowchart TD
+A["PTX Assembly Optimization"] --> B["Warp Shuffle Reductions"]
+A --> C["Fast Math Approximations"]
+A --> D["Fused Multiply-Add"]
+A --> E["Cache Hint Control"]
+B --> B1["shfl.sync.bfly.b32"]
+C --> C1["ex2.approx.f32"]
+C --> C2["lg2.approx.f32"]
+C --> C3["rcp.approx.f32"]
+D --> D1["fma.rn.f32"]
+E --> E1["ld.global.nc.f32"]
+E --> E2["st.global.wb.f32"]
+```
+
+**Diagram sources**
+- [src/kernels/ptx/README.md:52-172](file://src/kernels/ptx/README.md#L52-L172)
+- [src/kernels/ptx/gdn_decode_ptx.cuh:31-147](file://src/kernels/ptx/gdn_decode_ptx.cuh#L31-L147)
+- [src/kernels/ptx/gdn_prefill_ptx.cuh:34-79](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L34-L79)
+
+**Section sources**
+- [src/kernels/ptx/README.md:1-172](file://src/kernels/ptx/README.md#L1-L172)
+- [src/kernels/ptx/gdn_decode_ptx.cuh:1-456](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L456)
+- [src/kernels/ptx/gdn_prefill_ptx.cuh:1-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
+
+### **NEW**: CuTe DSL Compilation Pipeline with MLIR Optimization
+Advanced compilation pipeline for automatic kernel optimization:
+
+#### MLIR-Based Compilation Chain
+- **Python DSL**: High-level CuTe DSL syntax for tensor operations
+- **MLIR Dialects**: Automatic translation to MLIR with tensor operations
+- **Optimization Passes**: TileAndFuse, VectorizeSmem, SwizzleElimination, AsyncCopyInsertion
+- **LLVM IR**: Target-independent optimization and code generation
+- **PTX Generation**: Final PTX assembly for GPU execution
+
+#### Automatic Optimization Features
+- **TileAndFuse**: Automatically fuse operations and apply tiling for cache efficiency
+- **VectorizeSmem**: Vectorize shared memory operations for bandwidth optimization
+- **SwizzleElimination**: Automatic bank conflict resolution through swizzle patterns
+- **AsyncCopyInsertion**: Insert async memory copy operations for overlap
+
+#### Performance Characteristics
+- **JIT Compilation**: On-the-fly compilation with automatic performance tuning
+- **Framework Interop**: Native DLPack support for seamless integration
+- **Optimization Quality**: ~100% of theoretical performance when properly optimized
+- **Development Speed**: Significantly reduced development time compared to manual optimization
+
+```mermaid
+flowchart TD
+A["Python CuTe DSL"] --> B["MLIR Translation"]
+B --> C["Automatic Optimization Passes"]
+C --> D["LLVM IR Generation"]
+D --> E["PTX Assembly"]
+E --> F["GPU Execution"]
+C --> C1["TileAndFuse"]
+C --> C2["VectorizeSmem"]
+C --> C3["SwizzleElimination"]
+C --> C4["AsyncCopyInsertion"]
+```
+
+**Diagram sources**
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:10-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L10-L442)
+- [src/kernels/cute_dsl/gdn_prefill_dsl.py:15-323](file://src/kernels/cute_dsl/gdn_prefill_dsl.py#L15-L323)
+- [scripts/bench_cute_dsl_vs_cpp.py:301-323](file://scripts/bench_cute_dsl_vs_cpp.py#L301-L323)
+
+**Section sources**
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [src/kernels/cute_dsl/gdn_prefill_dsl.py:1-323](file://src/kernels/cute_dsl/gdn_prefill_dsl.py#L1-L323)
+- [scripts/bench_cute_dsl_vs_cpp.py:301-323](file://scripts/bench_cute_dsl_vs_cpp.py#L301-L323)
+
 ### Roofline Analysis and Performance Modeling
 Hardware targets and optimization strategy derived from roofline analysis:
 
@@ -719,6 +881,8 @@ Hardware targets and optimization strategy derived from roofline analysis:
 - Leverage quantization techniques to reduce memory bandwidth requirements.
 - Apply CuTe DSL optimization for improved memory access patterns.
 - Implement Swizzle bank conflict elimination for optimal shared memory utilization.
+- **NEW**: Use PTX assembly for 5-10% performance gains in critical paths.
+- **NEW**: Leverage MLIR optimization passes for automatic performance tuning.
 
 #### Observed Performance
 - Decode: up to ~1359x speedup over baseline at batch=64.
@@ -726,6 +890,8 @@ Hardware targets and optimization strategy derived from roofline analysis:
 - CUDA v5 shows improved bandwidth utilization through vectorization and async operations.
 - FP4/FP8 quantization achieves 1.46x speedup at batch=256 through memory compression.
 - Swizzle patterns achieve 8× bandwidth improvement in shared memory access.
+- **NEW**: PTX assembly provides 5-10% additional speedup in compute-intensive kernels.
+- **NEW**: MLIR optimization achieves comparable performance to hand-tuned CuTe C++ kernels.
 
 ```mermaid
 flowchart TD
@@ -734,7 +900,7 @@ B --> C["Compute arithmetic intensity (FLOPs/bytes)"]
 C --> D{"Intensity vs Ridge Point?"}
 D --> |Low| E["Improve bandwidth utilization<br/>coalesced access, chunking, vectorization"]
 D --> |High| F["Improve compute utilization<br/>fuse ops, reduce overhead"]
-E --> G["Iterate on layout/blocking<br/>vectorized loads, async copies, quantization, swizzle"]
+E --> G["Iterate on layout/blocking<br/>vectorized loads, async copies, quantization, swizzle, PTX"]
 F --> G
 G --> A
 ```
@@ -766,7 +932,8 @@ Baseline characteristics and improvements:
 - Cooperative loading mechanisms for efficient shared memory usage.
 - Async memory copy operations (cp.async) for overlapping computation and memory transfer.
 - Template-based kernel design for compile-time BLOCK_V optimization.
-- CuTe DSL integration for advanced memory optimization and layout management.
+- **NEW**: PTX embedded assembly for maximum performance control in critical paths.
+- **NEW**: CuTe DSL compilation pipeline with MLIR-based automatic optimization.
 - Quantization support for FP4/FP8 precision modes with lookup tables.
 - Warp specialization for producer/consumer optimization patterns.
 - Swizzle bank conflict elimination for optimal shared memory utilization.
@@ -774,6 +941,7 @@ Baseline characteristics and improvements:
 #### Emerging Programming Models
 - cuTile Python API for future high-level programming.
 - CUTLASS 4.0 DSL for advanced tensor operations.
+- **NEW**: MLIR-based compilation pipeline for automatic optimization.
 - Planning for cuTile v11 implementation.
 
 #### Performance Gains
@@ -782,19 +950,25 @@ Baseline characteristics and improvements:
 - CUDA v5 provides additional performance improvements through hardware-specific optimizations.
 - Quantization techniques achieve 1.46x speedup at memory-bound workloads.
 - Swizzle patterns achieve 8× bandwidth improvement in shared memory access.
+- **NEW**: PTX assembly provides 5-10% additional speedup in compute-intensive kernels.
+- **NEW**: MLIR optimization achieves competitive performance with hand-tuned kernels.
 
 ```mermaid
 sequenceDiagram
 participant Py as "PyTorch Baseline"
 participant Triton as "Triton Kernel"
 participant CUDA as "CUDA v5 Kernel"
+participant PTX as "PTX Optimization"
+participant DSL as "CuTe DSL Pipeline"
 participant Advanced as "Advanced CUDA"
 participant Emerging as "Emerging Models"
 Py->>Py : "Sequential loops, repeated head expansion"
 Py->>Triton : "Fused kernel with V-split"
 Triton->>CUDA : "Hardware-optimized implementation"
-CUDA->>Advanced : "CuTe DSL + Quantization + Warp Spec"
-Advanced->>Emerging : "cuTile + CUTLASS 4.0"
+CUDA->>PTX : "Embedded assembly optimizations"
+PTX->>DSL : "MLIR compilation pipeline"
+DSL->>Advanced : "Automatic optimization"
+Advanced->>Emerging : "cuTile + Future Models"
 Emerging-->>Emerging : "Swizzle + Advanced Programming"
 Triton-->>Py : "Reduced Python overhead"
 Advanced-->>CUDA : "Advanced memory optimization"
@@ -810,7 +984,8 @@ Emerging-->>Emerging : "Future-proof architecture"
 - [gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py:97-148](file://gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py#L97-L148)
 - [gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py:199-248](file://gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py#L199-L248)
 - [gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py:209-256](file://gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py#L209-L256)
-- [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
+- [src/kernels/ptx/gdn_decode_ptx.cuh:1-456](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L456)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
 - [src/kernels/cuda/gdn_decode_v7.cuh:1-200](file://src/kernels/cuda/gdn_decode_v7.cuh#L1-L200)
 - [src/kernels/cuda/gdn_decode_v8.cuh:1-200](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L200)
 - [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
@@ -823,6 +998,8 @@ Emerging-->>Emerging : "Future-proof architecture"
 - [gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py:97-148](file://gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py#L97-L148)
 - [gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py:199-248](file://gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py#L199-L248)
 - [gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py:209-256](file://gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py#L209-L256)
+- [src/kernels/ptx/README.md:1-172](file://src/kernels/ptx/README.md#L1-L172)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
 - [docs/PERFORMANCE.md:14-48](file://docs/PERFORMANCE.md#L14-L48)
 
 ### CUDA v5 Optimization Techniques
@@ -860,7 +1037,7 @@ Comprehensive hardware-specific optimizations for B200 architecture:
 - [gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py:209-215](file://gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py#L209-L215)
 - [gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py:220-224](file://gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py#L220-L224)
 
-### Kernel Evolution Roadmap (v1 to v10)
+### Kernel Evolution Roadmap (v1 to v11)
 Comprehensive kernel evolution documentation:
 
 #### Version Progression
@@ -874,13 +1051,16 @@ Comprehensive kernel evolution documentation:
 - **v8**: FP8 quantization + warp specialization
 - **v9**: CuTe DSL with manual swizzle implementation
 - **v10**: CuTe layout algebra with automatic bank conflict resolution
+- **v11**: PTX embedded assembly for maximum performance control
 
 #### Performance Achievements
 - **v5**: 2,834 GB/s achieved at batch=256 (35% of B200 peak)
 - **v7**: 1.46x speedup at batch=256 through FP4 quantization
 - **v8**: 1.45x speedup at batch=256 through FP8 quantization + warp spec
 - **v9/v10**: Similar performance with v9 slightly faster at small batches
+- **v11**: 5-10% additional speedup through PTX assembly optimizations
 - **Swizzle**: 8× bandwidth improvement in shared memory access
+- **MLIR**: Automatic optimization achieving competitive performance
 
 #### Technical Milestones
 - **Memory-bound optimization**: FP4/FP8 quantization for bandwidth reduction
@@ -889,6 +1069,8 @@ Comprehensive kernel evolution documentation:
 - **Pipeline optimization**: Producer/consumer warp division for bandwidth maximization
 - **Bank conflict elimination**: Swizzle patterns for optimal shared memory utilization
 - **Emerging models**: cuTile and CUTLASS 4.0 for future programming paradigms
+- **NEW**: PTX assembly for maximum performance control
+- **NEW**: MLIR-based automatic optimization pipeline
 
 **Section sources**
 - [docs/ROADMAP.md:1-180](file://docs/ROADMAP.md#L1-L180)
@@ -896,6 +1078,8 @@ Comprehensive kernel evolution documentation:
 - [src/kernels/cuda/gdn_decode_v8.cuh:1-200](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L200)
 - [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
 - [src/kernels/cute/gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
+- [src/kernels/ptx/README.md:1-172](file://src/kernels/ptx/README.md#L1-L172)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
 
 ## Dependency Analysis
 Build and packaging dependencies:
@@ -903,20 +1087,25 @@ Build and packaging dependencies:
 #### Build and packaging
 - Solutions are packed from config.toml and solution/triton/kernel.py into solution.json for benchmarking.
 - Advanced CUDA kernels are built through JIT compilation with proper error handling and fallback to Triton.
+- **NEW**: PTX kernels require embedded assembly compilation with proper PTX generation.
+- **NEW**: CuTe DSL kernels require MLIR compilation pipeline with automatic optimization passes.
 - CuTe kernels require CUTLASS headers and are conditionally compiled based on availability.
 - Emerging models (cuTile) require CUDA 13.1+ and are in planning phase.
 
 #### Benchmarking
 - Bench runner constructs solution dictionaries, runs on Modal B200, and compares against baseline when requested.
 - Support for running CUDA v5 kernels alongside Triton implementations for direct comparison.
-- Unified benchmark script supports all kernel versions (v5-v8) with configurable batch sizes.
+- **NEW**: Benchmarking includes PTX and CuTe DSL kernel comparisons.
+- Unified benchmark script supports all kernel versions (v5-v11) with configurable batch sizes.
 - Performance tracking includes swizzle and tensor core utilization metrics.
+- **NEW**: MLIR optimization pass analysis and performance comparison.
 
 #### Tracing and definitions
 - Workload definitions describe shapes, constraints, and data types for decode and prefill.
 - Roadmap documentation provides comprehensive version history and performance comparisons.
 - Emerging model documentation tracks cuTile and CUTLASS 4.0 development status.
 - State optimization documentation provides comprehensive analysis of GDN bottlenecks.
+- **NEW**: PTX and MLIR optimization documentation for emerging GPU programming models.
 
 ```mermaid
 graph LR
@@ -929,8 +1118,11 @@ CUDA_V7["src/kernels/cuda/gdn_decode_v7.cuh"] --> SOL_CUDA
 CUDA_V8["src/kernels/cuda/gdn_decode_v8.cuh"] --> SOL_CUDA
 CUDA_V9["src/kernels/cute/gdn_decode_v9.cuh"] --> SOL_CUDA
 CUDA_V10["src/kernels/cute/gdn_decode_v10.cuh"] --> SOL_CUDA
+CUDA_V11["src/kernels/ptx/gdn_decode_ptx.cuh"] --> SOL_CUDA
+DSL_SRC["src/kernels/cute_dsl/gdn_decode_dsl_optimized.py"] --> SOL_CUDA
 PACK --> BENCH["benchmarks/bench_modal.py"]
 PACK --> ALL_BENCH["scripts/bench_all_versions.py"]
+PACK --> DSL_BENCH["scripts/bench_cute_dsl_vs_cpp.py"]
 DEF1["gdn_decode_qk4_v8_d128_k_last.json"] --> BENCH
 DEF2["gdn_prefill_qk4_v8_d128_k_last.json"] --> BENCH
 ROADMAP["docs/ROADMAP.md"] --> ALL_BENCH
@@ -938,6 +1130,8 @@ STATE_OPT["docs/ZHIHU_GDN_STATE_OPTIMIZATION.md"] --> ALL_BENCH
 CUTLASS["src/kernels/cute/README.md"] --> SOL_CUDA
 CUTILE["src/kernels/cutile/README.md"] --> SOL_CUDA
 TC_EVOLUTION["docs/ZHIHU_GDN_TENSOR_CORE.md"] --> SOL_CUDA
+PTX_README["src/kernels/ptx/README.md"] --> SOL_CUDA
+DSL_README["src/kernels/cute_dsl/README.md"] --> SOL_CUDA
 ```
 
 **Diagram sources**
@@ -947,10 +1141,13 @@ TC_EVOLUTION["docs/ZHIHU_GDN_TENSOR_CORE.md"] --> SOL_CUDA
 - [gdn_prefill_qk4_v8_d128_k_last/scripts/pack_solution.py:20-52](file://gdn_prefill_qk4_v8_d128_k_last/scripts/pack_solution.py#L20-L52)
 - [benchmarks/bench_modal.py:74-103](file://benchmarks/bench_modal.py#L74-L103)
 - [scripts/bench_all_versions.py:1-200](file://scripts/bench_all_versions.py#L1-L200)
+- [scripts/bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
 - [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json:1-153](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L1-L153)
 - [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json:1-156](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json#L1-L156)
 - [docs/ROADMAP.md:1-180](file://docs/ROADMAP.md#L1-L180)
 - [docs/ZHIHU_GDN_STATE_OPTIMIZATION.md:1-507](file://docs/ZHIHU_GDN_STATE_OPTIMIZATION.md#L1-L507)
+- [src/kernels/ptx/README.md:1-172](file://src/kernels/ptx/README.md#L1-L172)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
 - [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
 - [src/kernels/cutile/README.md:1-64](file://src/kernels/cutile/README.md#L1-L64)
 - [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
@@ -960,6 +1157,7 @@ TC_EVOLUTION["docs/ZHIHU_GDN_TENSOR_CORE.md"] --> SOL_CUDA
 - [gdn_prefill_qk4_v8_d128_k_last/scripts/pack_solution.py:20-52](file://gdn_prefill_qk4_v8_d128_k_last/scripts/pack_solution.py#L20-L52)
 - [benchmarks/bench_modal.py:74-103](file://benchmarks/bench_modal.py#L74-L103)
 - [scripts/bench_all_versions.py:1-200](file://scripts/bench_all_versions.py#L1-L200)
+- [scripts/bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
 - [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json:1-153](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L1-L153)
 - [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json:1-156](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json#L1-L156)
 
@@ -973,18 +1171,23 @@ Parameter tuning and hardware-specific adaptations:
 #### Hardware-specific adaptations
 - B200 peak BF16 tensor core throughput and HBM bandwidth inform roofline targets.
 - CUDA v5 optimizations specifically target B200 architecture (sm100).
+- **NEW**: PTX assembly optimizations target maximum performance on B200.
+- **NEW**: MLIR optimization pipeline leverages automatic performance tuning.
 - CuTe DSL optimizations leverage CUTLASS 3.x for advanced memory management.
 - Quantization techniques optimized for FP4/FP8 hardware acceleration.
 - Swizzle patterns optimized for 32-bank shared memory systems.
 - Emerging models (cuTile) planned for CUDA 13.1+ environments.
 - Optimization emphasis on coalesced HBM access, register pressure reduction, and vectorized operations.
 
-#### CUDA vs Triton comparison
+#### CUDA vs Triton vs PTX vs DSL comparison
 - CUDA v5 provides hardware-specific optimizations for B200
 - Triton offers portability and ease of deployment
-- Advanced CUDA kernels (v7-v10) provide specialized optimizations
+- **NEW**: PTX provides maximum performance control with embedded assembly
+- **NEW**: CuTe DSL offers automatic optimization through MLIR pipeline
+- Advanced CUDA kernels (v7-v11) provide specialized optimizations
 - Emerging models (cuTile) offer future scalability
-- Both implement identical algorithmic optimizations
+- Both PTX and DSL implement identical algorithmic optimizations
+- **NEW**: PTX focuses on micro-optimizations, DSL on macro-optimizations
 
 #### Quantization performance impact
 - FP4 quantization: 4× memory reduction, 1.46x speedup at batch=256
@@ -1001,12 +1204,21 @@ Parameter tuning and hardware-specific adaptations:
 - Prefill stage: Can utilize tcgen05.mma for GEMM operations
 - Performance limited by arithmetic intensity rather than compute capability
 
+#### **NEW**: PTX vs DSL Performance Analysis
+- **PTX Advantages**: Maximum micro-optimization control, 5-10% performance gains
+- **PTX Disadvantages**: Reduced portability, increased development complexity
+- **DSL Advantages**: Automatic optimization, easier development, competitive performance
+- **DSL Disadvantages**: Less fine-grained control, potential missed micro-optimizations
+- **Recommendation**: Use PTX for maximum performance, DSL for development speed
+
 #### Practical guidance
 - Prefer fused kernels with tiled state access for memory-bound regimes.
 - Use V-dimension splitting for improved occupancy at small batches.
 - Choose CUDA v5 for maximum performance on B200 hardware, Triton for portability.
 - Use FP4 quantization for memory-bound workloads, FP8 for balanced scenarios.
-- Consider CuTe DSL kernels for advanced memory optimization needs.
+- Consider CuTe DSL kernels for automatic optimization needs.
+- **NEW**: Use PTX assembly for critical compute kernels requiring maximum performance.
+- **NEW**: Use CuTe DSL for development speed with automatic optimization.
 - Plan for cuTile adoption when CUDA 13.1+ becomes available.
 - Validate with trace-driven benchmarks to ensure correctness and performance.
 
@@ -1025,18 +1237,22 @@ Common issues and solutions:
 - Ensure tensors are contiguous before kernel launch to maintain coalesced access.
 - CUDA v5 requires proper tensor contiguity for vectorized memory operations.
 - CuTe kernels require proper alignment for swizzled memory access.
+- **NEW**: PTX kernels require proper alignment for embedded assembly operations.
 - Swizzle patterns require proper bank alignment for optimal performance.
 
 #### Benchmark configuration
 - Adjust warmup, iterations, and trials via bench runner arguments for stable measurements.
 - Unified benchmark script supports all kernel versions with configurable parameters.
 - Performance metrics include swizzle and tensor core utilization tracking.
+- **NEW**: PTX and DSL benchmarking requires proper MLIR and PTX compilation setup.
 
 #### CUDA JIT compilation issues
 - CUDA v5 kernels fall back to Triton implementation if JIT compilation fails.
 - Check for proper CUDA toolkit installation and environment setup.
 - Verify Modal B200 GPU availability and proper volume mounting.
 - CuTe kernels require CUTLASS headers and conditional compilation.
+- **NEW**: PTX kernels require embedded assembly compilation support.
+- **NEW**: CuTe DSL kernels require MLIR compilation pipeline installation.
 - Emerging models (cuTile) require CUDA 13.1+ and proper environment setup.
 
 #### Quantization errors
@@ -1054,6 +1270,18 @@ Common issues and solutions:
 - Check index transformation correctness for logical-to-physical mapping.
 - Ensure proper shared memory layout for swizzled access patterns.
 
+#### **NEW**: PTX Assembly Issues
+- Verify proper PTX syntax and instruction availability for target architecture.
+- Check embedded assembly compilation flags and optimization levels.
+- Ensure proper register usage and occupancy with PTX intrinsics.
+- Validate memory operation cache hints and alignment requirements.
+
+#### **NEW**: MLIR Compilation Issues
+- Verify MLIR installation and proper dialect support.
+- Check automatic optimization pass configuration and performance impact.
+- Ensure proper LLVM backend selection for target GPU architecture.
+- Validate JIT compilation timing and performance characteristics.
+
 #### Emerging model compatibility
 - Verify CUDA version compatibility for cuTile (13.1+) and CUTLASS 4.0.
 - Check for proper installation of emerging model dependencies.
@@ -1065,12 +1293,21 @@ Common issues and solutions:
 - Ensure proper memory layout optimization for state tensors.
 - Validate that stability constraints are met for chosen precision levels.
 
+#### **NEW**: Mixed Framework Issues
+- Ensure compatibility between PTX assembly and CuTe DSL optimizations.
+- Verify proper resource allocation for multiple optimization frameworks.
+- Check for conflicts in shared memory usage between different optimization approaches.
+- Validate performance trade-offs between micro and macro optimizations.
+
 **Section sources**
 - [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py:97-109](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L97-L109)
 - [gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py:111-124](file://gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py#L111-L124)
 - [gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py:27-92](file://gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py#L27-L92)
 - [benchmarks/bench_modal.py:241-330](file://benchmarks/bench_modal.py#L241-L330)
 - [scripts/bench_all_versions.py:1-200](file://scripts/bench_all_versions.py#L1-L200)
+- [scripts/bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
+- [src/kernels/ptx/README.md:1-172](file://src/kernels/ptx/README.md#L1-L172)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
 - [src/kernels/cuda/gdn_decode_v7.cuh:85-125](file://src/kernels/cuda/gdn_decode_v7.cuh#L85-L125)
 - [src/kernels/cuda/gdn_decode_v8.cuh:175-184](file://src/kernels/cuda/gdn_decode_v8.cuh#L175-L184)
 - [src/kernels/cute/README.md:34-79](file://src/kernels/cute/README.md#L34-L79)
@@ -1080,18 +1317,24 @@ Common issues and solutions:
 ## Conclusion
 The GDN kernels achieve substantial performance gains by combining V-dimension splitting, GVA head expansion, fused operations, and optimal memory layouts. The comprehensive state optimization documentation reveals that GDN's core challenge lies not in computational complexity, but in three fundamental bottlenecks: state recursion, memory bandwidth, and numerical stability.
 
-Advanced CUDA kernels introduce sophisticated optimizations including CuTe DSL memory optimization with swizzled shared memory layouts, FP4/FP8 quantization techniques with lookup tables and vectorized packing, and warp specialization patterns for producer/consumer optimization. The kernel evolution roadmap demonstrates systematic progress from v1 to v10, with each version addressing specific performance bottlenecks and hardware constraints.
+**NEW ADVANCES**: The latest kernel evolution introduces PTX optimization techniques with embedded assembly instructions, providing 5-10% performance gains through direct control over warp shuffle, fast math, and memory operations. The CuTe DSL compilation pipeline with MLIR-based automatic optimization delivers competitive performance with significantly reduced development complexity, achieving ~100% of theoretical performance through automatic optimization passes.
+
+Advanced CUDA kernels introduce sophisticated optimizations including CuTe DSL memory optimization with swizzled shared memory layouts, FP4/FP8 quantization techniques with lookup tables and vectorized packing, and warp specialization patterns for producer/consumer optimization. The kernel evolution roadmap demonstrates systematic progress from v1 to v11, with each version addressing specific performance bottlenecks and hardware constraints.
 
 The expanded technical depth now includes comprehensive coverage of Swizzle memory access patterns with mathematical foundations, detailed Tensor Core evolution from mma.sync to tcgen05.mma, and enhanced glossary definitions for emerging GPU programming concepts. The state optimization analysis provides crucial insights into why GDN requires fundamentally different optimization strategies than traditional attention mechanisms.
 
-Roofline analysis guided the focus on bandwidth utilization and occupancy improvements, while quantization techniques address memory-bound regimes at large batch sizes. The latest CUDA kernels (v7-v10) provide additional performance improvements through hardware-specific optimizations, making them the preferred choice for B200 deployments while Triton maintains portability across different hardware configurations.
+Roofline analysis guided the focus on bandwidth utilization and occupancy improvements, while quantization techniques address memory-bound regimes at large batch sizes. The latest CUDA kernels (v7-v11) provide additional performance improvements through hardware-specific optimizations, making them the preferred choice for B200 deployments while Triton maintains portability across different hardware configurations.
 
 The state optimization documentation serves as a foundation for understanding GDN's unique challenges and provides practical guidance for achieving optimal performance. The comprehensive roadmap ensures continued optimization and future enhancements for production deployment, with careful consideration of emerging technologies and their practical applications.
+
+**NEW CONCLUSION**: The integration of PTX assembly and MLIR-based optimization represents the cutting edge of GDN kernel optimization, offering both maximum performance control and automatic optimization capabilities. This dual approach ensures that developers can achieve optimal performance while maintaining development efficiency, positioning GDN kernels for future GPU architectures and programming models.
 
 **Section sources**
 - [docs/ZHIHU_GDN_STATE_OPTIMIZATION.md:482-507](file://docs/ZHIHU_GDN_STATE_OPTIMIZATION.md#L482-L507)
 - [README.md:134-168](file://README.md#L134-L168)
 - [docs/PERFORMANCE.md:1-144](file://docs/PERFORMANCE.md#L1-L144)
+- [src/kernels/ptx/README.md:1-172](file://src/kernels/ptx/README.md#L1-L172)
+- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
 - [src/kernels/cuda/gdn_decode_v7.cuh:1-200](file://src/kernels/cuda/gdn_decode_v7.cuh#L1-L200)
 - [src/kernels/cuda/gdn_decode_v8.cuh:1-200](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L200)
 - [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)

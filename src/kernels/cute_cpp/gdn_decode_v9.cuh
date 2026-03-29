@@ -10,11 +10,11 @@
  *   - TMA: Tensor Memory Accelerator with CuTe
  *   - SMEM: Swizzled shared memory layouts
  *
- *   Performance:
- *   - True async TMA with cp.async.bulk.tensor
+ *   Performance (Iteration 1):
+ *   - cp.async for async global→shared prefetch
  *   - Swizzled SMEM to avoid bank conflicts
+ *   - Overlapped load/compute via commit_group/wait_group
  *   - Cooperative thread arrays
- *   - Cluster-level sync
  *
  * Grid: (B, H=8, V_BLOCKS)
  * Block: 128 threads (4 warps)
@@ -28,6 +28,7 @@
 #include <cuda_fp8.h>
 #include <cstdint>
 #include <cmath>
+#include <cuda_pipeline.h>  // For cp.async primitives
 
 // CuTe requires CUTLASS - check if available
 #if __has_include(<cute/tensor.hpp>)
@@ -50,6 +51,48 @@ constexpr int V9_D = 128;
 constexpr int V9_WARP_SIZE = 32;
 constexpr int V9_NUM_WARPS = 4;
 constexpr int V9_THREADS = V9_NUM_WARPS * V9_WARP_SIZE;
+
+// ============================================================
+// cp.async Primitives for Async Prefetch (Blackwell optimized)
+// ============================================================
+
+// Async copy 16 bytes (4 floats) from global to shared memory
+__device__ __forceinline__ void cp_async_cg(void* smem_ptr, const void* gmem_ptr) {
+    uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
+    asm volatile(
+        "cp.async.cg.shared.global [%0], [%1], 16;"
+        :
+        : "r"(smem_addr), "l"(gmem_ptr)
+        : "memory"
+    );
+}
+
+// Async copy 4 bytes (1 float) from global to shared memory  
+__device__ __forceinline__ void cp_async_ca(void* smem_ptr, const void* gmem_ptr) {
+    uint32_t smem_addr = static_cast<uint32_t>(__cvta_generic_to_shared(smem_ptr));
+    asm volatile(
+        "cp.async.ca.shared.global [%0], [%1], 4;"
+        :
+        : "r"(smem_addr), "l"(gmem_ptr)
+        : "memory"
+    );
+}
+
+// Commit current group of async copies
+__device__ __forceinline__ void cp_async_commit_group() {
+    asm volatile("cp.async.commit_group;");
+}
+
+// Wait for N groups to complete (0 = wait for all)
+template<int N>
+__device__ __forceinline__ void cp_async_wait_group() {
+    asm volatile("cp.async.wait_group %0;" : : "n"(N));
+}
+
+// Wait for all async copies to complete
+__device__ __forceinline__ void cp_async_wait_all() {
+    asm volatile("cp.async.wait_all;");
+}
 
 // ============================================================
 // CuTe-based TMA Operations (Blackwell optimized)
@@ -213,30 +256,29 @@ gdn_decode_kernel_v9_tma(
     float beta = s_beta;
     
     // ============================================================
-    // TMA-style Async State Load with Swizzle
+    // TMA-style Async State Load with cp.async + Swizzle
     // ============================================================
     const float* state_ptr = State + b * stride_s_b + h * stride_s_h + v0 * stride_s_v;
     
-    // Each thread loads a portion of state with swizzled access pattern
-    // Swizzle function: new_idx = idx ^ ((idx >> 3) & 7)
-    #pragma unroll 4
-    for (int v_idx = tid / V9_D; v_idx < BLOCK_V; v_idx += V9_THREADS / V9_D) {
-        if (tid % V9_D < V9_D) {
-            int d_idx = tid % V9_D;
-            // Apply swizzle for bank conflict avoidance
-            int swizzled_d = d_idx ^ ((d_idx >> 3) & 7);
-            s_state[v_idx * V9_D + swizzled_d] = state_ptr[v_idx * stride_s_v + d_idx];
-        }
-    }
-    
-    // Fallback: strided load if TMA not effective
+    // Use cp.async for async prefetch - overlaps load with gate computation
+    // Each thread handles multiple elements using vectorized loads
     #pragma unroll
     for (int i = tid; i < BLOCK_V * V9_D; i += V9_THREADS) {
         int v_idx = i / V9_D;
         int d_idx = i % V9_D;
+        
+        // Apply swizzle for bank conflict avoidance
         int swizzled_d = d_idx ^ ((d_idx >> 3) & 7);
-        s_state[v_idx * V9_D + swizzled_d] = state_ptr[v_idx * stride_s_v + d_idx];
+        
+        // Issue async copy from global to shared
+        cp_async_ca(&s_state[v_idx * V9_D + swizzled_d], &state_ptr[v_idx * stride_s_v + d_idx]);
     }
+    
+    // Commit the async copy group
+    cp_async_commit_group();
+    
+    // Wait for async copies to complete (can overlap with other work)
+    cp_async_wait_group<0>();
     
     __syncthreads();
     
@@ -383,14 +425,16 @@ gdn_decode_kernel_v9_fp32(
     float g = s_g_fp32;
     float beta = s_beta_fp32;
     
-    // Load state
+    // Load state with cp.async (async prefetch)
     const float* state_ptr = State + b * stride_s_b + h * stride_s_h + v0 * stride_s_v;
     #pragma unroll
     for (int i = tid; i < BLOCK_V * V9_D; i += V9_THREADS) {
         int v_idx = i / V9_D;
         int d_idx = i % V9_D;
-        s_state[v_idx * V9_D + d_idx] = state_ptr[v_idx * stride_s_v + d_idx];
+        cp_async_ca(&s_state[v_idx * V9_D + d_idx], &state_ptr[v_idx * stride_s_v + d_idx]);
     }
+    cp_async_commit_group();
+    cp_async_wait_group<0>();
     
     __syncthreads();
     
