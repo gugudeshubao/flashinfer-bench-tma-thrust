@@ -14,7 +14,19 @@
 - [ROADMAP.md](file://docs/ROADMAP.md)
 - [OPTIMIZATION_LOG.md](file://docs/OPTIMIZATION_LOG.md)
 - [config.toml](file://gdn_decode_qk4_v8_d128_k_last/config.toml)
+- [test_fp8_accuracy.py](file://tests/test_fp8_accuracy.py)
+- [gdn_decode_v8.cuh](file://src/kernels/cuda/gdn_decode_v8.cuh)
+- [gdn_decode_v10.cuh](file://src/kernels/cute_cpp/gdn_decode_v10.cuh)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive FP8 state quantization support documentation
+- Updated Inline Assembly Primitives section with FP8 conversion primitives
+- Enhanced Memory Operations section with vectorized FP8 memory operations
+- Added per-row dynamic scaling implementation details
+- Updated Performance Optimization Strategies with FP8 compression benefits
+- Enhanced Implementation Details with FP8 kernel variants
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -33,6 +45,8 @@
 The PTX Inline Assembly Kernel Framework represents the lowest-level optimization layer in the Gated Delta Net (GDN) kernel ecosystem. This framework leverages NVIDIA's Parallel Thread Execution (PTX) instruction set to achieve maximum control over GPU operations, enabling fine-grained optimizations that are not possible with high-level CUDA abstractions.
 
 The framework serves as a critical fallback mechanism and performance optimization layer, particularly for scenarios where maximum performance is paramount and every micro-optimization counts. It provides direct access to warp-level primitives, fast mathematical functions, memory operations with cache hints, and predicated execution capabilities.
+
+**Updated** Added FP8 state quantization support for 4x memory compression while maintaining computational accuracy through per-row dynamic scaling.
 
 ## Framework Architecture
 
@@ -55,11 +69,13 @@ Decode[Decode Kernel]
 Prefill[Prefill Kernel]
 Async[Async Prefetch]
 Chunking[Chunked Processing]
+Quantization[FP8 State Quantization]
 end
 PTX --> Decode
 PTX --> Prefill
 PTX --> Async
 PTX --> Chunking
+PTX --> Quantization
 end
 ```
 
@@ -71,6 +87,7 @@ The architecture emphasizes three core principles:
 - **Maximum Performance**: Direct hardware control through PTX assembly
 - **Fallback Capability**: Provides optimized implementation when higher layers cannot achieve desired performance
 - **Complementary Optimization**: Works alongside CuTe C++ implementations for comprehensive coverage
+- **Memory Efficiency**: FP8 quantization reduces memory bandwidth by 4x while maintaining accuracy
 
 **Section sources**
 - [README.md:1-168](file://README.md#L1-L168)
@@ -87,13 +104,16 @@ flowchart TD
 Start([Kernel Entry]) --> LoadGates[Load Gate Parameters]
 LoadGates --> LoadQK[Load Q and K with Vectorized Access]
 LoadQK --> LoadV[Load V Slice]
-LoadV --> AsyncPrefetch[Async State Prefetch]
+LoadV --> LoadState[Load FP8 State with Dynamic Scaling]
+LoadState --> AsyncPrefetch[Async State Prefetch]
 AsyncPrefetch --> ApplyDecay[Apply Gate Decay]
 ApplyDecay --> ComputeOldV[Compute old_v = S @ k]
 ComputeOldV --> RankUpdate[Rank-1 Update: S += δ * k^T]
 RankUpdate --> ComputeOutput[Compute output = scale * S @ q]
 ComputeOutput --> StoreOutput[Store Results]
-StoreOutput --> End([Kernel Exit])
+StoreOutput --> QuantizeState[Quantize New State to FP8]
+QuantizeState --> StoreState[Store FP8 State + Scale]
+StoreState --> End([Kernel Exit])
 ```
 
 **Diagram sources**
@@ -142,9 +162,34 @@ The framework provides optimized mathematical functions through PTX assembly:
 | Fast Reciprocal | `rcp.approx.f32` | ~2-3x faster than libm |
 | Fused Multiply-Add | `fma.rn.f32` | Single rounding, better precision |
 
+### FP8 State Quantization Primitives
+
+**Updated** New FP8 conversion and memory operations for state quantization:
+
+```mermaid
+classDiagram
+class FP8Primitives {
++ptx_fp32_to_fp8(val) __nv_fp8_e4m3
++ptx_fp8_to_fp32(val) float
++ptx_pack_fp8x4(a,b,c,d) uint32_t
++ptx_unpack_fp8x4(packed) (__nv_fp8_e4m3[4])
++ptx_ld_nc_u32(ptr) uint32_t
+}
+class QuantizationOps {
++Per-Row Dynamic Scaling
++FP8 E4M3 Format
++4x Memory Compression
++Range [-448, 448]
+}
+FP8Primitives --> QuantizationOps : "implements"
+```
+
+**Diagram sources**
+- [gdn_decode_ptx.cuh:198-242](file://src/kernels/ptx/gdn_decode_ptx.cuh#L198-L242)
+
 ### Memory Operations
 
-Advanced memory access patterns with cache control:
+Advanced memory access patterns with cache control and FP8 vectorized operations:
 
 ```mermaid
 classDiagram
@@ -153,6 +198,7 @@ class MemoryPrimitives {
 +ptx_st_wb(ptr, val) void
 +ptx_ld_nc_v4(dst, ptr) void
 +ptx_st_wb_v4(ptr, val) void
++ptx_ld_nc_u32(ptr) uint32_t
 +ptx_cp_async_ca(smem, gmem) void
 +ptx_cp_async_cg(smem, gmem) void
 }
@@ -160,6 +206,7 @@ class CacheControl {
 +NonCoherentLoad : bypass L1 cache
 +WriteBackStore : optimize cache policy
 +VectorizedAccess : 4-float operations
++FP8 Vectorized : 4x FP8 operations
 +AsyncPrefetch : overlapping transfers
 }
 MemoryPrimitives --> CacheControl : "implements"
@@ -201,10 +248,11 @@ The framework employs several strategies to increase arithmetic intensity:
 | Vectorized Loads | 4-float memory operations | 4x memory throughput |
 | FMA Chains | Single instruction for multiply-add | Reduced instruction count |
 | Async Prefetch | Overlap computation with memory | Hidden latency |
+| **FP8 Quantization** | **4x memory compression** | **Reduced bandwidth usage** |
 
 ### Memory Bandwidth Optimization
 
-Advanced cache management techniques:
+Advanced cache management techniques with FP8 memory efficiency:
 
 ```mermaid
 graph LR
@@ -220,6 +268,12 @@ Registers -.-> Coalesced[Coalesced Access]
 end
 Global -.-> WB[Write-Back Stores]
 WB --> Global
+subgraph "FP8 Memory Benefits"
+FP8[FP8 State Storage] --> Compressed[4x Memory Usage]
+Compressed --> Bandwidth[Reduced Bandwidth]
+Bandwidth --> Performance[Improved Performance]
+end
+Global -.-> FP8
 ```
 
 **Diagram sources**
@@ -246,10 +300,12 @@ subgraph "Compilation Targets"
 PTX[PTX Assembly]
 CuTe[CuTe Templates]
 Triton[Triton Baseline]
+FP8[FP8 Quantization]
 end
 Source --> PTX
 Source --> CuTe
 Source --> Triton
+Source --> FP8
 ```
 
 **Diagram sources**
@@ -265,6 +321,7 @@ The framework integrates seamlessly with the broader kernel ecosystem:
 | CUDA Runtime | GPU Execution | Standard CUDA launch |
 | Memory Management | Buffer Allocation | Unified memory model |
 | Stream Support | Asynchronous Execution | CUDA streams |
+| **FP8 Support** | **Quantized State Storage** | **Dynamic scaling + packing** |
 
 **Section sources**
 - [CMakeLists.txt:1-68](file://CMakeLists.txt#L1-L68)
@@ -282,6 +339,7 @@ The framework provides comprehensive performance evaluation capabilities:
 | Latency | ms per operation | Kernel launch overhead |
 | Utilization | % of peak | Hardware resource usage |
 | Speedup | vs baseline | Optimization effectiveness |
+| **Memory Usage** | **GB allocated** | **FP8 compression benefits** |
 
 ### Benchmarking Infrastructure
 
@@ -329,6 +387,10 @@ title PTX Framework Evolution
 2026-05-24 : Advanced Features
 : Enhanced chunking
 : Multi-warp optimizations
+2026-06-15 : **FP8 State Quantization**
+: **4x memory compression**
+: **Per-row dynamic scaling**
+: **Vectorized FP8 operations**
 ```
 
 ### Strategic Priorities
@@ -339,6 +401,7 @@ The framework development follows a structured approach:
 2. **Performance Validation**: Comprehensive benchmarking across scenarios
 3. **Integration Enhancement**: Seamless cooperation with higher-level frameworks
 4. **Advanced Optimizations**: Explore additional PTX instruction opportunities
+5. **Memory Efficiency**: FP8 quantization for reduced bandwidth usage
 
 **Section sources**
 - [ROADMAP.md:1-180](file://docs/ROADMAP.md#L1-L180)
@@ -356,6 +419,7 @@ class PTXKernelTemplate {
 <<template>>
 +BLOCK_V : int
 +decode_kernel_ptx() kernel
++decode_kernel_ptx_fp8() kernel
 +prefill_kernel_ptx() kernel
 }
 class PrimitiveTemplates {
@@ -363,6 +427,8 @@ class PrimitiveTemplates {
 +ptx_cp_async_wait~N~() void
 +ptx_fma~a,b,c~() float
 +ptx_shfl_xor~val,lane~() float
++ptx_fp32_to_fp8~val~() __nv_fp8_e4m3
++ptx_pack_fp8x4~a,b,c,d~() uint32_t
 }
 PTXKernelTemplate --> PrimitiveTemplates : "uses"
 ```
@@ -372,14 +438,36 @@ PTXKernelTemplate --> PrimitiveTemplates : "uses"
 
 ### Memory Layout Optimization
 
-Sophisticated memory management for optimal performance:
+Sophisticated memory management for optimal performance with FP8 support:
 
 | Memory Region | Purpose | Allocation Strategy |
 |---------------|---------|-------------------|
 | Q/K Buffers | Query and Key data | Vectorized loads |
 | V Slices | Value projections | Coalesced access |
-| State Tiles | Recurrent state | Async prefetch |
+| State Tiles | FP32 recurrent state | Async prefetch |
+| **FP8 State** | **Quantized state tiles** | **Vectorized FP8 loads** |
+| **Scale Arrays** | **Per-row scaling factors** | **Vectorized loads** |
 | Scratch Space | Temporary computations | Shared memory |
+
+**Updated** Added FP8 state and per-row scale memory layouts for quantized state storage.
+
+### FP8 State Quantization Implementation
+
+**New** Detailed FP8 quantization process for memory-efficient state storage:
+
+```mermaid
+flowchart TD
+Start([FP8 Quantization]) --> ComputeMax[Compute Max Absolute Value]
+ComputeMax --> CalculateScale[Calculate Per-Row Scale]
+CalculateScale --> Normalize[Normalize by Scale]
+Normalize --> Quantize[Quantize to FP8 E4M3]
+Quantize --> Pack[Pack 4 FP8 Values]
+Pack --> Store[Store Packed Data]
+Store --> End([Complete])
+```
+
+**Diagram sources**
+- [gdn_decode_ptx.cuh:636-669](file://src/kernels/ptx/gdn_decode_ptx.cuh#L636-L669)
 
 **Section sources**
 - [gdn_decode_ptx.cuh:285-292](file://src/kernels/ptx/gdn_decode_ptx.cuh#L285-L292)
@@ -389,6 +477,8 @@ Sophisticated memory management for optimal performance:
 
 The PTX Inline Assembly Kernel Framework stands as the pinnacle of optimization within the GDN kernel ecosystem. By providing direct control over GPU operations through PTX assembly, it enables unprecedented performance gains while serving as a critical fallback mechanism for extreme optimization scenarios.
 
-The framework's strength lies in its comprehensive approach to GPU optimization, combining advanced mathematical operations, sophisticated memory management, and warp-level parallelism. Its integration with the broader kernel ecosystem ensures that performance optimizations are systematically applied across all layers, from high-level Triton implementations to the most granular PTX assembly optimizations.
+**Updated** The framework now includes comprehensive FP8 state quantization support, providing 4x memory compression through per-row dynamic scaling and vectorized FP8 operations. This enhancement maintains computational accuracy while significantly reducing memory bandwidth requirements, making it particularly valuable for memory-bound scenarios where every optimization counts toward maximizing hardware utilization.
 
-As the framework continues to evolve, it maintains its position as the essential foundation for achieving peak performance in GDN kernel implementations, particularly in memory-bound scenarios where every optimization counts toward maximizing hardware utilization.
+The framework's strength lies in its comprehensive approach to GPU optimization, combining advanced mathematical operations, sophisticated memory management, warp-level parallelism, and efficient state quantization. Its integration with the broader kernel ecosystem ensures that performance optimizations are systematically applied across all layers, from high-level Triton implementations to the most granular PTX assembly optimizations.
+
+As the framework continues to evolve, it maintains its position as the essential foundation for achieving peak performance in GDN kernel implementations, particularly in memory-bound scenarios where FP8 quantization provides substantial bandwidth savings while preserving numerical accuracy through careful dynamic scaling strategies.

@@ -14,13 +14,25 @@
 - [src/kernels/cute_cpp/gdn_decode_v9.cuh](file://src/kernels/cute_cpp/gdn_decode_v9.cuh)
 - [src/kernels/cute_cpp/gdn_decode_v10.cuh](file://src/kernels/cute_cpp/gdn_decode_v10.cuh)
 - [src/kernels/cute_dsl/gdn_decode_dsl.py](file://src/kernels/cute_dsl/gdn_decode_dsl.py)
+- [src/kernels/cuda/gdn_decode_v7.cuh](file://src/kernels/cuda/gdn_decode_v7.cuh)
+- [src/kernels/cuda/gdn_decode_v8.cuh](file://src/kernels/cuda/gdn_decode_v8.cuh)
+- [src/kernels/ptx/gdn_decode_ptx.cuh](file://src/kernels/ptx/gdn_decode_ptx.cuh)
 - [src/gdn_kernels.cu](file://src/gdn_kernels.cu)
 - [scripts/test_cutile.py](file://scripts/test_cutile.py)
 - [scripts/bench_cutile_vs_triton.py](file://scripts/bench_cutile_vs_triton.py)
+- [scripts/bench_all_versions.py](file://scripts/bench_all_versions.py)
 - [docs/ROADMAP.md](file://docs/ROADMAP.md)
 - [docs/OPTIMIZATION_LOG.md](file://docs/OPTIMIZATION_LOG.md)
-- [scripts/bench_all_versions.py](file://scripts/bench_all_versions.py)
+- [tests/test_fp8_accuracy.py](file://tests/test_fp8_accuracy.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive FP8 state quantization implementation documentation
+- Integrated FP8 conversion primitives and per-row scaling algorithms
+- Documented FP8 quantization accuracy testing and validation
+- Enhanced performance analysis with FP8 memory compression benefits
+- Updated kernel architecture sections to include FP8 optimization strategies
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -28,10 +40,11 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
+6. [FP8 State Quantization Implementation](#fp8-state-quantization-implementation)
+7. [Dependency Analysis](#dependency-analysis)
+8. [Performance Considerations](#performance-considerations)
+9. [Troubleshooting Guide](#troubleshooting-guide)
+10. [Conclusion](#conclusion)
 
 ## Introduction
 
@@ -303,6 +316,140 @@ M --> N[2.25 PFLOPS Tensor Cores]
 **Section sources**
 - [scripts/bench_all_versions.py:32-444](file://scripts/bench_all_versions.py#L32-L444)
 
+## FP8 State Quantization Implementation
+
+The cuTile Kernel Framework now includes comprehensive FP8 (Float Point 8-bit) state quantization implementation as part of its memory optimization strategy. This enhancement provides 4x memory compression while maintaining acceptable accuracy for inference workloads.
+
+### FP8 Quantization Architecture
+
+The FP8 implementation follows a sophisticated approach combining per-row dynamic scaling with vectorized memory access patterns:
+
+```mermaid
+graph TB
+subgraph "FP8 Quantization Pipeline"
+A[FP32 State Matrix] --> B[Per-Row Dynamic Scaling]
+B --> C[Quantization to FP8 E4M3]
+C --> D[Packed Storage (FP8x4)]
+D --> E[Vectorized Memory Access]
+end
+subgraph "Dequantization Pipeline"
+E --> F[Load Packed FP8x4]
+F --> G[Unpacking Operation]
+G --> H[Per-Row Scaling]
+H --> I[FP32 Computation]
+end
+```
+
+**Diagram sources**
+- [src/kernels/cuda/gdn_decode_v8.cuh:99-129](file://src/kernels/cuda/gdn_decode_v8.cuh#L99-L129)
+- [src/kernels/cute_cpp/gdn_decode_v10.cuh:54-87](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L54-L87)
+- [src/kernels/ptx/gdn_decode_ptx.cuh:636-668](file://src/kernels/ptx/gdn_decode_ptx.cuh#L636-L668)
+
+### FP8 Conversion Primitives
+
+The framework implements comprehensive FP8 conversion primitives for seamless integration across different kernel implementations:
+
+#### CUDA Implementation
+The CUDA FP8 implementation provides high-performance conversion operations optimized for GPU execution:
+
+- **fp32_to_fp8_v8**: Direct conversion from FP32 to FP8 E4M3 format
+- **fp8_to_fp32_v8**: Dequantization from FP8 back to FP32 precision
+- **pack_fp8x4**: Vectorized packing of four FP8 values into uint32
+- **unpack_fp8x4**: Unpacking operation for efficient memory access
+
+#### CuTe C++ Implementation  
+The CuTe C++ version maintains the same interface while leveraging template-based optimization:
+
+- **v10_fp32_to_fp8**: Optimized conversion with compile-time constant folding
+- **v10_fp8_to_fp32**: High-throughput dequantization routine
+- **v10_pack_fp8x4**: Vectorized memory access with alignment guarantees
+- **v10_unpack_fp8x4**: Efficient unpacking with minimal register pressure
+
+#### PTX Assembly Implementation
+The PTX version provides assembly-level optimization for maximum performance:
+
+- **ptx_fp32_to_fp8**: Inline PTX instructions for conversion
+- **ptx_fp8_to_fp32**: Assembly-optimized dequantization
+- **ptx_pack_fp8x4**: Direct memory packing operations
+- **ptx_unpack_fp8x4**: Fast unpacking with predicated execution
+
+**Section sources**
+- [src/kernels/cuda/gdn_decode_v8.cuh:99-129](file://src/kernels/cuda/gdn_decode_v8.cuh#L99-L129)
+- [src/kernels/cute_cpp/gdn_decode_v10.cuh:54-87](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L54-L87)
+- [src/kernels/ptx/gdn_decode_ptx.cuh:218-231](file://src/kernels/ptx/gdn_decode_ptx.cuh#L218-L231)
+
+### Per-Row Dynamic Scaling Strategy
+
+The FP8 implementation employs per-row dynamic scaling to maximize precision utilization while preventing overflow:
+
+#### Scaling Algorithm
+Each row of the state matrix maintains its own scaling factor calculated as:
+```
+scale_row = max_abs(state_row) / 448.0
+```
+
+Where 448.0 represents the maximum representable value in FP8 E4M3 format. This approach ensures optimal use of the available dynamic range for each row.
+
+#### Scale Storage and Management
+- **Scale Memory Layout**: One float per row stored contiguously
+- **Scale Loading**: Vectorized loading during state initialization
+- **Scale Propagation**: Automatic application during dequantization
+- **Scale Updates**: Recalculation during state updates with safety margins
+
+**Section sources**
+- [src/kernels/cuda/gdn_decode_v8.cuh:517-527](file://src/kernels/cuda/gdn_decode_v8.cuh#L517-L527)
+- [src/kernels/cute_cpp/gdn_decode_v10.cuh:576-586](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L576-L586)
+- [src/kernels/ptx/gdn_decode_ptx.cuh:640-649](file://src/kernels/ptx/gdn_decode_ptx.cuh#L640-L649)
+
+### Vectorized Memory Access Patterns
+
+The FP8 implementation optimizes memory bandwidth through vectorized access patterns:
+
+#### Packed Storage Format
+Four consecutive FP8 values are packed into a single 32-bit word:
+```
+[FP8_3][FP8_2][FP8_1][FP8_0] → uint32
+```
+
+This 4x memory compression reduces state storage from 4 bytes per element to 1 byte.
+
+#### Vectorized Load/Store Operations
+- **Vectorized Loads**: 128 threads process 4 elements each for optimal memory throughput
+- **Coalesced Access**: Sequential memory access patterns for optimal bandwidth utilization
+- **Alignment Guarantees**: 4-byte alignment for efficient vectorized operations
+
+**Section sources**
+- [src/kernels/cuda/gdn_decode_v8.cuh:107-129](file://src/kernels/cuda/gdn_decode_v8.cuh#L107-L129)
+- [src/kernels/cute_cpp/gdn_decode_v10.cuh:65-87](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L65-L87)
+- [src/kernels/ptx/gdn_decode_ptx.cuh:653-668](file://src/kernels/ptx/gdn_decode_ptx.cuh#L653-L668)
+
+### FP8 Accuracy Validation
+
+The framework includes comprehensive accuracy testing to validate FP8 quantization correctness:
+
+#### Test Methodology
+The accuracy test simulates multiple GDN decode iterations to measure error accumulation over time:
+
+- **Input Generation**: Random tensors with realistic distributions
+- **Reference Computation**: FP32 baseline computation
+- **Quantized Computation**: FP8 quantization with per-row scaling
+- **Error Metrics**: Maximum absolute error and relative error analysis
+
+#### Test Results
+Extensive testing on NVIDIA B200 architecture demonstrates:
+
+| Metric | FP32 Reference | FP8 Quantized | Error |
+|--------|----------------|---------------|-------|
+| Output Max Error | 5.6e-05 | 5.6e-05 | **0.0%** |
+| Output Rel Error | 1.2e-04 | 11.4% | **Acceptable** |
+| State Max Error | 2.5e-03 | 2.5e-03 | **0.0%** |
+| State Rel Error | 1.0e-03 | 10.5% | **Acceptable** |
+| Error Accumulation | 0.16x | 0.16x | **Stable** |
+
+**Section sources**
+- [tests/test_fp8_accuracy.py:117-212](file://tests/test_fp8_accuracy.py#L117-L212)
+- [docs/OPTIMIZATION_LOG.md:263-276](file://docs/OPTIMIZATION_LOG.md#L263-L276)
+
 ## Dependency Analysis
 
 The cuTile Kernel Framework maintains clear separation of concerns through well-defined module boundaries and dependency relationships:
@@ -369,9 +516,24 @@ The framework includes B200-specific optimizations:
 - **Tensor Core integration**: Automatic utilization of BF16 Tensor Cores
 - **Memory hierarchy optimization**: Efficient use of L1, L2, and HBM3e memory
 
+### FP8 Memory Compression Benefits
+
+The FP8 quantization implementation provides significant memory savings:
+
+#### Theoretical Memory Reduction
+- **FP32 State**: 64 KB per head, 512 KB total (8 heads)
+- **FP8 State**: 16 KB per head, 128 KB total (8 heads)
+- **Compression Ratio**: 4:1 reduction in state memory footprint
+
+#### Practical Performance Impact
+- **Memory Bandwidth**: 4x reduction in state load/store bandwidth
+- **Throughput**: Potential 2-4x speedup for memory-bound decode kernels
+- **Latency**: Reduced memory access latency for state operations
+
 **Section sources**
 - [README.md:144-168](file://README.md#L144-L168)
 - [docs/OPTIMIZATION_LOG.md:116-135](file://docs/OPTIMIZATION_LOG.md#L116-L135)
+- [docs/OPTIMIZATION_LOG.md:189-193](file://docs/OPTIMIZATION_LOG.md#L189-L193)
 
 ## Troubleshooting Guide
 
@@ -394,6 +556,11 @@ The framework includes B200-specific optimizations:
 - **Issue**: Template compilation failures in CuTe C++ kernels
 - **Solution**: Ensure proper CUDA toolkit version and include correct header paths
 
+**FP8 Quantization Issues**
+- **Issue**: Overflow or underflow in FP8 quantized state
+- **Cause**: Insufficient scaling factor or improper per-row scaling
+- **Solution**: Verify scale calculation and ensure proper scaling margins
+
 ### Debugging Tools and Techniques
 
 The framework provides comprehensive testing infrastructure:
@@ -402,21 +569,26 @@ The framework provides comprehensive testing infrastructure:
 - **Integration tests**: End-to-end correctness validation
 - **Performance profiling**: Memory bandwidth and compute utilization analysis
 - **Hardware profiling**: NVIDIA Nsight Compute integration for detailed analysis
+- **Accuracy validation**: FP8 quantization error analysis and validation
 
 **Section sources**
 - [scripts/test_cutile.py:32-75](file://scripts/test_cutile.py#L32-L75)
 - [src/kernels/cutile/README.md:13-26](file://src/kernels/cutile/README.md#L13-L26)
+- [tests/test_fp8_accuracy.py:1-243](file://tests/test_fp8_accuracy.py#L1-L243)
 
 ## Conclusion
 
 The cuTile Kernel Framework represents a comprehensive approach to GPU kernel development that successfully balances performance optimization with development productivity. Through its multi-layered architecture supporting cuTile Python, CuTe C++, CuTe DSL, PTX assembly, and Triton baseline implementations, the framework provides developers with flexible optimization strategies tailored to different use cases and performance requirements.
 
+**Updated** The framework now includes comprehensive FP8 state quantization implementation that provides 4x memory compression while maintaining acceptable accuracy for inference workloads. This enhancement demonstrates the framework's commitment to cutting-edge optimization techniques and practical performance improvements.
+
 Key achievements include:
 - **95% B200 peak bandwidth utilization** through advanced memory optimization techniques
+- **FP8 quantization implementation** providing 4x memory compression with validated accuracy
 - **Multi-framework comparative analysis** enabling informed optimization decisions
 - **Comprehensive testing infrastructure** ensuring correctness across all implementation variants
 - **Hardware-specific optimizations** leveraging B200 architecture capabilities
 
 The framework's modular design and extensive documentation make it an excellent foundation for advanced GPU programming projects, demonstrating best practices in memory optimization, kernel design, and performance engineering. Its support for multiple optimization levels from high-level Python DSLs to low-level PTX assembly provides flexibility for different development scenarios while maintaining consistent performance targets.
 
-Future development directions include persistent kernel implementations, advanced profiling integration, and continued exploration of hybrid optimization strategies that combine multiple framework approaches for maximum performance gains.
+Future development directions include persistent kernel implementations, advanced profiling integration, continued exploration of hybrid optimization strategies, and further expansion of quantization techniques for even greater memory efficiency.

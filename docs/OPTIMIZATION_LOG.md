@@ -260,23 +260,35 @@ void gdn_decode_ptx_fp8_launch(...);
 For GDN state which accumulates over many steps, FP8 may introduce drift.
 Recommend FP8 for inference, FP32 for training.
 
-### FP8 Accuracy Test Results (Modal B200)
+### Quantization Accuracy Test Results (Modal B200)
 
 Tested with realistic parameters over 100 decode steps:
 
-| Metric | Value | Notes |
-|--------|-------|-------|
-| Output max error | 5.6e-05 | Very small |
-| Output rel error | **11.4%** | Acceptable for inference |
-| State max error | 2.5e-03 | Small |
-| State rel error | **10.5%** | Acceptable |
-| Error accumulation | **0.16x** | Errors don't compound! |
+| Metric | FP8 E4M3 | FP4 E2M1 | Notes |
+|--------|----------|----------|-------|
+| **Compression** | 4x | **8x** | State size reduction |
+| Output max error | 5.6e-05 | 3.4e-04 | 6x worse for FP4 |
+| Output rel error | **11.4%** | **54.6%** | FP4 too aggressive |
+| State max error | 2.5e-03 | 1.6e-02 | 6x worse for FP4 |
+| State rel error | **10.5%** | **64.9%** | FP4 too aggressive |
+| Error accumulation | **0.16x** | **0.11x** | Both stable! |
 
-**Key finding**: FP8 quantization error does NOT accumulate over time.
-This makes FP8 safe for long sequence inference.
+### Precision Recommendation
+
+| Precision | Memory/Head | Relative Error | Recommended Use |
+|-----------|-------------|----------------|-----------------|
+| FP32 | 64 KB | 0% | Training, exact inference |
+| **FP8** | **16 KB** | **~11%** | **Inference (recommended)** |
+| FP4 | 8 KB | ~55-65% | Extreme compression only |
+
+**Key findings**:
+1. **FP8 is the sweet spot**: 4x compression with only ~11% relative error
+2. **FP4 is too aggressive**: 8x compression but ~55-65% error - likely unacceptable
+3. **Neither accumulates errors**: Critical for long sequence inference
 
 ### Benchmark Status
 - [x] FP8 accuracy test completed (2026-03-28)
+- [x] FP4 accuracy test completed (2026-03-28)
 - [ ] Pending FP8 vs FP32 latency benchmark (requires CUDA compilation)
 
 ---

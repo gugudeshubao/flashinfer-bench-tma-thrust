@@ -1,15 +1,76 @@
 """
-FP8 State Quantization Accuracy Test
+FP8/FP4 State Quantization Accuracy Test
 
-Tests the accuracy loss when using FP8 E4M3 quantized state vs FP32.
+Tests the accuracy loss when using FP8 E4M3 or FP4 quantized state vs FP32.
 Simulates the GDN decode kernel behavior over multiple iterations.
 
 Usage:
-    modal run tests/test_fp8_accuracy.py                 # Modal B200 test
-    modal run tests/test_fp8_accuracy.py --steps 200     # More iterations
+    modal run tests/test_fp8_accuracy.py                       # FP8 test
+    modal run tests/test_fp8_accuracy.py --precision fp4       # FP4 test
+    modal run tests/test_fp8_accuracy.py --steps 200           # More iterations
 """
 
 import math
+
+
+# ============================================================
+# FP4 E2M1 Quantization (from v7 kernel)
+# ============================================================
+
+# FP4 E2M1 lookup table (same as v7 kernel)
+FP4_LUT = [
+    0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0,
+    -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0
+]
+
+
+def fp4_e2m1_quantize(x):
+    """
+    Simulate FP4 E2M1 quantization with per-row dynamic scaling.
+    
+    FP4 E2M1: 1 sign + 2 exponent + 1 mantissa
+    Values: 0, 0.5, 1, 1.5, 2, 3, 4, 6 (and negatives)
+    
+    Returns: (quantized_tensor, scale_per_row)
+    """
+    import torch
+    
+    # Per-row scaling to map max value to FP4 range (max=6)
+    max_abs = x.abs().max(dim=-1, keepdim=True).values
+    scale = max_abs / 5.0  # Use 5 for safety margin (max representable is 6)
+    scale = torch.clamp(scale, min=1e-6)
+    
+    # Normalize to FP4 range
+    x_scaled = x / scale
+    
+    # Quantize to nearest FP4 value using lookup table logic
+    sign = (x_scaled < 0).float()
+    abs_val = x_scaled.abs()
+    
+    # Map to FP4 mantissa (0-7)
+    # Thresholds: 0.25, 0.75, 1.25, 1.75, 2.5, 3.5, 5.0
+    mant = torch.zeros_like(abs_val)
+    mant = torch.where(abs_val >= 0.25, torch.ones_like(mant) * 1, mant)
+    mant = torch.where(abs_val >= 0.75, torch.ones_like(mant) * 2, mant)
+    mant = torch.where(abs_val >= 1.25, torch.ones_like(mant) * 3, mant)
+    mant = torch.where(abs_val >= 1.75, torch.ones_like(mant) * 4, mant)
+    mant = torch.where(abs_val >= 2.5, torch.ones_like(mant) * 5, mant)
+    mant = torch.where(abs_val >= 3.5, torch.ones_like(mant) * 6, mant)
+    mant = torch.where(abs_val >= 5.0, torch.ones_like(mant) * 7, mant)
+    
+    # Map back to FP4 values
+    fp4_values = torch.tensor([0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0], device=x.device)
+    quantized_abs = fp4_values[mant.long()]
+    
+    # Apply sign
+    quantized = torch.where(sign > 0, -quantized_abs, quantized_abs)
+    
+    return quantized, scale
+
+
+def fp4_e2m1_dequantize(quantized, scale):
+    """Dequantize FP4 back to FP32."""
+    return quantized * scale
 
 
 # ============================================================
@@ -88,22 +149,30 @@ def gdn_decode_fp32(q, k, v, state, g, beta, scale=None):
     return out, state
 
 
-def gdn_decode_fp8(q, k, v, state_quant, state_scale, g, beta, scale=None):
+def gdn_decode_quantized(q, k, v, state_quant, state_scale, g, beta, precision='fp8', scale=None):
     """
-    GDN decode step with FP8 state.
+    GDN decode step with quantized state (FP8 or FP4).
     
     Returns: (output, new_state_quant, new_state_scale, dequantized_state)
     """
+    # Select quantization functions based on precision
+    if precision == 'fp4':
+        dequantize_fn = fp4_e2m1_dequantize
+        quantize_fn = fp4_e2m1_quantize
+    else:  # fp8
+        dequantize_fn = fp8_e4m3_dequantize
+        quantize_fn = fp8_e4m3_quantize
+    
     # Dequantize state
-    state = fp8_e4m3_dequantize(state_quant, state_scale)
+    state = dequantize_fn(state_quant, state_scale)
     
     # Run delta rule in FP32
     out, new_state = gdn_decode_fp32(q, k, v, state, g, beta, scale)
     
-    # Quantize new state back to FP8
+    # Quantize new state back
     B, V, K = new_state.shape
     new_state_flat = new_state.view(B * V, K)
-    new_state_quant, new_state_scale = fp8_e4m3_quantize(new_state_flat)
+    new_state_quant, new_state_scale = quantize_fn(new_state_flat)
     new_state_quant = new_state_quant.view(B, V, K)
     new_state_scale = new_state_scale.view(B, V, 1)
     
@@ -114,9 +183,9 @@ def gdn_decode_fp8(q, k, v, state_quant, state_scale, g, beta, scale=None):
 # Accuracy Test
 # ============================================================
 
-def test_fp8_accuracy(batch_size: int = 4, d: int = 128, num_steps: int = 100, seed: int = 42):
+def test_fp8_accuracy(batch_size: int = 4, d: int = 128, num_steps: int = 100, seed: int = 42, precision: str = 'fp8'):
     """
-    Compare FP32 vs FP8 state over multiple decode steps.
+    Compare FP32 vs quantized (FP8/FP4) state over multiple decode steps.
     """
     import torch
     import numpy as np
@@ -125,6 +194,17 @@ def test_fp8_accuracy(batch_size: int = 4, d: int = 128, num_steps: int = 100, s
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     dtype = torch.float32
     
+    # Select quantization function
+    if precision == 'fp4':
+        quantize_fn = fp4_e2m1_quantize
+        precision_label = "FP4 E2M1"
+        compression = "8x"
+    else:
+        quantize_fn = fp8_e4m3_quantize
+        precision_label = "FP8 E4M3"
+        compression = "4x"
+    
+    print(f"Precision: {precision_label} ({compression} compression)")
     print(f"Device: {device}")
     print(f"Batch size: {batch_size}, D: {d}, Steps: {num_steps}")
     print("=" * 60)
@@ -132,11 +212,11 @@ def test_fp8_accuracy(batch_size: int = 4, d: int = 128, num_steps: int = 100, s
     # Initialize state
     state_fp32 = torch.randn(batch_size, d, d, device=device, dtype=dtype) * 0.1
     
-    # For FP8: quantize initial state
+    # For quantized: quantize initial state
     state_flat = state_fp32.view(batch_size * d, d)
-    state_fp8_quant, state_fp8_scale = fp8_e4m3_quantize(state_flat)
-    state_fp8_quant = state_fp8_quant.view(batch_size, d, d)
-    state_fp8_scale = state_fp8_scale.view(batch_size, d, 1)
+    state_quant, state_scale = quantize_fn(state_flat)
+    state_quant = state_quant.view(batch_size, d, d)
+    state_scale = state_scale.view(batch_size, d, 1)
     
     # Track errors
     output_errors = []
@@ -158,14 +238,14 @@ def test_fp8_accuracy(batch_size: int = 4, d: int = 128, num_steps: int = 100, s
         # FP32 reference
         out_fp32, state_fp32 = gdn_decode_fp32(q, k, v, state_fp32, g, beta)
         
-        # FP8 version
-        out_fp8, state_fp8_quant, state_fp8_scale, state_fp8_actual = gdn_decode_fp8(
-            q, k, v, state_fp8_quant, state_fp8_scale, g, beta
+        # Quantized version
+        out_quant, state_quant, state_scale, state_actual = gdn_decode_quantized(
+            q, k, v, state_quant, state_scale, g, beta, precision=precision
         )
         
         # Compute errors
-        out_err = (out_fp32 - out_fp8).abs()
-        state_err = (state_fp32 - state_fp8_actual).abs()
+        out_err = (out_fp32 - out_quant).abs()
+        state_err = (state_fp32 - state_actual).abs()
         
         output_errors.append({
             'step': step,
@@ -203,6 +283,7 @@ def test_fp8_accuracy(batch_size: int = 4, d: int = 128, num_steps: int = 100, s
         print(f"  Error accumulation:     {late_err/early_err:.2f}x (late/early)")
     
     return {
+        'precision': precision,
         'output_errors': output_errors,
         'state_errors': state_errors,
         'final_out_max_err': output_errors[-1]['max_abs'],
@@ -223,18 +304,18 @@ app = modal.App("fp8-accuracy-test")
 image = modal.Image.debian_slim(python_version="3.12").pip_install("torch", "numpy")
 
 @app.function(image=image, gpu="B200:1", timeout=300)
-def run_fp8_test_modal(batch_size: int = 4, num_steps: int = 100):
-    return test_fp8_accuracy(batch_size=batch_size, num_steps=num_steps)
+def run_fp8_test_modal(batch_size: int = 4, num_steps: int = 100, precision: str = 'fp8'):
+    return test_fp8_accuracy(batch_size=batch_size, num_steps=num_steps, precision=precision)
 
 @app.local_entrypoint()
-def main(batch_size: int = 4, steps: int = 100):
-    print(f"Running FP8 accuracy test on Modal B200...")
-    print(f"  batch_size={batch_size}, steps={steps}")
+def main(batch_size: int = 4, steps: int = 100, precision: str = 'fp8'):
+    print(f"Running {precision.upper()} accuracy test on Modal B200...")
+    print(f"  batch_size={batch_size}, steps={steps}, precision={precision}")
     print()
-    result = run_fp8_test_modal.remote(batch_size, steps)
+    result = run_fp8_test_modal.remote(batch_size, steps, precision)
     
     print("\n" + "=" * 60)
-    print("FINAL RESULTS")
+    print(f"FINAL RESULTS ({precision.upper()})")
     print("=" * 60)
     print(f"  Output max error:  {result['final_out_max_err']:.4e}")
     print(f"  Output rel error:  {result['final_out_rel_err']:.2%}")
