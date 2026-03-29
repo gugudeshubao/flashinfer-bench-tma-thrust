@@ -2,6 +2,7 @@
 
 <cite>
 **Referenced Files in This Document**
+- [gdn_decode_v10.cuh](file://src/kernels/cute_cpp/gdn_decode_v10.cuh)
 - [kernel.py](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py)
 - [kernel.py](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py)
 - [kernel_v2.py](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel_v2.py)
@@ -12,6 +13,7 @@
 - [ROADMAP.md](file://docs/ROADMAP.md)
 - [ROOFLINE.md](file://docs/ROOFLINE.md)
 - [bench_modal.py](file://benchmarks/bench_modal.py)
+- [bench_quantization_perf.py](file://benchmarks/bench_quantization_perf.py)
 - [gdn_decode_ptx.cuh](file://src/kernels/ptx/gdn_decode_ptx.cuh)
 - [gdn_decode_v7.cuh](file://src/kernels/cuda/gdn_decode_v7.cuh)
 - [gdn_decode_v8.cuh](file://src/kernels/cuda/gdn_decode_v8.cuh)
@@ -19,21 +21,22 @@
 - [gdn_decode_dsl_optimized.py](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py)
 - [gdn_prefill_dsl.py](file://src/kernels/cute_dsl/gdn_prefill_dsl.py)
 - [README.md](file://src/kernels/cute_dsl/README.md)
-- [gdn_decode_v10.cuh](file://src/kernels/cute_cpp/gdn_decode_v10.cuh)
 - [README.md](file://src/kernels/cute_cpp/README.md)
 - [bench_cute_dsl_vs_cpp.py](file://scripts/bench_cute_dsl_vs_cpp.py)
 - [bench_cute_vs_triton.py](file://scripts/bench_cute_vs_triton.py)
-- [test_fp8_accuracy.py](file://tests/test_fp8_accuracy.py)
+- [test_quantization_accuracy.py](file://tests/test_quantization_accuracy.py)
 - [build_cuda.py](file://scripts/build_cuda.py)
+- [ZHIHU_GDN_QUANTIZATION.md](file://docs/ZHIHU_GDN_QUANTIZATION.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced kernel documentation with FP4 E2M1 quantization support across CuTe C++ and PTX kernel implementations
-- Updated performance analysis to include FP4 8x memory compression with experimental accuracy characteristics
-- Expanded memory optimization strategies to cover FP4 quantization primitives and vectorized memory operations
-- Added detailed coverage of FP4 quantization accuracy testing and validation results
-- Updated kernel comparison matrix to reflect FP4 quantization capabilities alongside FP8 support
+- Enhanced kernel documentation with comprehensive FP8 E4M3 and FP4 E2M1 quantization support across all kernel technologies
+- Updated performance analysis to include FP8 4x memory compression and FP4 8x memory compression with detailed accuracy characteristics
+- Expanded memory optimization strategies to cover per-row dynamic scaling, vectorized memory operations, and quantization primitives
+- Added detailed coverage of quantization accuracy testing, validation results, and engineering recommendations
+- Updated kernel comparison matrix to reflect enhanced quantization capabilities alongside FP32, BF16, and FP8 support
+- Integrated comprehensive quantization performance benchmarking and real-world accuracy validation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -76,11 +79,14 @@ O --> Q["gdn_decode_dsl_optimized.py"]
 O --> R["gdn_prefill_dsl.py"]
 J --> S["cute_cpp/"]
 S --> T["gdn_decode_v10.cuh"]
-A --> U["tests/test_fp8_accuracy.py"]
+A --> U["tests/test_quantization_accuracy.py"]
 A --> V["scripts/bench_all_versions.py"]
+A --> W["benchmarks/bench_quantization_perf.py"]
+A --> X["docs/ZHIHU_GDN_QUANTIZATION.md"]
 ```
 
 **Diagram sources**
+- [gdn_decode_v10.cuh:1-1355](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L1-L1355)
 - [kernel.py:1-136](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L1-L136)
 - [kernel_v2.py:1-122](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel_v2.py#L1-L122)
 - [kernel_v3.py:1-130](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel_v3.py#L1-L130)
@@ -94,8 +100,11 @@ A --> V["scripts/bench_all_versions.py"]
 - [gdn_decode_v7.cuh:160-359](file://src/kernels/cuda/gdn_decode_v7.cuh#L160-L359)
 - [gdn_decode_v8.cuh:392-546](file://src/kernels/cuda/gdn_decode_v8.cuh#L392-L546)
 - [gdn_decode_dsl.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
-- [gdn_decode_v10.cuh:584-783](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L584-L783)
-- [test_fp8_accuracy.py:1-243](file://tests/test_fp8_accuracy.py#L1-L243)
+- [gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [gdn_prefill_dsl.py:1-323](file://src/kernels/cute_dsl/gdn_prefill_dsl.py#L1-L323)
+- [test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
+- [bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
+- [ZHIHU_GDN_QUANTIZATION.md:1-195](file://docs/ZHIHU_GDN_QUANTIZATION.md#L1-L195)
 
 **Section sources**
 - [config.toml:1-10](file://gdn_decode_qk4_v8_d128_k_last/config.toml#L1-L10)
@@ -110,15 +119,18 @@ A --> V["scripts/bench_all_versions.py"]
 - **CUDA C++ kernels**: Enhanced with TMA (Tensor Memory Access) and cp.async bulk operations for 2D tile loads with memory latency hiding, now featuring FP8/F4 quantization with vectorized memory operations.
 - **CuTe DSL kernels**: Python-based kernels using CUTLASS 4.0+ DSL with MLIR compilation pipeline, offering automatic optimization passes including async copy insertion and FP8/F4 quantization support.
 - **CuTe C++ kernels**: Traditional C++ template-based implementations with manual optimization and NVCC compilation, now featuring cp.async prefetch capabilities and FP8/F4 state quantization with per-row scaling.
-- **FP8/F4 Quantization Support**: All kernel technologies now support FP8 (4x memory compression) and FP4 E2M1 (8x memory compression) state quantization with per-row dynamic scaling and vectorized memory operations for state storage and retrieval.
+- **Enhanced FP8/F4 Quantization Support**: All kernel technologies now support FP8 (4x memory compression) and FP4 E2M1 (8x memory compression) state quantization with per-row dynamic scaling and vectorized memory operations for state storage and retrieval.
 - **Configuration**: Defines the solution metadata and build specification.
 - **Trace definition**: Documents axes, constraints, inputs/outputs, and a reference implementation.
 - **Optimization logs**: Detailed records of cp.async prefetch implementation and FP8/F4 quantization across all kernel technologies.
 - **Roadmap**: Strategic direction for kernel optimization including cp.async prefetch integration and FP8/F4 quantization.
 - **Benchmark runner**: Orchestrates benchmarking on Modal B200 and compares solution vs baseline across multiple kernel technologies.
-- **FP8/F4 Accuracy Testing**: Comprehensive testing framework validating quantization accuracy over multiple decode steps with experimental error characteristics.
+- **Quantization accuracy testing**: Comprehensive testing framework validating quantization accuracy over multiple decode steps with experimental error characteristics.
+- **Quantization performance benchmarking**: Real-world performance measurement of memory-bound decode kernels with different precision configurations.
+- **Quantization research documentation**: In-depth analysis of why GDN quantization is more challenging than other operations and engineering recommendations.
 
 **Section sources**
+- [gdn_decode_v10.cuh:80-187](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L80-L187)
 - [kernel.py:1-136](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L1-L136)
 - [kernel_v2.py:1-122](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel_v2.py#L1-L122)
 - [kernel_v3.py:1-130](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel_v3.py#L1-L130)
@@ -127,13 +139,9 @@ A --> V["scripts/bench_all_versions.py"]
 - [gdn_decode_v7.cuh:160-359](file://src/kernels/cuda/gdn_decode_v7.cuh#L160-L359)
 - [gdn_decode_v8.cuh:392-546](file://src/kernels/cuda/gdn_decode_v8.cuh#L392-L546)
 - [gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
-- [gdn_decode_v10.cuh:584-783](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L584-L783)
-- [config.toml:1-10](file://gdn_decode_qk4_v8_d128_k_last/config.toml#L1-L10)
-- [gdn_decode_qk4_v8_d128_k_last.json:1-153](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L1-L153)
-- [OPTIMIZATION_LOG.md:183-281](file://docs/OPTIMIZATION_LOG.md#L183-L281)
-- [ROADMAP.md:70-180](file://docs/ROADMAP.md#L70-L180)
-- [bench_modal.py:1-330](file://benchmarks/bench_modal.py#L1-L330)
-- [test_fp8_accuracy.py:1-243](file://tests/test_fp8_accuracy.py#L1-L243)
+- [test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
+- [bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
+- [ZHIHU_GDN_QUANTIZATION.md:1-195](file://docs/ZHIHU_GDN_QUANTIZATION.md#L1-L195)
 
 ## Architecture Overview
 The GDN decode kernel performs single-token generation with recurrent state updates. The solution kernel is organized as a Triton program with a grid of (B, H=8, V_BLOCKS) where each program handles a V-tile of size BLOCK_V and a single head. The kernel computes decay and update gates per head, applies a decay to the state, computes the old value, interpolates the new value, updates the state via a rank-1 delta rule, and produces the output by projecting with Q. The architecture now supports multiple kernel technologies, each with distinct compilation strategies and optimization approaches including cp.async prefetch for memory latency hiding and FP8/F4 state quantization for memory compression.
@@ -277,44 +285,49 @@ These patterns enable efficient HBM bandwidth utilization and register reuse acr
 - [gdn_decode_ptx.cuh:14](file://src/kernels/ptx/gdn_decode_ptx.cuh#L14)
 - [gdn_decode_dsl_optimized.py:98](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L98)
 
-### FP8/F4 State Quantization Implementation
-**Enhanced** All kernel implementations now feature FP8 (4x memory compression) and FP4 E2M1 (8x memory compression) state quantization with experimental accuracy characteristics:
+### Enhanced FP8/F4 State Quantization Implementation
+**Updated** All kernel implementations now feature comprehensive FP8 (4x memory compression) and FP4 E2M1 (8x memory compression) state quantization with experimental accuracy characteristics:
 
-- **FP8 E4M3 Quantization (4x compression)**:
-  - Memory Compression: State matrices compressed from FP32 (64 KB per head) to FP8 (16 KB per head), achieving 4x memory reduction.
-  - Per-Row Dynamic Scaling: Each row of state maintains its own scale factor for optimal precision preservation.
-  - Vectorized Memory Operations: 4 FP8 values packed into uint32_t for efficient memory bandwidth utilization.
-  - Internal FP32 Compute: State storage uses FP8 while computations remain in FP32 for numerical stability.
-  - Dequantization/Quantization: On load, FP8 state dequantized using per-row scales; on store, new state quantized back to FP8.
+#### FP8 E4M3 Quantization (4x compression)
+- **Memory Compression**: State matrices compressed from FP32 (64 KB per head) to FP8 (16 KB per head), achieving 4x memory reduction.
+- **Per-Row Dynamic Scaling**: Each row of state maintains its own scale factor for optimal precision preservation.
+- **Vectorized Memory Operations**: 4 FP8 values packed into uint32_t for efficient memory bandwidth utilization.
+- **Internal FP32 Compute**: State storage uses FP8 while computations remain in FP32 for numerical stability.
+- **Dequantization/Quantization**: On load, FP8 state dequantized using per-row scales; on store, new state quantized back to FP8.
 
-- **FP4 E2M1 Quantization (8x compression)**:
-  - Memory Compression: State matrices compressed from FP32 (64 KB per head) to FP4 (8 KB per head), achieving 8x memory reduction.
-  - Lookup Table Quantization: Uses FP4 lookup table with values [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0] and negative counterparts.
-  - Vectorized Memory Operations: 8 FP4 values packed into uint32_t for efficient memory bandwidth utilization.
-  - Experimental Accuracy: ~55-65% relative error - use only for extreme compression scenarios.
-  - Per-Row Dynamic Scaling: Each row maintains its own scale factor for precision preservation.
+#### FP4 E2M1 Quantization (8x compression)
+- **Memory Compression**: State matrices compressed from FP32 (64 KB per head) to FP4 (8 KB per head), achieving 8x memory reduction.
+- **Lookup Table Quantization**: Uses FP4 lookup table with values [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0] and negative counterparts.
+- **Vectorized Memory Operations**: 8 FP4 values packed into uint32_t for efficient memory bandwidth utilization.
+- **Experimental Accuracy**: ~55-65% relative error - use only for extreme compression scenarios.
+- **Per-Row Dynamic Scaling**: Each row maintains its own scale factor for precision preservation.
 
-**Design Decisions**:
+#### Design Decisions
 1. **Per-row scaling**: Scale = max_abs / 400.0 (FP8) or max_abs / 6.0 (FP4) for range safety
 2. **FP32 internal compute**: Only state storage is quantized for memory efficiency
 3. **Vectorized memory**: Pack values into uint32_t for 4x/8x bandwidth efficiency
 4. **Experimental validation**: FP4 quantization error may accumulate over time, requiring careful monitoring
 
-**Expected Benefits**:
+#### Expected Benefits
 - **4x memory reduction**: 512KB → 128KB per batch (FP8)
 - **8x memory reduction**: 512KB → 64KB per batch (FP4)
 - **4x/8x lower memory BW**: State load/store bandwidth reduced proportionally
 - **Potential 2-4x speedup**: For memory-bound decode kernel
 
-**Accuracy Validation**: FP8 quantization error does NOT accumulate over time, making it safe for long sequence inference. FP4 quantization shows experimental accuracy characteristics with ~55-65% relative error.
+#### Accuracy Validation
+- **FP8 quantization error does NOT accumulate over time**, making it safe for long sequence inference.
+- **FP4 quantization shows experimental accuracy characteristics** with ~55-65% relative error.
+- **Comprehensive testing** validates quantization effects over multiple decode steps with detailed error metrics.
 
 **Section sources**
-- [OPTIMIZATION_LOG.md:183-281](file://docs/OPTIMIZATION_LOG.md#L183-L281)
-- [gdn_decode_ptx.cuh:468-673](file://src/kernels/ptx/gdn_decode_ptx.cuh#L468-L673)
-- [gdn_decode_v8.cuh:392-546](file://src/kernels/cuda/gdn_decode_v8.cuh#L392-L546)
-- [gdn_decode_v10.cuh:584-783](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L584-L783)
-- [test_fp8_accuracy.py:117-243](file://tests/test_fp8_accuracy.py#L117-L243)
-- [gdn_decode_v7.cuh:81-130](file://src/kernels/cuda/gdn_decode_v7.cuh#L81-L130)
+- [gdn_decode_v10.cuh:80-187](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L80-L187)
+- [gdn_decode_v10.cuh:666-1060](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L666-L1060)
+- [gdn_decode_ptx.cuh:893-1102](file://src/kernels/ptx/gdn_decode_ptx.cuh#L893-L1102)
+- [gdn_decode_v7.cuh:367-407](file://src/kernels/cuda/gdn_decode_v7.cuh#L367-L407)
+- [OPTIMIZATION_LOG.md:234-296](file://docs/OPTIMIZATION_LOG.md#L234-L296)
+- [test_quantization_accuracy.py:182-361](file://tests/test_quantization_accuracy.py#L182-L361)
+- [bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-336)
+- [ZHIHU_GDN_QUANTIZATION.md:24-44](file://docs/ZHIHU_GDN_QUANTIZATION.md#L24-L44)
 
 ### cp.Async Prefetch Implementation Across Technologies
 **Enhanced** All kernel implementations now feature cp.async prefetch capabilities for memory latency hiding:
@@ -357,7 +370,7 @@ PTX kernels provide the highest level of hardware control through embedded assem
 - **Cache Control**: `ld.global.nc`, `st.global.wb` for L1/L2 bypass and write-back optimization
 - **Predicated Execution**: `selp.f32` for branchless conditional operations
 - **cp.async Prefetch**: `ptx_cp_async_ca`, `ptx_cp_async_cg` for memory latency hiding
-- **FP8/F4 Quantization**: `ptx_fp32_to_fp8`, `ptx_fp8_to_fp32`, `ptx_pack_fp8x4`, `ptx_unpack_fp8x4` and FP4 E2M1 equivalents for state compression
+- **Enhanced**: FP8/F4 Quantization with `ptx_fp32_to_fp8`, `ptx_fp8_to_fp32`, `ptx_pack_fp8x4`, `ptx_unpack_fp8x4` and FP4 E2M1 equivalents for state compression
 
 **Performance Benefits:**
 - Maximum performance extraction (~100% of theoretical limits)
@@ -382,7 +395,7 @@ CUDA C++ kernels now feature advanced memory management with TMA and cp.async pr
 - **cp.async Bulk Operations**: `cp.async.ca.shared.global` for async prefetch
 - **Vectorized Operations**: `float4` loads/stores for 16-byte aligned access
 - **Warp Specialization**: Producer/consumer warps for optimal pipeline utilization
-- **FP8/F4 Quantization Primitives**: `__nv_fp8_e4m3`, `pack_fp8x4`, `unpack_fp8x4` and FP4 equivalents for state compression
+- **Enhanced**: FP8/F4 Quantization Primitives with `__nv_fp8_e4m3`, `pack_fp8x4`, `unpack_fp8x4` and FP4 equivalents for state compression
 - **Per-Row Scaling**: Dynamic scaling factors for each state row
 
 **Performance Benefits:**
@@ -414,13 +427,13 @@ Python DSL → MLIR Dialects → LLVM IR → PTX → SASS
 - **AsyncCopyInsertion**: TMA/cp.async instruction insertion
 - **WarpSpecialization**: Automatic warp specialization
 - **RegisterAllocation**: Optimized register scheduling
-- **FP8/F4 Quantization Insertion**: Automatic FP8/F4 state compression
+- **Enhanced**: Automatic FP8/F4 quantization insertion
 
 **Kernel Variants:**
 - **Simplified DSL**: Basic State @ Q computation for demonstration
 - **Optimized DSL**: Full delta rule with SMEM staging and vectorization
 - **Prefill DSL**: Chunk-based processing for compute density optimization
-- **FP8/F4 DSL**: Enhanced with automatic FP8/F4 quantization support
+- **Enhanced**: FP8/F4 DSL**: Enhanced with automatic FP8/F4 quantization support
 
 **Performance Characteristics:**
 - Development efficiency: High (Python-based)
@@ -445,7 +458,7 @@ Traditional C++ template-based approach with manual optimization:
 - **TMA Abstraction**: Simplified asynchronous memory operations
 - **WGMMA Support**: Tensor Core operation abstraction
 - **cp.async Prefetch**: Manual implementation for memory latency hiding
-- **FP8/F4 Quantization**: Manual implementation with per-row scaling and vectorized memory operations
+- **Enhanced**: FP8/F4 Quantization with manual implementation, per-row scaling and vectorized memory operations
 
 **Version Evolution:**
 - **v9**: Manual XOR swizzle implementation
@@ -473,7 +486,7 @@ High-level Python kernel with JIT compilation:
 - **Broadcasting**: Automatic broadcasting for gate computation
 - **Integration**: Seamless PyTorch integration
 - **Adaptive Blocking**: BLOCK_V varies based on batch size for optimal occupancy
-- **FP8/F4 Support**: Enhanced with FP8/F4 state quantization capabilities
+- **Enhanced**: FP8/F4 Support with quantization capabilities
 
 **Performance Characteristics:**
 - **Adaptive BLOCK_V**: 16 for B≤16, 32 for B≤128, 64 for B>128
@@ -502,19 +515,21 @@ H --> D
 I["gdn_decode_ptx.cuh"] --> J["CUDA Runtime"]
 I --> K["Embedded PTX Assembly"]
 I --> L["cp.async Prefetch"]
-I --> M["FP8/F4 Quantization Primitives"]
+I --> M["Enhanced FP8/F4 Quantization Primitives"]
 N["gdn_decode_v7.cuh"] --> O["CUDA Toolkit + TMA"]
 N --> P["cp.async Bulk Operations"]
-N --> Q["FP8/F4 Quantization Support"]
+N --> Q["Enhanced FP8/F4 Quantization Support"]
 R["gdn_decode_dsl.py"] --> S["CuTe DSL (MLIR)"]
 R --> T["Automatic FP8/F4 Insertion"]
 U["gdn_decode_dsl_optimized.py"] --> S
 U --> T
 V["gdn_decode_v10.cuh"] --> W["CuTe C++ (NVCC)"]
 V --> X["Manual cp.async Implementation"]
-V --> Y["FP8/F4 Quantization with Per-Row Scaling"]
-Z["test_fp8_accuracy.py"] --> AA["FP8/F4 Accuracy Testing Framework"]
+V --> Y["Enhanced FP8/F4 Quantization with Per-Row Scaling"]
+Z["test_quantization_accuracy.py"] --> AA["FP8/F4 Accuracy Testing Framework"]
 BB["build_cuda.py"] --> CC["FP4 Export Functions"]
+DD["bench_quantization_perf.py"] --> EE["Quantization Performance Benchmarking"]
+FF["ZHIHU_GDN_QUANTIZATION.md"] --> GG["Quantization Research Documentation"]
 ```
 
 **Diagram sources**
@@ -527,8 +542,9 @@ BB["build_cuda.py"] --> CC["FP4 Export Functions"]
 - [gdn_decode_dsl.py:22-31](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L22-L31)
 - [gdn_decode_dsl_optimized.py:26-35](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L26-L35)
 - [gdn_decode_v10.cuh:1-200](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L1-L200)
-- [test_fp8_accuracy.py:1-243](file://tests/test_fp8_accuracy.py#L1-L243)
-- [build_cuda.py:398-402](file://scripts/build_cuda.py#L398-L402)
+- [test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
+- [bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
+- [ZHIHU_GDN_QUANTIZATION.md:1-195](file://docs/ZHIHU_GDN_QUANTIZATION.md#L1-L195)
 
 **Section sources**
 - [config.toml:1-10](file://gdn_decode_qk4_v8_d128_k_last/config.toml#L1-L10)
@@ -568,10 +584,10 @@ These strategies are validated by roofline analysis and implemented across all k
 - **Memory alignment**: PTX kernels require proper memory alignment for vectorized operations.
 - **cp.async prefetch issues**: Ensure proper commit/wait sequences are used in CUDA/PTX implementations.
 - **TMA compatibility**: Verify TMA support is available for CUDA kernels using cp.async bulk operations.
-- **FP8/F4 quantization issues**: Verify FP8/F4 support is available on the target GPU and that per-row scaling factors are properly computed.
+- **Enhanced**: FP8/F4 quantization issues**: Verify FP8/F4 support is available on the target GPU and that per-row scaling factors are properly computed.
 - **Memory compression errors**: Ensure proper packing/unpacking of FP8/F4 values and that memory addresses are properly aligned for vectorized operations.
-- **Accuracy validation**: Use the FP8/F4 accuracy testing framework to validate quantization effects over multiple decode steps, with special attention to FP4 experimental error characteristics.
-- **FP4 experimental risks**: Monitor for potential error accumulation over extended inference sequences due to higher experimental error rates.
+- **Enhanced**: Accuracy validation**: Use the FP8/F4 accuracy testing framework to validate quantization effects over multiple decode steps, with special attention to FP4 experimental error characteristics.
+- **Enhanced**: FP4 experimental risks**: Monitor for potential error accumulation over extended inference sequences due to higher experimental error rates.
 
 **Section sources**
 - [gdn_decode_qk4_v8_d128_k_last.json:44-48](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L44-L48)
@@ -579,7 +595,7 @@ These strategies are validated by roofline analysis and implemented across all k
 - [kernel.py:117-123](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L117-L123)
 - [README.md:151-163](file://src/kernels/ptx/README.md#L151-L163)
 - [README.md:118-127](file://src/kernels/cute_cpp/README.md#L118-L127)
-- [test_fp8_accuracy.py:117-243](file://tests/test_fp8_accuracy.py#L117-L243)
+- [test_quantization_accuracy.py:117-243](file://tests/test_quantization_accuracy.py#L117-L243)
 
 ## Conclusion
 The GDN Decode Kernel achieves significant performance improvements over the baseline Python implementation by fusing operations, using register blocking over the V-dimension, and leveraging multiple compilation technologies. The Triton solution provides excellent balance of performance and development efficiency, while PTX inline assembly kernels deliver maximum performance through embedded assembly instructions, cp.async prefetch for memory latency hiding, and FP8/F4 state quantization with 4x/8x memory compression. CUDA C++ kernels now feature TMA and advanced cp.async bulk operations for coalesced 2D tile loads, enhanced with FP8/F4 quantization support. CuTe DSL offers automatic optimization with high development efficiency, including automatic FP8/F4 quantization insertion. CuTe C++ provides traditional template-based optimization with manual cp.async prefetch implementation and FP8/F4 state quantization with per-row scaling. The k-last state layout and GVA mechanism enable efficient state persistence and head sharing across all implementations, while autotuning identifies optimal configurations for BLOCK_V and num_warps. The enhanced cp.async prefetch capabilities across all kernel technologies provide substantial memory latency hiding benefits, with PTX kernels achieving the highest performance through embedded assembly and CuTe DSL providing near-optimal performance with significantly reduced development effort. The addition of FP8/F4 state quantization delivers 4x/8x memory compression with per-row dynamic scaling, achieving 2-4x potential speedup for memory-bound decode kernels while maintaining acceptable accuracy for inference scenarios. FP8 quantization provides stable accuracy without error accumulation, while FP4 quantization offers extreme compression with experimental accuracy characteristics suitable for specific use cases. The expanded technology stack now provides flexible deployment options depending on specific requirements for performance, development efficiency, memory bandwidth, and maintenance considerations.

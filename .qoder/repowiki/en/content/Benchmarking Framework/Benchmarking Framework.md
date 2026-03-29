@@ -5,16 +5,19 @@
 - [README.md](file://README.md)
 - [bench_all_versions.py](file://scripts/bench_all_versions.py)
 - [bench_cuda_real.py](file://scripts/bench_cuda_real.py)
-- [bench_cute_dsl_vs_cpp.py](file://scripts/bench_cute_dsl_vs_cpp.py)
 - [bench_cute_vs_triton.py](file://scripts/bench_cute_vs_triton.py)
+- [bench_cute_dsl_vs_cpp.py](file://scripts/bench_cute_dsl_vs_cpp.py)
 - [bench_cutile_vs_triton.py](file://scripts/bench_cutile_vs_triton.py)
 - [bench_prefill_all.py](file://scripts/bench_prefill_all.py)
 - [bench_kernels.py](file://scripts/bench_kernels.py)
+- [bench_modal.py](file://benchmarks/bench_modal.py)
+- [bench_quantization_perf.py](file://benchmarks/bench_quantization_perf.py)
 - [build_cuda.py](file://scripts/build_cuda.py)
 - [setup_volume.py](file://scripts/setup_volume.py)
 - [test_cute_dsl.py](file://scripts/test_cute_dsl.py)
 - [explore_cute_dsl.py](file://scripts/explore_cute_dsl.py)
 - [test_cutile.py](file://scripts/test_cutile.py)
+- [test_quantization_accuracy.py](file://tests/test_quantization_accuracy.py)
 - [gdn_decode_dsl.py](file://src/kernels/cute_dsl/gdn_decode_dsl.py)
 - [gdn_decode_cutile.py](file://src/kernels/cutile/gdn_decode_cutile.py)
 - [gdn_decode_triton.py](file://src/kernels/triton/gdn_decode_triton.py)
@@ -28,19 +31,21 @@
 - [gdn_decode_v8.cuh](file://src/kernels/cuda/gdn_decode_v8.cuh)
 - [gdn_decode_v9.cuh](file://src/kernels/cute/gdn_decode_v9.cuh)
 - [gdn_decode_v10.cuh](file://src/kernels/cute/gdn_decode_v10.cuh)
+- [gdn_decode_v10.cuh](file://src/kernels/cute_cpp/gdn_decode_v10.cuh)
+- [gdn_decode_ptx.cuh](file://src/kernels/ptx/gdn_decode_ptx.cuh)
 - [PERFORMANCE.md](file://docs/PERFORMANCE.md)
+- [ZHIHU_GDN_QUANTIZATION.md](file://docs/ZHIHU_GDN_QUANTIZATION.md)
 - [debug_prefill.py](file://scripts/debug_prefill.py)
 - [debug_prefill2.py](file://scripts/debug_prefill2.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive CuTe DSL vs CuTe C++ performance comparison system demonstrating 800x+ performance advantage
-- Integrated cuTile vs Triton benchmarking framework with per-slice and batched implementations
-- Implemented unified prefill benchmarking across all frameworks (Triton, CUDA, CuTe, PTX)
-- Enhanced with detailed performance comparison matrices and statistical analysis
-- Expanded cloud execution with CUTLASS DSL and cuTile support for NVIDIA B200 GPUs
-- Added comprehensive prefill optimization analysis with chunking strategies
+- Added comprehensive quantization performance benchmarking capabilities with BF16, FP8, and FP4 state compression
+- Integrated new quantization accuracy testing framework with detailed precision analysis
+- Enhanced benchmarking system with memory-bound performance analysis and compression ratio validation
+- Added real CUDA kernel support for quantized state implementations across v7-v10 kernels
+- Expanded documentation with quantization-specific performance analysis and engineering recommendations
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -55,20 +60,24 @@
 10. [Appendices](#appendices)
 
 ## Introduction
-This document explains the comprehensive benchmarking framework and execution system for the Gated Delta Net (GDN) kernels across multiple kernel versions (v5-v10) on the Modal cloud platform. The framework has evolved from a simple Triton-based benchmark to a unified system supporting CUDA kernels with advanced features like Tensor Memory Accelerator (TMA), CuTe DSL, cuTile, and various precision optimizations. It covers cloud integration for GPU execution (NVIDIA B200), volume setup, workload provisioning, and comprehensive benchmark orchestration with correctness validation.
+This document explains the comprehensive benchmarking framework and execution system for the Gated Delta Net (GDN) kernels across multiple kernel versions (v5-v10) on the Modal cloud platform. The framework has evolved from a simple Triton-based benchmark to a unified system supporting CUDA kernels with advanced features like Tensor Memory Accelerator (TMA), CuTe DSL, cuTile, and extensive quantization performance benchmarking capabilities.
 
-The framework now supports extensive kernel version testing, adaptive batch size optimization, real CUDA library benchmarking with performance validation against Triton baselines, and systematic performance comparison between CuTe DSL vs CuTe C++, cuTile vs Triton, and unified prefill benchmarking across all frameworks. It provides detailed performance analysis across different hardware configurations and kernel implementations, demonstrating significant performance improvements with advanced DSL techniques and chunking strategies.
+The framework now includes sophisticated quantization performance benchmarking with BF16, FP8, and FP4 state compression, comprehensive accuracy testing with detailed precision analysis, and systematic performance comparison between different quantization schemes. It covers cloud integration for GPU execution (NVIDIA B200), volume setup, workload provisioning, and comprehensive benchmark orchestration with correctness validation and memory-bound performance analysis.
+
+The quantization benchmarking system provides detailed performance analysis across different compression ratios (2x, 4x, 8x) and validates theoretical memory bandwidth gains against practical implementation results. It includes both simulation-based performance testing and real CUDA kernel benchmarking with proper quantization support.
 
 ## Project Structure
 The repository organizes the benchmarking stack into:
-- **Unified benchmarking scripts**: [bench_all_versions.py](file://scripts/bench_all_versions.py), [bench_cuda_real.py](file://scripts/bench_cuda_real.py), [bench_cute_vs_triton.py](file://scripts/bench_cute_vs_triton.py), [bench_cute_dsl_vs_cpp.py](file://scripts/bench_cute_dsl_vs_cpp.py), [bench_cutile_vs_triton.py](file://scripts/bench_cutile_vs_triton.py), [bench_prefill_all.py](file://scripts/bench_prefill_all.py)
-- **CUDA kernel compilation**: [build_cuda.py](file://scripts/build_cuda.py) for compiling v5-v10 kernels
+- **Unified benchmarking scripts**: [bench_all_versions.py](file://scripts/bench_all_versions.py), [bench_cuda_real.py](file://scripts/bench_cuda_real.py), [bench_cute_vs_triton.py](file://scripts/bench_cute_vs_triton.py), [bench_cute_dsl_vs_cpp.py](file://scripts/bench_cute_dsl_vs_cpp.py), [bench_cutile_vs_triton.py](file://scripts/bench_cutile_vs_triton.py), [bench_prefill_all.py](file://scripts/bench_prefill_all.py), [bench_quantization_perf.py](file://benchmarks/bench_quantization_perf.py)
+- **Modal benchmarking integration**: [bench_modal.py](file://benchmarks/bench_modal.py) for FlashInfer benchmark orchestration
+- **Quantization testing framework**: [test_quantization_accuracy.py](file://tests/test_quantization_accuracy.py) for precision validation
+- **CUDA kernel compilation**: [build_cuda.py](file://scripts/build_cuda.py) for compiling v5-v10 kernels with quantization support
 - **Volume setup**: [setup_volume.py](file://scripts/setup_volume.py) for creating synthetic or HF datasets
 - **CuTe DSL testing**: [test_cute_dsl.py](file://scripts/test_cute_dsl.py), [explore_cute_dsl.py](file://scripts/explore_cute_dsl.py) for DSL validation
 - **cuTile testing**: [test_cutile.py](file://scripts/test_cutile.py) for cuTile validation
-- **Kernel implementations**: Multi-version support (v5-v10) with CUDA, CuTe, and Triton implementations
+- **Kernel implementations**: Multi-version support (v5-v10) with CUDA, CuTe, PTX, and quantization variants
 - **Workload definitions**: JSON specification files under [flashinfer_trace/definitions/gdn](file://flashinfer_trace/definitions/gdn)
-- **Documentation**: Performance tracking and optimization guides
+- **Documentation**: Performance tracking, quantization analysis, and optimization guides
 - **Debugging utilities**: Scripts for correctness validation and framework evaluation
 
 ```mermaid
@@ -80,7 +89,14 @@ BCT["scripts/bench_cute_vs_triton.py"]
 BCD["scripts/bench_cute_dsl_vs_cpp.py"]
 BCL["scripts/bench_cutile_vs_triton.py"]
 BPA["scripts/bench_prefill_all.py"]
+BQP["benchmarks/bench_quantization_perf.py"]
 BK["scripts/bench_kernels.py"]
+END
+subgraph "Modal Integration"
+BM["benchmarks/bench_modal.py"]
+END
+subgraph "Quantization Testing"
+TQA["tests/test_quantization_accuracy.py"]
 END
 subgraph "CuTe DSL Infrastructure"
 TCD["scripts/test_cute_dsl.py"]
@@ -106,6 +122,8 @@ CUDA7["src/kernels/cuda/gdn_decode_v7.cuh"]
 CUDA8["src/kernels/cuda/gdn_decode_v8.cuh"]
 CUTE9["src/kernels/cute/gdn_decode_v9.cuh"]
 CUTE10["src/kernels/cute/gdn_decode_v10.cuh"]
+CPP10["src/kernels/cute_cpp/gdn_decode_v10.cuh"]
+PTX["src/kernels/ptx/gdn_decode_ptx.cuh"]
 END
 subgraph "Workload Definitions"
 DEF_DEC["gdn_decode_* JSON"]
@@ -113,6 +131,7 @@ DEF_PREF["gdn_prefill_* JSON"]
 END
 subgraph "Documentation"
 PERF["docs/PERFORMANCE.md"]
+QUANT["docs/ZHIHU_GDN_QUANTIZATION.md"]
 ROAD["docs/ROADMAP.md"]
 END
 BAV --> CUDA5
@@ -131,6 +150,9 @@ BCL --> CUTILE
 BCL --> TRITON
 BPA --> PREFILL_DSL
 BPA --> PREFILL_TRITON
+BQP --> PERF
+TQA --> QUANT
+BM --> PERF
 TCD --> DSL
 ECD --> DSL
 TCL --> CUTILE
@@ -145,6 +167,8 @@ CUDA7 --> LIB
 CUDA8 --> LIB
 CUTE9 --> LIB
 CUTE10 --> LIB
+CPP10 --> LIB
+PTX --> LIB
 ```
 
 **Diagram sources**
@@ -154,6 +178,9 @@ CUTE10 --> LIB
 - [bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
 - [bench_cutile_vs_triton.py:1-359](file://scripts/bench_cutile_vs_triton.py#L1-L359)
 - [bench_prefill_all.py:1-331](file://scripts/bench_prefill_all.py#L1-L331)
+- [bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
+- [bench_modal.py:1-330](file://benchmarks/bench_modal.py#L1-L330)
+- [test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
 - [test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
 - [explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
 - [test_cutile.py:1-339](file://scripts/test_cutile.py#L1-L339)
@@ -173,19 +200,26 @@ CUTE10 --> LIB
 - [bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
 - [bench_cutile_vs_triton.py:1-359](file://scripts/bench_cutile_vs_triton.py#L1-L359)
 - [bench_prefill_all.py:1-331](file://scripts/bench_prefill_all.py#L1-L331)
+- [bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
+- [bench_modal.py:1-330](file://benchmarks/bench_modal.py#L1-L330)
+- [test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
 - [build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
 
 ## Core Components
-- **Unified benchmarking system**: Seven main scripts for comprehensive benchmarking scenarios - bench_all_versions.py for multi-version testing, bench_cuda_real.py for real CUDA kernel validation, bench_cute_vs_triton.py for CuTe vs Triton comparison, bench_cute_dsl_vs_cpp.py for CuTe DSL vs CuTe C++ vs Triton comparison, bench_cutile_vs_triton.py for cuTile vs Triton comparison, bench_prefill_all.py for unified prefill benchmarking, and bench_kernels.py for kernel-specific testing
+- **Unified benchmarking system**: Eight main scripts for comprehensive benchmarking scenarios - bench_all_versions.py for multi-version testing, bench_cuda_real.py for real CUDA kernel validation, bench_cute_vs_triton.py for CuTe vs Triton comparison, bench_cute_dsl_vs_cpp.py for CuTe DSL vs CuTe C++ vs Triton comparison, bench_cutile_vs_triton.py for cuTile vs Triton comparison, bench_prefill_all.py for unified prefill benchmarking, bench_quantization_perf.py for quantization performance analysis, and bench_kernels.py for kernel-specific testing
+- **Modal benchmarking integration**: [bench_modal.py](file://benchmarks/bench_modal.py) for FlashInfer benchmark orchestration with solution vs baseline comparison
+- **Quantization performance benchmarking**: [bench_quantization_perf.py](file://benchmarks/bench_quantization_perf.py) for comprehensive state compression analysis across BF16, FP8, and FP4 precisions
+- **Quantization accuracy testing**: [test_quantization_accuracy.py](file://tests/test_quantization_accuracy.py) for detailed precision validation and error accumulation analysis
 - **CuTe DSL integration**: Comprehensive testing and validation of CUTLASS DSL kernels with automatic availability detection and performance demonstration
 - **cuTile integration**: NVIDIA cuTile kernel testing with per-slice and batched implementations for optimal performance
-- **CUDA kernel compilation**: Automated compilation of v5-v10 kernels with nvcc for B200 (sm_100) architecture
+- **CUDA kernel compilation**: Automated compilation of v5-v10 kernels with nvcc for B200 (sm_100) architecture and quantization support
 - **Volume management**: Synthetic dataset generation and HuggingFace dataset download for comprehensive testing
-- **Multi-version kernel support**: Complete coverage from Triton v5 baseline through CuTe v10 advanced implementations
+- **Multi-version kernel support**: Complete coverage from Triton v5 baseline through CuTe v10 advanced implementations with quantization variants
 - **Adaptive batch optimization**: Intelligent BLOCK_V sizing based on batch size for optimal performance
 - **Correctness validation**: Comprehensive verification framework comparing CUDA kernels against Triton baseline
 - **Performance comparison framework**: Systematic benchmarking across different batch sizes, frameworks, and optimization strategies
 - **Prefill optimization analysis**: Chunking strategies and arithmetic intensity analysis for compute-bound scenarios
+- **Quantization-aware performance analysis**: Memory-bound optimization with compression ratio validation and bandwidth utilization analysis
 
 Key responsibilities:
 - **Multi-version benchmarking**: [benchmark_versions function:38-404](file://scripts/bench_all_versions.py#L38-L404)
@@ -194,6 +228,8 @@ Key responsibilities:
 - **CuTe DSL vs CuTe C++ vs Triton**: [benchmark_cute_dsl_vs_cpp function:29-325](file://scripts/bench_cute_dsl_vs_cpp.py#L29-L325)
 - **cuTile vs Triton comparison**: [bench_cutile_vs_triton function:35-351](file://scripts/bench_cutile_vs_triton.py#L35-L351)
 - **Unified prefill benchmarking**: [benchmark_prefill_all function:34-323](file://scripts/bench_prefill_all.py#L34-L323)
+- **Quantization performance analysis**: [benchmark_precision function:127-228](file://benchmarks/bench_quantization_perf.py#L127-L228)
+- **Quantization accuracy testing**: [test_quantization_accuracy function:219-330](file://tests/test_quantization_accuracy.py#L219-L330)
 - **CUDA compilation**: [build_cuda_kernels function:69-373](file://scripts/build_cuda.py#L69-L373)
 - **Volume setup**: [setup_synthetic function:146-169](file://scripts/setup_volume.py#L146-L169)
 - **Kernel version support**: [v5-v10 kernel implementations:1-320](file://src/kernels/cuda/gdn_decode_v5.cuh#L1-L320)
@@ -205,11 +241,13 @@ Key responsibilities:
 - [bench_cute_dsl_vs_cpp.py:29-325](file://scripts/bench_cute_dsl_vs_cpp.py#L29-L325)
 - [bench_cutile_vs_triton.py:35-351](file://scripts/bench_cutile_vs_triton.py#L35-L351)
 - [bench_prefill_all.py:34-323](file://scripts/bench_prefill_all.py#L34-L323)
+- [bench_quantization_perf.py:127-228](file://benchmarks/bench_quantization_perf.py#L127-L228)
+- [test_quantization_accuracy.py:219-330](file://tests/test_quantization_accuracy.py#L219-L330)
 - [build_cuda.py:69-373](file://scripts/build_cuda.py#L69-L373)
 - [setup_volume.py:146-169](file://scripts/setup_volume.py#L146-L169)
 
 ## Architecture Overview
-The system now features a comprehensive benchmarking architecture supporting multiple kernel versions, frameworks, and optimization strategies with extensive validation, performance analysis, and systematic comparison capabilities. It includes automated CUDA compilation, real kernel benchmarking, CuTe DSL and cuTile testing, unified prefill benchmarking, and multi-version comparison frameworks.
+The system now features a comprehensive benchmarking architecture supporting multiple kernel versions, frameworks, optimization strategies, and quantization capabilities with extensive validation, performance analysis, and systematic comparison capabilities. It includes automated CUDA compilation, real kernel benchmarking, CuTe DSL and cuTile testing, unified prefill benchmarking, quantization performance analysis, and multi-version comparison frameworks.
 
 ```mermaid
 sequenceDiagram
@@ -220,6 +258,9 @@ participant BCT as "bench_cute_vs_triton.py"
 participant BCD as "bench_cute_dsl_vs_cpp.py"
 participant BCL as "bench_cutile_vs_triton.py"
 participant BPA as "bench_prefill_all.py"
+participant BQP as "bench_quantization_perf.py"
+participant BM as "bench_modal.py"
+participant TQA as "test_quantization_accuracy.py"
 participant BC as "build_cuda.py"
 participant CUDA as "CUDA Library"
 participant FS as "Modal Volume"
@@ -227,31 +268,31 @@ CLI->>BAV : "modal run scripts/bench_all_versions.py --versions all"
 BAV->>FS : "Load test data and configurations"
 BAV->>BAV : "Run v5-v8 benchmarks with adaptive BLOCK_V"
 BAV->>CLI : "Print version comparison results"
+CLI->>BQP : "modal run benchmarks/bench_quantization_perf.py"
+BQP->>FS : "Run quantization performance analysis"
+BQP->>BQP : "Benchmark BF16, FP8, FP4 states"
+BQP->>CLI : "Print compression vs performance analysis"
+CLI->>TQA : "modal run tests/test_quantization_accuracy.py"
+TQA->>FS : "Run quantization accuracy tests"
+TQA->>TQA : "Test BF16, FP8, FP4 precision"
+TQA->>CLI : "Print accuracy vs compression analysis"
 CLI->>BC : "modal run scripts/build_cuda.py"
 BC->>FS : "Compile v5-v10 kernels with nvcc"
-BC->>FS : "Generate libgdn_kernels.so"
+BC->>FS : "Generate libgdn_kernels.so with quantization"
 BC->>CLI : "Verify library exports"
 CLI->>BCR : "modal run scripts/bench_cuda_real.py"
 BCR->>FS : "Load compiled CUDA library"
 BCR->>BCR : "Validate correctness vs Triton v5"
-BCR->>BCR : "Benchmark v7-v10 kernels"
+BCR->>BCR : "Benchmark v7-v10 kernels with quantization"
 BCR->>CLI : "Print CUDA vs Triton comparison"
 CLI->>BCT : "modal run scripts/bench_cute_vs_triton.py"
 BCT->>FS : "Load CuTe DSL and Triton kernels"
 BCT->>BCT : "Benchmark across B=1,4,16,64"
 BCT->>CLI : "Print CuTe vs Triton performance ratios"
-CLI->>BCD : "modal run scripts/bench_cute_dsl_vs_cpp.py"
-BCD->>FS : "Load CuTe DSL, CuTe C++, and Triton kernels"
-BCD->>BCD : "Benchmark across B=1,4,16,64"
-BCD->>CLI : "Print comprehensive framework comparison"
-CLI->>BCL : "modal run scripts/bench_cutile_vs_triton.py"
-BCL->>FS : "Load cuTile and Triton kernels"
-BCL->>BCL : "Benchmark per-slice and batched cuTile"
-BCL->>CLI : "Print cuTile vs Triton performance"
-CLI->>BPA : "modal run scripts/bench_prefill_all.py"
-BPA->>FS : "Load prefill workloads and kernels"
-BPA->>BPA : "Benchmark Triton, CUDA, CuTe, PTX prefill"
-BPA->>CLI : "Print unified prefill comparison"
+CLI->>BM : "modal run benchmarks/bench_modal.py"
+BM->>FS : "Run FlashInfer benchmark orchestration"
+BM->>BM : "Solution vs baseline comparison"
+BM->>CLI : "Print benchmark results"
 ```
 
 **Diagram sources**
@@ -261,12 +302,15 @@ BPA->>CLI : "Print unified prefill comparison"
 - [bench_cute_dsl_vs_cpp.py:328-333](file://scripts/bench_cute_dsl_vs_cpp.py#L328-L333)
 - [bench_cutile_vs_triton.py:354-359](file://scripts/bench_cutile_vs_triton.py#L354-L359)
 - [bench_prefill_all.py:326-331](file://scripts/bench_prefill_all.py#L326-L331)
+- [bench_quantization_perf.py:231-267](file://benchmarks/bench_quantization_perf.py#L231-L267)
+- [bench_modal.py:250-330](file://benchmarks/bench_modal.py#L250-L330)
+- [test_quantization_accuracy.py:337-361](file://tests/test_quantization_accuracy.py#L337-L361)
 - [build_cuda.py:416-436](file://scripts/build_cuda.py#L416-L436)
 
 ## Detailed Component Analysis
 
 ### Unified Benchmarking System
-The new benchmarking system replaces the old bench_modal.py approach with seven specialized scripts:
+The new benchmarking system replaces the old bench_modal.py approach with eight specialized scripts:
 
 **bench_all_versions.py**: Comprehensive multi-version benchmarking supporting v5-v8 with adaptive batch optimization
 - Tests kernel versions v5, v6, v7, v8 with configurable batch sizes (1, 16, 64, 256)
@@ -274,11 +318,11 @@ The new benchmarking system replaces the old bench_modal.py approach with seven 
 - Provides bandwidth calculations and performance comparisons across versions
 - Supports both synthetic and real kernel execution
 
-**bench_cuda_real.py**: Real CUDA kernel validation and benchmarking
+**bench_cuda_real.py**: Real CUDA kernel validation and benchmarking with quantization support
 - Validates correctness of compiled CUDA kernels against Triton v5 baseline
 - Benchmarks real CUDA v7, v8, v9, v10 kernels with comprehensive performance analysis
 - Includes CUDA Graph optimization for low-latency launches
-- Supports both FP32 and quantized precision modes (FP4, FP8)
+- Supports both FP32 and quantized precision modes (FP4, FP8, BF16)
 
 **bench_cute_vs_triton.py**: Systematic CuTe DSL vs Triton performance comparison
 - Demonstrates significant performance differences across different batch sizes
@@ -304,6 +348,12 @@ The new benchmarking system replaces the old bench_modal.py approach with seven 
 - Provides roofline analysis and framework recommendations
 - Supports multiple sequence configurations and batch sizes
 
+**bench_quantization_perf.py**: Comprehensive quantization performance benchmarking
+- Measures execution time for GDN decode with different state precisions: FP32, BF16, FP8, FP4
+- Validates theoretical speedup = compression ratio (limited by HBM bandwidth)
+- Supports batch sizes B=1,4,16,64,64 with detailed performance analysis
+- Provides memory bandwidth calculations and compression ratio validation
+
 **Section sources**
 - [bench_all_versions.py:1-444](file://scripts/bench_all_versions.py#L1-L444)
 - [bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
@@ -311,6 +361,64 @@ The new benchmarking system replaces the old bench_modal.py approach with seven 
 - [bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
 - [bench_cutile_vs_triton.py:1-359](file://scripts/bench_cutile_vs_triton.py#L1-L359)
 - [bench_prefill_all.py:1-331](file://scripts/bench_prefill_all.py#L1-L331)
+- [bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
+
+### Quantization Performance Benchmarking System
+The framework now includes comprehensive quantization performance benchmarking capabilities:
+
+**bench_quantization_perf.py**: Dedicated quantization performance analysis
+- Measures execution time for GDN decode with different state precisions: FP32 (baseline), BF16 (2x compression), FP8 (4x compression), FP4 (8x compression)
+- Validates theoretical speedup = compression ratio (limited by HBM bandwidth)
+- Supports batch sizes B=1,4,16,64,64 with detailed performance analysis
+- Provides memory bandwidth calculations and compression ratio validation
+- Includes expected vs actual speedup analysis for memory-bound kernels
+
+**Quantization simulation framework**: [test_quantization_accuracy.py](file://tests/test_quantization_accuracy.py)
+- Tests accuracy loss when using BF16/FP8/FP4 quantized state vs FP32
+- Simulates GDN decode kernel behavior over multiple iterations
+- Validates precision vs compression trade-offs with detailed error analysis
+- Provides error accumulation analysis and stability testing
+
+**Quantization kernel implementations**: Real CUDA support across v7-v10 kernels
+- BF16 state compression with 2x memory reduction and ~0.6% error
+- FP8 E4M3 quantization with 4x memory reduction and ~11% error
+- FP4 E2M1 quantization with 8x memory reduction and ~55% error
+- Per-row dynamic scaling for optimal quantization accuracy
+- Mixed precision approaches for production deployment
+
+**Performance analysis**: Memory-bound optimization validation
+- All kernels are highly memory-bound with focus on bandwidth utilization
+- Compression ratio directly correlates with performance improvement
+- PyTorch simulation overhead may mask true memory bandwidth gains
+- Real CUDA kernels (v10, PTX) show closer to theoretical speedup
+
+**Section sources**
+- [bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
+- [test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
+- [gdn_decode_v7.cuh:1-634](file://src/kernels/cuda/gdn_decode_v7.cuh#L1-L634)
+- [gdn_decode_v8.cuh:1-653](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L653)
+- [gdn_decode_v10.cuh:1-1355](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L1-L1355)
+- [gdn_decode_ptx.cuh:1-1423](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
+
+### Modal Benchmarking Integration
+The framework integrates with FlashInfer's benchmark orchestration system:
+
+**bench_modal.py**: FlashInfer benchmark integration
+- Runs GDN kernel benchmarks on Modal B200 with solution vs baseline comparison
+- Supports decode and prefill kernel benchmarking
+- Provides side-by-side comparison of solution vs Python baseline
+- Handles CUDA kernel vs Triton kernel comparisons
+- Supports multiple kernel configurations and batch sizes
+
+**FlashInfer integration**: Workload definition and solution packaging
+- Uses JSON specification files for workload definitions
+- Supports solution vs baseline comparison workflows
+- Handles multi-kernel benchmarking orchestration
+- Provides standardized performance evaluation metrics
+
+**Section sources**
+- [bench_modal.py:1-330](file://benchmarks/bench_modal.py#L1-L330)
+- [config.toml:1-10](file://gdn_decode_qk4_v8_d128_k_last/config.toml#L1-L10)
 
 ### CuTe DSL Integration and Testing
 The framework now includes comprehensive CuTe DSL testing infrastructure:
@@ -377,6 +485,7 @@ The build system automates compilation of all kernel versions with proper depend
 
 - **CUDA 12.8 support**: Full B200 (sm_100) compatibility with modern CUDA features
 - **CUTLASS integration**: CuTe DSL and cuTile support through CUTLASS headers for advanced kernel optimization
+- **Quantization support**: FP8, FP4, and BF16 state compression in CUDA kernels
 - **Combined compilation**: Single shared library containing all kernel versions
 - **External C wrappers**: ctypes-compatible function exports for Python integration
 - **CUDA Graph support**: Low-latency kernel launching for small batches
@@ -388,22 +497,23 @@ The build system automates compilation of all kernel versions with proper depend
 - [build_cuda.py:110-330](file://scripts/build_cuda.py#L110-L330)
 
 ### Multi-Version Kernel Support
-The framework now supports a complete evolution of GDN kernels:
+The framework now supports a complete evolution of GDN kernels with quantization capabilities:
 
 **v5 (Baseline)**: Triton implementation with auto-tuning and basic optimizations
 **v6 (TMA)**: CUDA implementation with Tensor Memory Accelerator for async state loading
 **v7 (Quantization)**: Advanced CUDA with FP4/FP8 quantization and vectorized loads
 **v8 (Warp Specialization)**: Maximum performance with warp specialization and FP8 optimization
 **v9 (CuTe Swizzle)**: CuTe DSL with SMEM swizzling for optimal memory access patterns
-**v10 (Advanced CuTe)**: Latest CuTe optimizations with TMA async copy capabilities
+**v10 (Advanced CuTe)**: Latest CuTe optimizations with TMA async copy capabilities and quantization support
 
+**Quantization variants**: All kernel versions support BF16, FP8, and FP4 state compression with mixed precision computation
 **Section sources**
 - [gdn_decode_v5.cuh:1-320](file://src/kernels/cuda/gdn_decode_v5.cuh#L1-L320)
 - [gdn_decode_v6.cuh:1-310](file://src/kernels/cuda/gdn_decode_v6.cuh#L1-L310)
 - [gdn_decode_v7.cuh:1-634](file://src/kernels/cuda/gdn_decode_v7.cuh#L1-L634)
 - [gdn_decode_v8.cuh:1-653](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L653)
 - [gdn_decode_v9.cuh:1-200](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L200)
-- [gdn_decode_v10.cuh:1-200](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L200)
+- [gdn_decode_v10.cuh:1-1355](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L1-L1355)
 
 ### Adaptive Batch Optimization
 The benchmarking system implements intelligent batch size optimization:
@@ -429,12 +539,14 @@ The framework includes robust correctness validation:
 - **Error reporting**: Detailed error messages with maximum and mean differences
 - **CuTe DSL validation**: Automatic availability detection and fallback mechanisms
 - **cuTile validation**: Per-slice and batched implementation correctness checks
+- **Quantization validation**: Accuracy testing across different precision levels
 
 **Section sources**
 - [bench_cuda_real.py:422-460](file://scripts/bench_cuda_real.py#L422-L460)
 - [bench_cuda_real.py:474-492](file://scripts/bench_cuda_real.py#L474-L492)
 - [test_cute_dsl.py:89-127](file://scripts/test_cute_dsl.py#L89-L127)
 - [test_cutile.py:1-339](file://scripts/test_cutile.py#L1-L339)
+- [test_quantization_accuracy.py:219-330](file://tests/test_quantization_accuracy.py#L219-L330)
 
 ### Volume Management and Dataset Generation
 Enhanced volume management supports both synthetic and real-world datasets:
@@ -460,12 +572,15 @@ The benchmarking system provides comprehensive performance analysis:
 - **Framework comparison**: Systematic comparison across different frameworks with detailed ratios
 - **Roofline analysis**: Arithmetic intensity and compute-bound optimization analysis
 - **Chunking optimization**: Prefill optimization with chunk-based processing strategies
+- **Quantization analysis**: Compression ratio validation and memory-bound performance assessment
+- **Accuracy validation**: Precision testing across different quantization schemes
 
 **Section sources**
 - [bench_all_versions.py:325-345](file://scripts/bench_all_versions.py#L325-L345)
 - [bench_cuda_real.py:547-574](file://scripts/bench_cuda_real.py#L547-L574)
 - [bench_cute_vs_triton.py:155-170](file://scripts/bench_cute_vs_triton.py#L155-L170)
 - [bench_prefill_all.py:284-323](file://scripts/bench_prefill_all.py#L284-L323)
+- [bench_quantization_perf.py:208-228](file://benchmarks/bench_quantization_perf.py#L208-L228)
 
 ## Dependency Analysis
 The comprehensive benchmarking system introduces several key dependencies:
@@ -474,12 +589,13 @@ The comprehensive benchmarking system introduces several key dependencies:
 - **CUDA 12.8**: Full B200 (sm_100) compatibility for advanced kernel features
 - **CUTLASS**: CuTe DSL and cuTile support for advanced kernel optimization
 - **Triton**: Baseline implementation for correctness validation
-- **PyTorch**: CUDA operations and tensor management
+- **PyTorch**: CUDA operations and tensor management for quantization testing
 - **ctypes**: Python-C integration for CUDA library access
 - **Tabulate**: Formatted result presentation
 - **nvidia-cutlass-dsl**: CUTLASS DSL for advanced kernel development
 - **cuda-tile**: NVIDIA cuTile for tile-based GPU programming
 - **cupy-cuda13x**: CuPy integration for cuTile kernels
+- **FlashInfer**: Benchmark orchestration and solution management
 
 ```mermaid
 graph LR
@@ -489,6 +605,9 @@ BCT["bench_cute_vs_triton.py"] --> MODAL
 BCD["bench_cute_dsl_vs_cpp.py"] --> MODAL
 BCL["bench_cutile_vs_triton.py"] --> MODAL
 BPA["bench_prefill_all.py"] --> MODAL
+BQP["bench_quantization_perf.py"] --> MODAL
+BM["bench_modal.py"] --> FLASHINFER["FlashInfer"]
+TQA["test_quantization_accuracy.py"] --> MODAL
 BC["build_cuda.py"] --> CUDA["CUDA 12.8"]
 BC --> CUTLASS["CUTLASS Headers"]
 BC --> NVCC["nvcc Compiler"]
@@ -506,6 +625,7 @@ BCR --> TABULATE
 BCT --> TABULATE
 BCL --> TABULATE
 BPA --> TABULATE
+BQP --> TABULATE
 ```
 
 **Diagram sources**
@@ -515,6 +635,8 @@ BPA --> TABULATE
 - [bench_cute_dsl_vs_cpp.py:13-21](file://scripts/bench_cute_dsl_vs_cpp.py#L13-L21)
 - [bench_cutile_vs_triton.py:12-27](file://scripts/bench_cutile_vs_triton.py#L12-L27)
 - [bench_prefill_all.py:19-26](file://scripts/bench_prefill_all.py#L19-L26)
+- [bench_quantization_perf.py:19-25](file://benchmarks/bench_quantization_perf.py#L19-L25)
+- [bench_modal.py:21-32](file://benchmarks/bench_modal.py#L21-L32)
 - [build_cuda.py:18-34](file://scripts/build_cuda.py#L18-L34)
 
 **Section sources**
@@ -524,6 +646,8 @@ BPA --> TABULATE
 - [bench_cute_dsl_vs_cpp.py:13-21](file://scripts/bench_cute_dsl_vs_cpp.py#L13-L21)
 - [bench_cutile_vs_triton.py:12-27](file://scripts/bench_cutile_vs_triton.py#L12-L27)
 - [bench_prefill_all.py:19-26](file://scripts/bench_prefill_all.py#L19-L26)
+- [bench_quantization_perf.py:19-25](file://benchmarks/bench_quantization_perf.py#L19-L25)
+- [bench_modal.py:21-32](file://benchmarks/bench_modal.py#L21-L32)
 - [build_cuda.py:18-34](file://scripts/build_cuda.py#L18-L34)
 
 ## Performance Considerations
@@ -531,7 +655,7 @@ The comprehensive benchmarking system addresses several critical performance asp
 
 - **Memory-bound optimization**: All kernels are highly memory-bound with focus on bandwidth utilization
 - **Adaptive BLOCK_V sizing**: Intelligent grid configuration based on batch size for optimal occupancy
-- **Precision trade-offs**: FP4/FP8 quantization provides significant bandwidth savings with controlled accuracy loss
+- **Precision trade-offs**: FP4/FP8/BF16 quantization provides significant bandwidth savings with controlled accuracy loss
 - **TMA utilization**: Tensor Memory Accelerator enables efficient async state loading in CUDA kernels
 - **Warp specialization**: v8 and later versions utilize specialized warp configurations for maximum throughput
 - **CuTe optimization**: Advanced DSL and swizzling techniques optimize memory access patterns
@@ -540,6 +664,8 @@ The comprehensive benchmarking system addresses several critical performance asp
 - **Framework comparison**: Comprehensive analysis of CuTe DSL vs CuTe C++ vs Triton performance
 - **Prefill optimization**: Chunking strategies for compute-bound prefill scenarios
 - **Roofline analysis**: Arithmetic intensity analysis and optimization recommendations
+- **Quantization validation**: Memory-bound performance analysis with compression ratio validation
+- **Mixed precision strategies**: Optimal balance between memory savings and computational accuracy
 
 **Section sources**
 - [PERFORMANCE.md:1-158](file://docs/PERFORMANCE.md#L1-L158)
@@ -549,6 +675,7 @@ The comprehensive benchmarking system addresses several critical performance asp
 - [bench_cute_vs_triton.py:136-137](file://scripts/bench_cute_vs_triton.py#L136-L137)
 - [bench_cute_dsl_vs_cpp.py:301-323](file://scripts/bench_cute_dsl_vs_cpp.py#L301-L323)
 - [bench_prefill_all.py:309-321](file://scripts/bench_prefill_all.py#L309-L321)
+- [bench_quantization_perf.py:329-335](file://benchmarks/bench_quantization_perf.py#L329-L335)
 
 ## Troubleshooting Guide
 Common issues and remedies in the comprehensive benchmarking system:
@@ -557,7 +684,7 @@ Common issues and remedies in the comprehensive benchmarking system:
 - **CUDA compilation errors**: Verify CUDA 12.8 installation and sm_100 architecture compatibility
 - **Version not supported**: Check that requested kernel version is included in compiled library
 - **Batch size limitations**: Some versions may not support very large batch sizes due to memory constraints
-- **Precision issues**: Quantized kernels (FP4/FP8) may have different numerical behavior than FP32
+- **Precision issues**: Quantized kernels (FP4/FP8/BF16) may have different numerical behavior than FP32
 - **TMA compatibility**: TMA features require compatible CUDA runtime and driver versions
 - **Memory overflow**: Large batch sizes may exceed GPU memory limits, requiring reduced batch sizes
 - **CuTe DSL not available**: Install nvidia-cutlass-dsl package for DSL kernel support
@@ -565,6 +692,8 @@ Common issues and remedies in the comprehensive benchmarking system:
 - **Framework comparison failures**: Ensure both frameworks are available for comparison
 - **Per-slice overhead**: cuTile per-slice implementation may be slower for large batches
 - **Chunking issues**: Prefill chunking requires proper arithmetic intensity analysis
+- **Quantization accuracy**: FP4 quantization may introduce significant errors in GDN state
+- **Compression validation**: Ensure theoretical speedup matches measured performance for memory-bound kernels
 
 **Section sources**
 - [build_cuda.py:50-56](file://scripts/build_cuda.py#L50-L56)
@@ -573,9 +702,10 @@ Common issues and remedies in the comprehensive benchmarking system:
 - [bench_cute_vs_triton.py:57](file://scripts/bench_cute_vs_triton.py#L57)
 - [bench_cute_dsl_vs_cpp.py:46](file://scripts/bench_cute_dsl_vs_cpp.py#L46)
 - [bench_cutile_vs_triton.py:348-349](file://scripts/bench_cutile_vs_triton.py#L348-L349)
+- [bench_quantization_perf.py:259-265](file://benchmarks/bench_quantization_perf.py#L259-L265)
 
 ## Conclusion
-The comprehensive benchmarking framework represents a significant advancement in GDN kernel evaluation, providing comprehensive multi-version testing, real CUDA validation, CuTe DSL and cuTile integration, and systematic performance comparison capabilities. The system successfully bridges the gap between Triton baselines and production CUDA implementations, offering detailed performance analysis across the complete kernel evolution from v5 to v10.
+The comprehensive benchmarking framework represents a significant advancement in GDN kernel evaluation, providing comprehensive multi-version testing, real CUDA validation, CuTe DSL and cuTile integration, quantization performance benchmarking, and systematic performance comparison capabilities. The system successfully bridges the gap between Triton baselines and production CUDA implementations, offering detailed performance analysis across the complete kernel evolution from v5 to v10.
 
 Key achievements include:
 - **Complete kernel coverage**: Support for all versions (v5-v10) with proper compilation and validation
@@ -583,13 +713,15 @@ Key achievements include:
 - **Comprehensive validation**: Robust correctness checking against Triton baselines
 - **CuTe DSL integration**: Advanced DSL kernel testing and performance demonstration
 - **cuTile integration**: NVIDIA cuTile kernel testing with per-slice and batched optimizations
+- **Quantization performance analysis**: Memory-bound optimization with compression ratio validation
 - **Framework comparison**: Detailed performance analysis across different frameworks with 800x+ advantages
 - **Prefill optimization**: Unified prefill benchmarking with chunking strategies and roofline analysis
-- **Production readiness**: Real CUDA library compilation with external C interfaces
+- **Production readiness**: Real CUDA library compilation with external C interfaces and quantization support
 - **Scalable architecture**: Modular design supporting future kernel version additions
 - **Cloud optimization**: Cost-effective cloud execution with proper resource management
+- **Quantization validation**: Comprehensive precision testing with accuracy vs compression trade-off analysis
 
-The framework enables precise performance characterization across different hardware configurations and provides actionable insights for kernel optimization and deployment decisions. The addition of comprehensive framework comparison systems demonstrates the significant advantages of advanced kernel optimization techniques and provides clear guidance for framework selection based on batch size and computational requirements.
+The framework enables precise performance characterization across different hardware configurations and provides actionable insights for kernel optimization and deployment decisions. The addition of comprehensive quantization performance benchmarking demonstrates the significant advantages of advanced kernel optimization techniques and provides clear guidance for framework selection based on batch size and computational requirements.
 
 ## Appendices
 
@@ -600,12 +732,16 @@ The framework enables precise performance characterization across different hard
 - **CuTe DSL vs CuTe C++ vs Triton**: [scripts/bench_cute_dsl_vs_cpp.py:10](file://scripts/bench_cute_dsl_vs_cpp.py#L10)
 - **cuTile vs Triton comparison**: [scripts/bench_cutile_vs_triton.py:9](file://scripts/bench_cutile_vs_triton.py#L9)
 - **Unified prefill benchmarking**: [scripts/bench_prefill_all.py:16](file://scripts/bench_prefill_all.py#L16)
+- **Quantization performance analysis**: [benchmarks/bench_quantization_perf.py:13-16](file://benchmarks/bench_quantization_perf.py#L13-L16)
+- **Quantization accuracy testing**: [tests/test_quantization_accuracy.py:7-11](file://tests/test_quantization_accuracy.py#L7-L11)
+- **Modal benchmarking**: [benchmarks/bench_modal.py:4-9](file://benchmarks/bench_modal.py#L4-L9)
 - **CUDA compilation**: [scripts/build_cuda.py:6-10](file://scripts/build_cuda.py#L6-L10)
 - **Volume setup**: [scripts/setup_volume.py:5-7](file://scripts/setup_volume.py#L5-L7)
 
 ### Appendix B: Configuration Options
 - **Multi-version testing**: `--versions` (v5,v6,v7,v8 or 'all'), `--batches` (1,16,64,256)
 - **Benchmark parameters**: `--warmup` (default: 20), `--iters` (default: 200)
+- **Quantization benchmarking**: `--batch-size` (default: 64), `--precision` (bf16, fp8, fp4)
 - **Framework comparison**: Automatic availability detection, fallback mechanisms
 - **CUDA compilation**: Automatic nvcc compilation with -O3 and --use_fast_math flags
 - **Kernel selection**: Automatic BLOCK_V sizing based on batch size
@@ -614,6 +750,8 @@ The framework enables precise performance characterization across different hard
 - **cuTile configuration**: Per-slice and batched implementation options
 - **Prefill optimization**: Chunking strategies and arithmetic intensity analysis
 - **Roofline analysis**: Framework recommendations based on computational requirements
+- **Quantization analysis**: Compression ratio validation and memory-bound performance assessment
+- **Modal integration**: FlashInfer benchmark orchestration with solution vs baseline comparison
 
 **Section sources**
 - [bench_all_versions.py:10-15](file://scripts/bench_all_versions.py#L10-L15)
@@ -622,5 +760,8 @@ The framework enables precise performance characterization across different hard
 - [bench_cute_dsl_vs_cpp.py:173-179](file://scripts/bench_cute_dsl_vs_cpp.py#L173-L179)
 - [bench_cutile_vs_triton.py:262-263](file://scripts/bench_cutile_vs_triton.py#L262-L263)
 - [bench_prefill_all.py:210-211](file://scripts/bench_prefill_all.py#L210-L211)
+- [bench_quantization_perf.py:271-275](file://benchmarks/bench_quantization_perf.py#L271-L275)
+- [test_quantization_accuracy.py:271-274](file://tests/test_quantization_accuracy.py#L271-L274)
+- [bench_modal.py:251-257](file://benchmarks/bench_modal.py#L251-L257)
 - [build_cuda.py:335-347](file://scripts/build_cuda.py#L335-L347)
 - [bench_cuda_real.py:408-413](file://scripts/bench_cuda_real.py#L408-L413)

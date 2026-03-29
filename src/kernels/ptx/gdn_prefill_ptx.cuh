@@ -132,6 +132,67 @@ __device__ __forceinline__ void mma_m16n8k16_bf16(
 }
 
 // ============================================================
+// TMA (Tensor Memory Accelerator) PTX Primitives
+// For Blackwell (sm_100) bulk async memory operations
+// ============================================================
+
+// Initialize mbarrier with expected arrival count
+__device__ __forceinline__ void ptx_mbarrier_init(uint64_t* mbar, int count) {
+    asm volatile("mbarrier.init.shared.b64 [%0], %1;"
+        :: "r"((uint32_t)__cvta_generic_to_shared(mbar)), "r"(count));
+}
+
+// Announce expected bytes for TMA transaction
+__device__ __forceinline__ void ptx_mbarrier_arrive_tx(uint64_t* mbar, int bytes) {
+    asm volatile("mbarrier.arrive.expect_tx.shared.b64 _, [%0], %1;"
+        :: "r"((uint32_t)__cvta_generic_to_shared(mbar)), "r"(bytes) : "memory");
+}
+
+// Wait on mbarrier with parity
+__device__ __forceinline__ void ptx_mbarrier_wait(uint64_t* mbar, int phase) {
+    asm volatile(
+        "{\n"
+        ".reg .pred p;\n"
+        "WAIT_LOOP_PF:\n"
+        "mbarrier.try_wait.parity.shared.b64 p, [%0], %1;\n"
+        "@!p bra WAIT_LOOP_PF;\n"
+        "}\n"
+        :: "r"((uint32_t)__cvta_generic_to_shared(mbar)), "r"(phase) : "memory");
+}
+
+// TMA 2D bulk async copy: global tensor -> shared memory
+// Requires: CUtensorMap descriptor, mbarrier
+__device__ __forceinline__ void ptx_tma_load_2d(
+    void* smem, const CUtensorMap* tmap, int x, int y, uint64_t* mbar
+) {
+    uint32_t smem_addr = (uint32_t)__cvta_generic_to_shared(smem);
+    uint32_t mbar_addr = (uint32_t)__cvta_generic_to_shared(mbar);
+    asm volatile(
+        "cp.async.bulk.tensor.2d.shared::cta.global.mbarrier::complete_tx::bytes"
+        " [%0], [%1, {%2, %3}], [%4];"
+        :: "r"(smem_addr), "l"(tmap), "r"(x), "r"(y), "r"(mbar_addr) : "memory");
+}
+
+// cp.async for element-wise async copy (non-TMA)
+__device__ __forceinline__ void ptx_cp_async_16(void* dst, const void* src) {
+    asm volatile("cp.async.ca.shared.global [%0], [%1], 16;"
+        :: "r"((uint32_t)__cvta_generic_to_shared(dst)), "l"(src) : "memory");
+}
+
+__device__ __forceinline__ void ptx_cp_async_commit() {
+    asm volatile("cp.async.commit_group;");
+}
+
+__device__ __forceinline__ void ptx_cp_async_wait_all() {
+    asm volatile("cp.async.wait_all;");
+}
+
+template<int N>
+__device__ __forceinline__ void ptx_cp_async_wait_group() {
+    asm volatile("cp.async.wait_group %0;" :: "n"(N));
+}
+
+// ============================================================
 // Derived Math Functions using PTX
 // ============================================================
 
