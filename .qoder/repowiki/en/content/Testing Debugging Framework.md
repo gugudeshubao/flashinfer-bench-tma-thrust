@@ -28,10 +28,10 @@
 - Added robust debugging tools with direct framework integration
 - Strengthened multi-version benchmarking capabilities
 - Expanded volume management with persistent trace datasets
-- **Added comprehensive FP8/FP4 quantization accuracy testing capabilities**
-- **Enhanced FP8 accuracy testing with simulation of E4M3 and E2M1 quantization**
-- **Integrated Modal-based testing infrastructure for FP8 validation**
-- **Expanded testing infrastructure for FP8 quantization validation**
+- **Enhanced FP8/FP4 quantization accuracy testing with comprehensive multi-precision comparison framework**
+- **Integrated Modal-based testing infrastructure for FP8/F4 validation**
+- **Expanded testing infrastructure for FP4 E2M1 quantization validation**
+- **Added BF16 quantization testing capabilities**
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,7 +42,7 @@
 6. [Volume Management](#volume-management)
 7. [Kernel Implementation Analysis](#kernel-implementation-analysis)
 8. [Performance Validation](#performance-validation)
-9. [FP8 Quantization Accuracy Testing](#fp8-quantization-accuracy-testing)
+9. [Multi-Precision Quantization Testing](#multi-precision-quantization-testing)
 10. [Troubleshooting Guide](#troubleshooting-guide)
 11. [Best Practices](#best-practices)
 
@@ -52,7 +52,7 @@ The Testing Debugging Framework is a comprehensive system designed for validatin
 
 The framework supports multiple kernel versions (v5 through v10) with different optimization strategies including Triton-based kernels, CUDA implementations, and CuTe DSL layouts. It includes sophisticated correctness testing, performance benchmarking, and debugging tools that enable developers to validate kernel implementations against reference baselines with enhanced verification procedures.
 
-**Updated** Enhanced with improved verification procedures for kernel correctness across multiple framework versions, comprehensive validation against Triton baselines, and **comprehensive FP8/FP4 quantization accuracy testing capabilities**.
+**Updated** Enhanced with improved verification procedures for kernel correctness across multiple framework versions, comprehensive validation against Triton baselines, and **comprehensive FP8/FP4/BF16 quantization accuracy testing capabilities** with multi-precision comparison framework.
 
 ## Framework Architecture
 
@@ -69,7 +69,7 @@ end
 subgraph "Testing Layer"
 F[Correctness Tests] --> G[Gate Broadcast Tests]
 G --> H[Multi-batch Validation]
-F --> I[FP8/FP4 Accuracy Tests]
+F --> I[Multi-Precision Quantization Tests]
 end
 subgraph "Debugging Layer"
 J[Reference Comparison] --> K[Framework Evaluation]
@@ -91,13 +91,13 @@ I --> A
 
 **Diagram sources**
 - [tests/test_correctness.py:1-363](file://tests/test_correctness.py#L1-L363)
-- [tests/test_fp8_accuracy.py:1-324](file://tests/test_fp8_accuracy.py#L1-L324)
+- [tests/test_fp8_accuracy.py:1-360](file://tests/test_fp8_accuracy.py#L1-L360)
 - [scripts/debug_prefill.py:1-306](file://scripts/debug_prefill.py#L1-L306)
 - [benchmarks/bench_modal.py:1-330](file://benchmarks/bench_modal.py#L1-L330)
 
 The architecture consists of four primary layers:
 
-1. **Testing Infrastructure**: Automated correctness validation and regression testing with enhanced verification procedures, including **FP8/FP4 quantization accuracy testing**
+1. **Testing Infrastructure**: Automated correctness validation and regression testing with enhanced verification procedures, including **multi-precision quantization testing with FP8, FP4, and BF16 formats**
 2. **Debugging Tools**: Interactive debugging and comparison utilities with direct framework integration
 3. **Benchmarking System**: Performance measurement and comparison frameworks with comprehensive validation
 4. **Volume Management**: Persistent storage and trace set management with comprehensive dataset support
@@ -139,7 +139,7 @@ The framework implements several enhanced test categories:
 3. **Multi-batch Validation**: Tests across different batch sizes (1, 4, 16, 64) with adaptive BLOCK_V selection
 4. **Block Size Testing**: Validates different BLOCK_V configurations (16, 32, 64) with performance impact analysis
 5. **Framework Integration Testing**: Direct integration with flashinfer-bench evaluation system for comprehensive validation
-6. **FP8/FP4 Quantization Accuracy Testing**: **Comprehensive validation of quantization accuracy with E4M3 and E2M1 formats**
+6. **Multi-Precision Quantization Testing**: **Comprehensive validation of quantization accuracy across FP8, FP4, and BF16 formats**
 
 **Section sources**
 - [tests/test_correctness.py:186-277](file://tests/test_correctness.py#L186-L277)
@@ -209,7 +209,7 @@ end
 subgraph "Benchmark Parameters"
 G[Batch Sizes] --> H[1, 4, 16, 64, 256]
 I[Block Sizes] --> J[16, 32, 64]
-K[Precision] --> L[FP32, FP16, FP8, FP4]
+K[Precision] --> L[FP32, FP16, FP8, FP4, BF16]
 end
 A --> G
 B --> H
@@ -361,21 +361,21 @@ G --> H
 **Section sources**
 - [README.md:14-28](file://README.md#L14-L28)
 
-## FP8 Quantization Accuracy Testing
+## Multi-Precision Quantization Testing
 
-**New Section** The framework now includes comprehensive FP8 and FP4 quantization accuracy testing capabilities with detailed simulation and validation procedures.
+**New Section** The framework now includes comprehensive multi-precision quantization testing capabilities with detailed simulation and validation procedures across FP8, FP4, and BF16 formats.
 
 ### Quantization Testing Architecture
 
-The FP8 accuracy testing framework provides detailed validation of quantization accuracy across multiple iterations:
+The multi-precision accuracy testing framework provides detailed validation of quantization accuracy across multiple iterations and precision formats:
 
 ```mermaid
 sequenceDiagram
-participant Test as FP8 Test
+participant Test as Multi-Precision Test
 participant Quant as Quantization Module
 participant GDN as GDN Decode
 participant Stats as Statistical Analysis
-Test->>Quant : Initialize FP8/E4M3 quantization
+Test->>Quant : Initialize quantization (FP8/FP4/BF16)
 Test->>GDN : Run decode with FP32 state
 Test->>GDN : Run decode with quantized state
 Quant->>GDN : Dequantize state to FP32
@@ -389,7 +389,7 @@ Stats-->>Test : Report accuracy results
 
 ### Quantization Methods
 
-The framework supports two primary quantization formats:
+The framework supports three primary quantization formats:
 
 1. **FP8 E4M3 Quantization**: 
    - 1 sign bit, 4 exponent bits, 3 mantissa bits
@@ -402,21 +402,29 @@ The framework supports two primary quantization formats:
    - Lookup table approach with 8 representable values
    - Range: [-6, 6], 8x memory compression ratio
    - Directly compatible with v7 kernel implementation
+   - **Enhanced with CUDA v10 support including lookup tables and vectorized operations**
+
+3. **BF16 Quantization**:
+   - 1 sign bit, 8 exponent bits, 7 mantissa bits
+   - Same range as FP32, but lower precision (~0.8% relative error)
+   - 2x memory compression ratio
+   - No scaling needed (same range as FP32)
 
 ### Test Methodology
 
-The FP8 accuracy testing framework implements comprehensive validation procedures:
+The multi-precision accuracy testing framework implements comprehensive validation procedures:
 
 ```mermaid
 flowchart TD
-A[Accuracy Test] --> B[Initialize State]
+A[Multi-Precision Test] --> B[Initialize State]
 B --> C[Generate Inputs]
 C --> D[Run FP32 Reference]
 D --> E[Run Quantized Version]
 E --> F[Calculate Errors]
 F --> G[Track Metrics]
 G --> H[Analyze Accumulation]
-H --> I[Report Results]
+H --> I[Compare Precision Formats]
+I --> J[Report Results]
 ```
 
 **Diagram sources**
@@ -430,6 +438,7 @@ H --> I[Report Results]
 4. **Modal Integration**: Uses Modal platform for consistent B200 GPU testing environment
 5. **Configurable Parameters**: Adjustable batch sizes, dimensions, and iteration counts
 6. **Realistic Input Generation**: Creates normalized random inputs with realistic gate values
+7. **Precision Comparison**: Direct comparison between FP8, FP4, and BF16 formats
 
 ### Quantization Implementation Details
 
@@ -445,11 +454,18 @@ The framework provides detailed quantization implementations:
 - Lookup table approach for consistent quantization
 - Direct mapping to 8 representable values
 - Compatible with existing v7 kernel implementation
+- **Enhanced with CUDA v10 support including lookup tables and vectorized operations**
 - Optimized for memory bandwidth efficiency
+
+**BF16 Quantization**:
+- Direct conversion to bfloat16 format
+- No scaling required (same range as FP32)
+- Minimal precision loss (~0.8% relative error)
 
 **Section sources**
 - [tests/test_fp8_accuracy.py:16-124](file://tests/test_fp8_accuracy.py#L16-L124)
 - [tests/test_fp8_accuracy.py:186-293](file://tests/test_fp8_accuracy.py#L186-L293)
+- [src/kernels/cute_cpp/gdn_decode_v10.cuh:90-158](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L90-L158)
 
 ## Troubleshooting Guide
 
@@ -467,7 +483,7 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 1. **Memory Allocation Failures**: Check available GPU memory with utilization monitoring
 2. **Kernel Launch Failures**: Verify grid/block dimensions with validation procedures
 3. **Data Type Mismatches**: Ensure proper tensor dtype conversions with comprehensive type checking
-4. **FP8 Quantization Errors**: Verify proper scaling factors and quantization ranges
+4. **Quantization Accuracy Errors**: Verify proper scaling factors and quantization ranges
 
 ### Performance Issues
 
@@ -482,7 +498,7 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 2. **Statistical Analysis**: Leverage comprehensive statistical comparisons with tolerance thresholds
 3. **Trace Set Validation**: Utilize persistent trace datasets for reproducible testing
 4. **Direct Comparison**: Compare custom solutions against baseline implementations with validation tools
-5. **FP8 Accuracy Testing**: Use dedicated FP8 accuracy tests to validate quantization effects
+5. **Multi-Precision Testing**: Use dedicated quantization tests to validate effects across FP8, FP4, and BF16 formats
 6. **Modal Platform**: Leverage Modal for consistent cloud-based testing environment
 
 **Section sources**
@@ -499,8 +515,9 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 3. **Performance Baselines**: Establish performance baselines for each version with validation procedures
 4. **Framework Integration**: Leverage flashinfer-bench for comprehensive validation against baselines
 5. **Statistical Analysis**: Use comprehensive statistical comparisons with configurable tolerance thresholds
-6. **Quantization Testing**: Include FP8/FP4 accuracy tests in all performance validation cycles
+6. **Multi-Precision Testing**: Include FP8/FP4/BF16 accuracy tests in all performance validation cycles
 7. **Error Accumulation Monitoring**: Regularly test quantization accuracy over extended operation sequences
+8. **Precision Comparison**: Always test quantization effects across multiple precision formats
 
 ### Advanced Debugging Approach
 
@@ -517,10 +534,10 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 3. **Hardware Characterization**: Account for specific hardware capabilities with comprehensive testing
 4. **Framework Validation**: Use flashinfer-bench for comprehensive validation against baselines
 5. **Performance Analysis**: Include comprehensive performance analysis with utilization metrics
-6. **Quantization Validation**: Always include FP8/FP4 accuracy testing in performance validation
+6. **Multi-Precision Validation**: Always include FP8/FP4/BF16 accuracy testing in performance validation
 7. **Error Tracking**: Monitor both immediate accuracy and long-term error accumulation
 
-### FP8 Quantization Best Practices
+### Multi-Precision Quantization Best Practices
 
 1. **Proper Scaling**: Use per-row dynamic scaling with appropriate safety margins
 2. **Error Monitoring**: Track both absolute and relative errors during quantization
@@ -528,6 +545,7 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 4. **Modal Validation**: Use Modal platform for consistent B200 GPU testing conditions
 5. **Parameter Tuning**: Adjust quantization parameters based on accuracy requirements
 6. **Fallback Strategies**: Implement graceful degradation when quantization accuracy is insufficient
+7. **Precision Selection**: Choose appropriate precision format based on accuracy and performance trade-offs
 
 **Section sources**
 - [tests/test_fp8_accuracy.py:186-293](file://tests/test_fp8_accuracy.py#L186-L293)

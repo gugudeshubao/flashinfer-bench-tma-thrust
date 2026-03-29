@@ -1,13 +1,14 @@
 """
-FP8/FP4 State Quantization Accuracy Test
+State Quantization Accuracy Test
 
-Tests the accuracy loss when using FP8 E4M3 or FP4 quantized state vs FP32.
+Tests the accuracy loss when using BF16/FP8/FP4 quantized state vs FP32.
 Simulates the GDN decode kernel behavior over multiple iterations.
 
 Usage:
-    modal run tests/test_fp8_accuracy.py                       # FP8 test
-    modal run tests/test_fp8_accuracy.py --precision fp4       # FP4 test
-    modal run tests/test_fp8_accuracy.py --steps 200           # More iterations
+    modal run tests/test_quantization_accuracy.py                       # FP8 (default)
+    modal run tests/test_quantization_accuracy.py --precision bf16      # BF16 test
+    modal run tests/test_quantization_accuracy.py --precision fp4       # FP4 test
+    modal run tests/test_quantization_accuracy.py --steps 200           # More iterations
 """
 
 import math
@@ -215,7 +216,7 @@ def gdn_decode_quantized(q, k, v, state_quant, state_scale, g, beta, precision='
 # Accuracy Test
 # ============================================================
 
-def test_fp8_accuracy(batch_size: int = 4, d: int = 128, num_steps: int = 100, seed: int = 42, precision: str = 'fp8'):
+def test_quantization_accuracy(batch_size: int = 4, d: int = 128, num_steps: int = 100, seed: int = 42, precision: str = 'fp8'):
     """
     Compare FP32 vs quantized (FP8/FP4) state over multiple decode steps.
     """
@@ -335,20 +336,20 @@ def test_fp8_accuracy(batch_size: int = 4, d: int = 128, num_steps: int = 100, s
 
 import modal
 
-app = modal.App("fp8-accuracy-test")
+app = modal.App("quantization-accuracy-test")
 
 image = modal.Image.debian_slim(python_version="3.12").pip_install("torch", "numpy")
 
 @app.function(image=image, gpu="B200:1", timeout=300)
-def run_fp8_test_modal(batch_size: int = 4, num_steps: int = 100, precision: str = 'fp8'):
-    return test_fp8_accuracy(batch_size=batch_size, num_steps=num_steps, precision=precision)
+def run_quantization_test_modal(batch_size: int = 4, num_steps: int = 100, precision: str = 'fp8'):
+    return test_quantization_accuracy(batch_size=batch_size, num_steps=num_steps, precision=precision)
 
 @app.local_entrypoint()
 def main(batch_size: int = 4, steps: int = 100, precision: str = 'fp8'):
     print(f"Running {precision.upper()} accuracy test on Modal B200...")
     print(f"  batch_size={batch_size}, steps={steps}, precision={precision}")
     print()
-    result = run_fp8_test_modal.remote(batch_size, steps, precision)
+    result = run_quantization_test_modal.remote(batch_size, steps, precision)
     
     print("\n" + "=" * 60)
     print(f"FINAL RESULTS ({precision.upper()})")

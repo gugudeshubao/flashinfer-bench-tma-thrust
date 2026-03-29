@@ -24,15 +24,16 @@
 - [bench_cute_dsl_vs_cpp.py](file://scripts/bench_cute_dsl_vs_cpp.py)
 - [bench_cute_vs_triton.py](file://scripts/bench_cute_vs_triton.py)
 - [test_fp8_accuracy.py](file://tests/test_fp8_accuracy.py)
+- [build_cuda.py](file://scripts/build_cuda.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced kernel documentation with FP8 state quantization implementation across all kernel technologies
-- Updated performance analysis to include FP8 benefits with 4x memory compression and per-row dynamic scaling
-- Expanded memory optimization strategies to cover FP8 quantization primitives and vectorized memory operations
-- Added detailed coverage of FP8 accuracy testing and validation results
-- Updated kernel comparison matrix to reflect FP8 quantization capabilities and performance improvements
+- Enhanced kernel documentation with FP4 E2M1 quantization support across CuTe C++ and PTX kernel implementations
+- Updated performance analysis to include FP4 8x memory compression with experimental accuracy characteristics
+- Expanded memory optimization strategies to cover FP4 quantization primitives and vectorized memory operations
+- Added detailed coverage of FP4 quantization accuracy testing and validation results
+- Updated kernel comparison matrix to reflect FP4 quantization capabilities alongside FP8 support
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -47,10 +48,10 @@
 10. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the GDN Decode Kernel implementation for single-token autoregressive inference, covering the mathematical foundation of the gated delta net (GDN) mechanism, the V-dimension splitting strategy that distributes the output dimension across four parallel programs for improved SM occupancy, and the algorithmic steps: decay gate computation using sigmoid activation, update gate calculation with exponential functions, state evolution through delta rule rank-1 updates, and output projection with scaling factors. It also documents the grouped value attention (GVA) mechanism where two V-heads share each Q/K head, and provides concrete examples from the Triton kernel showing memory access patterns, register blocking strategies, and thread block organization. The document now includes comprehensive coverage of FP8 state quantization implementation with 4x memory compression, per-row dynamic scaling, and vectorized memory operations across all kernel technologies, comparing them against the baseline Triton solution to highlight performance optimizations achieved through different compilation technologies and memory coalescing strategies.
+This document explains the GDN Decode Kernel implementation for single-token autoregressive inference, covering the mathematical foundation of the gated delta net (GDN) mechanism, the V-dimension splitting strategy that distributes the output dimension across four parallel programs for improved SM occupancy, and the algorithmic steps: decay gate computation using sigmoid activation, update gate calculation with exponential functions, state evolution through delta rule rank-1 updates, and output projection with scaling factors. It also documents the grouped value attention (GVA) mechanism where two V-heads share each Q/K head, and provides concrete examples from the Triton kernel showing memory access patterns, register blocking strategies, and thread block organization. The document now includes comprehensive coverage of FP8 state quantization (4x memory compression) and FP4 E2M1 quantization (8x memory compression) implementations with experimental accuracy characteristics, comparing them against the baseline Triton solution to highlight performance optimizations achieved through different compilation technologies and memory coalescing strategies.
 
 ## Project Structure
-The repository organizes the GDN decode kernel under a dedicated directory with separate solution and baseline implementations, a configuration file, and a trace definition that captures the operation's semantics and shapes. The implementation now includes multiple kernel technologies with FP8 quantization support: Triton (with adaptive blocking), PTX inline assembly, CUDA C++ with TMA, and CuTe DSL variants, all enhanced with cp.async prefetch capabilities and FP8 state compression.
+The repository organizes the GDN decode kernel under a dedicated directory with separate solution and baseline implementations, a configuration file, and a trace definition that captures the operation's semantics and shapes. The implementation now includes multiple kernel technologies with FP8 and FP4 quantization support: Triton (with adaptive blocking), PTX inline assembly, CUDA C++ with TMA, and CuTe DSL variants, all enhanced with cp.async prefetch capabilities and quantized state compression.
 
 ```mermaid
 graph TB
@@ -105,17 +106,17 @@ A --> V["scripts/bench_all_versions.py"]
 - **Triton v2 kernel**: Fused delta-rule implementation with full state tile in registers, eliminating Python loop overhead and single HBM read/write per kernel launch.
 - **Triton v3 kernel**: V-dimension splitting strategy with fixed BLOCK_V=32 across 4 parallel programs for improved SM occupancy.
 - **Baseline Python kernel**: Reference implementation using PyTorch operations and GVA expansion.
-- **PTX inline assembly kernels**: CUDA C++ kernels with embedded PTX assembly instructions for maximum control over low-level GPU operations, including warp shuffle, fast math, memory operations, cp.async prefetch for memory latency hiding, and FP8 state quantization with per-row dynamic scaling.
-- **CUDA C++ kernels**: Enhanced with TMA (Tensor Memory Access) and cp.async bulk operations for 2D tile loads with memory latency hiding, now featuring FP8 quantization with vectorized memory operations.
-- **CuTe DSL kernels**: Python-based kernels using CUTLASS 4.0+ DSL with MLIR compilation pipeline, offering automatic optimization passes including async copy insertion and FP8 quantization support.
-- **CuTe C++ kernels**: Traditional C++ template-based implementations with manual optimization and NVCC compilation, now featuring cp.async prefetch capabilities and FP8 state quantization with per-row scaling.
-- **FP8 Quantization Support**: All kernel technologies now support FP8 state quantization with 4x memory compression, per-row dynamic scaling, and vectorized memory operations for state storage and retrieval.
+- **PTX inline assembly kernels**: CUDA C++ kernels with embedded PTX assembly instructions for maximum control over low-level GPU operations, including warp shuffle, fast math, memory operations, cp.async prefetch for memory latency hiding, and FP8/F4 quantization support with per-row dynamic scaling.
+- **CUDA C++ kernels**: Enhanced with TMA (Tensor Memory Access) and cp.async bulk operations for 2D tile loads with memory latency hiding, now featuring FP8/F4 quantization with vectorized memory operations.
+- **CuTe DSL kernels**: Python-based kernels using CUTLASS 4.0+ DSL with MLIR compilation pipeline, offering automatic optimization passes including async copy insertion and FP8/F4 quantization support.
+- **CuTe C++ kernels**: Traditional C++ template-based implementations with manual optimization and NVCC compilation, now featuring cp.async prefetch capabilities and FP8/F4 state quantization with per-row scaling.
+- **FP8/F4 Quantization Support**: All kernel technologies now support FP8 (4x memory compression) and FP4 E2M1 (8x memory compression) state quantization with per-row dynamic scaling and vectorized memory operations for state storage and retrieval.
 - **Configuration**: Defines the solution metadata and build specification.
 - **Trace definition**: Documents axes, constraints, inputs/outputs, and a reference implementation.
-- **Optimization logs**: Detailed records of cp.async prefetch implementation and FP8 quantization across all kernel technologies.
-- **Roadmap**: Strategic direction for kernel optimization including cp.async prefetch integration and FP8 quantization.
+- **Optimization logs**: Detailed records of cp.async prefetch implementation and FP8/F4 quantization across all kernel technologies.
+- **Roadmap**: Strategic direction for kernel optimization including cp.async prefetch integration and FP8/F4 quantization.
 - **Benchmark runner**: Orchestrates benchmarking on Modal B200 and compares solution vs baseline across multiple kernel technologies.
-- **FP8 Accuracy Testing**: Comprehensive testing framework validating FP8 quantization accuracy over multiple decode steps.
+- **FP8/F4 Accuracy Testing**: Comprehensive testing framework validating quantization accuracy over multiple decode steps with experimental error characteristics.
 
 **Section sources**
 - [kernel.py:1-136](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L1-L136)
@@ -125,7 +126,7 @@ A --> V["scripts/bench_all_versions.py"]
 - [gdn_decode_ptx.cuh:468-673](file://src/kernels/ptx/gdn_decode_ptx.cuh#L468-L673)
 - [gdn_decode_v7.cuh:160-359](file://src/kernels/cuda/gdn_decode_v7.cuh#L160-L359)
 - [gdn_decode_v8.cuh:392-546](file://src/kernels/cuda/gdn_decode_v8.cuh#L392-L546)
-- [gdn_decode_dsl.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
 - [gdn_decode_v10.cuh:584-783](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L584-L783)
 - [config.toml:1-10](file://gdn_decode_qk4_v8_d128_k_last/config.toml#L1-L10)
 - [gdn_decode_qk4_v8_d128_k_last.json:1-153](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L1-L153)
@@ -135,7 +136,7 @@ A --> V["scripts/bench_all_versions.py"]
 - [test_fp8_accuracy.py:1-243](file://tests/test_fp8_accuracy.py#L1-L243)
 
 ## Architecture Overview
-The GDN decode kernel performs single-token generation with recurrent state updates. The solution kernel is organized as a Triton program with a grid of (B, H=8, V_BLOCKS) where each program handles a V-tile of size BLOCK_V and a single head. The kernel computes decay and update gates per head, applies a decay to the state, computes the old value, interpolates the new value, updates the state via a rank-1 delta rule, and produces the output by projecting with Q. The architecture now supports multiple kernel technologies, each with distinct compilation strategies and optimization approaches including cp.async prefetch for memory latency hiding and FP8 state quantization for memory compression.
+The GDN decode kernel performs single-token generation with recurrent state updates. The solution kernel is organized as a Triton program with a grid of (B, H=8, V_BLOCKS) where each program handles a V-tile of size BLOCK_V and a single head. The kernel computes decay and update gates per head, applies a decay to the state, computes the old value, interpolates the new value, updates the state via a rank-1 delta rule, and produces the output by projecting with Q. The architecture now supports multiple kernel technologies, each with distinct compilation strategies and optimization approaches including cp.async prefetch for memory latency hiding and FP8/F4 state quantization for memory compression.
 
 ```mermaid
 sequenceDiagram
@@ -276,26 +277,36 @@ These patterns enable efficient HBM bandwidth utilization and register reuse acr
 - [gdn_decode_ptx.cuh:14](file://src/kernels/ptx/gdn_decode_ptx.cuh#L14)
 - [gdn_decode_dsl_optimized.py:98](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L98)
 
-### FP8 State Quantization Implementation
-**Enhanced** All kernel implementations now feature FP8 state quantization with 4x memory compression and per-row dynamic scaling:
+### FP8/F4 State Quantization Implementation
+**Enhanced** All kernel implementations now feature FP8 (4x memory compression) and FP4 E2M1 (8x memory compression) state quantization with experimental accuracy characteristics:
 
-- **Memory Compression**: State matrices are compressed from FP32 (64 KB per head) to FP8 (16 KB per head), achieving 4x memory reduction.
-- **Per-Row Dynamic Scaling**: Each row of state maintains its own scale factor for optimal precision preservation.
-- **Vectorized Memory Operations**: 4 FP8 values are packed into uint32_t for efficient memory bandwidth utilization.
-- **Internal FP32 Compute**: State storage uses FP8 while computations remain in FP32 for numerical stability.
-- **Dequantization/Quantization**: On load, FP8 state is dequantized using per-row scales; on store, new state is quantized back to FP8.
+- **FP8 E4M3 Quantization (4x compression)**:
+  - Memory Compression: State matrices compressed from FP32 (64 KB per head) to FP8 (16 KB per head), achieving 4x memory reduction.
+  - Per-Row Dynamic Scaling: Each row of state maintains its own scale factor for optimal precision preservation.
+  - Vectorized Memory Operations: 4 FP8 values packed into uint32_t for efficient memory bandwidth utilization.
+  - Internal FP32 Compute: State storage uses FP8 while computations remain in FP32 for numerical stability.
+  - Dequantization/Quantization: On load, FP8 state dequantized using per-row scales; on store, new state quantized back to FP8.
+
+- **FP4 E2M1 Quantization (8x compression)**:
+  - Memory Compression: State matrices compressed from FP32 (64 KB per head) to FP4 (8 KB per head), achieving 8x memory reduction.
+  - Lookup Table Quantization: Uses FP4 lookup table with values [0.0, 0.5, 1.0, 1.5, 2.0, 3.0, 4.0, 6.0] and negative counterparts.
+  - Vectorized Memory Operations: 8 FP4 values packed into uint32_t for efficient memory bandwidth utilization.
+  - Experimental Accuracy: ~55-65% relative error - use only for extreme compression scenarios.
+  - Per-Row Dynamic Scaling: Each row maintains its own scale factor for precision preservation.
 
 **Design Decisions**:
-1. **Per-row scaling**: Scale = max_abs / 400.0 (FP8 E4M3 range is [-448, 448])
-2. **FP32 internal compute**: Only state storage is FP8 for memory efficiency
-3. **Vectorized memory**: Pack 4 FP8 values into uint32_t for 4x bandwidth efficiency
+1. **Per-row scaling**: Scale = max_abs / 400.0 (FP8) or max_abs / 6.0 (FP4) for range safety
+2. **FP32 internal compute**: Only state storage is quantized for memory efficiency
+3. **Vectorized memory**: Pack values into uint32_t for 4x/8x bandwidth efficiency
+4. **Experimental validation**: FP4 quantization error may accumulate over time, requiring careful monitoring
 
 **Expected Benefits**:
-- **4x memory reduction**: 512KB → 128KB per batch
-- **4x lower memory BW**: State load/store bandwidth reduced
+- **4x memory reduction**: 512KB → 128KB per batch (FP8)
+- **8x memory reduction**: 512KB → 64KB per batch (FP4)
+- **4x/8x lower memory BW**: State load/store bandwidth reduced proportionally
 - **Potential 2-4x speedup**: For memory-bound decode kernel
 
-**Accuracy Validation**: FP8 quantization error does NOT accumulate over time, making it safe for long sequence inference.
+**Accuracy Validation**: FP8 quantization error does NOT accumulate over time, making it safe for long sequence inference. FP4 quantization shows experimental accuracy characteristics with ~55-65% relative error.
 
 **Section sources**
 - [OPTIMIZATION_LOG.md:183-281](file://docs/OPTIMIZATION_LOG.md#L183-L281)
@@ -303,13 +314,14 @@ These patterns enable efficient HBM bandwidth utilization and register reuse acr
 - [gdn_decode_v8.cuh:392-546](file://src/kernels/cuda/gdn_decode_v8.cuh#L392-L546)
 - [gdn_decode_v10.cuh:584-783](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L584-L783)
 - [test_fp8_accuracy.py:117-243](file://tests/test_fp8_accuracy.py#L117-L243)
+- [gdn_decode_v7.cuh:81-130](file://src/kernels/cuda/gdn_decode_v7.cuh#L81-L130)
 
 ### cp.Async Prefetch Implementation Across Technologies
 **Enhanced** All kernel implementations now feature cp.async prefetch capabilities for memory latency hiding:
 
-- **PTX Inline Assembly**: Implements `ptx_cp_async_ca` and `ptx_cp_async_cg` functions for async memory copying with commit/wait operations, now including FP8 state quantization support.
-- **CUDA C++**: Uses `cp.async.bulk.tensor.2d` for coalesced 2D tile loads with mbarrier completion, enhanced with FP8 quantization primitives.
-- **CuTe DSL**: Automatic insertion of async copy operations through MLIR optimization passes, supporting FP8 quantization.
+- **PTX Inline Assembly**: Implements `ptx_cp_async_ca` and `ptx_cp_async_cg` functions for async memory copying with commit/wait operations, now including FP8/F4 quantization support.
+- **CUDA C++**: Uses `cp.async.bulk.tensor.2d` for coalesced 2D tile loads with mbarrier completion, enhanced with FP8/F4 quantization primitives.
+- **CuTe DSL**: Automatic insertion of async copy operations through MLIR optimization passes, supporting FP8/F4 quantization.
 - **Triton**: While Triton doesn't directly expose cp.async primitives, the memory access patterns are optimized for latency hiding through coalesced access and register blocking.
 
 **Section sources**
@@ -320,12 +332,12 @@ These patterns enable efficient HBM bandwidth utilization and register reuse acr
 ### Comparison Against Baseline
 - **Baseline (Python)**: Uses PyTorch operations with explicit GVA expansion and k-first layout conversion. It demonstrates the algorithmic steps and serves as a correctness reference.
 - **Solution (Triton)**: Fuses all per-head operations into a single kernel, uses register blocking over V, and maintains k-last state layout. This reduces kernel launch overhead, improves memory coalescing, and leverages Triton JIT compilation for performance.
-- **PTX Inline Assembly**: Provides maximum performance through embedded PTX instructions for warp shuffle, fast math, memory operations with cache hints, cp.async prefetch for memory latency hiding, and FP8 state quantization with per-row scaling.
-- **CUDA C++**: Enhanced with TMA and cp.async bulk operations for 2D tile loads with memory latency hiding, achieving significant performance improvements with FP8 quantization support.
-- **CuTe DSL**: Offers automatic optimization through MLIR compilation pipeline with vectorization, shared memory optimization, warp specialization, async copy insertion, and FP8 quantization support.
-- **CuTe C++**: Provides traditional C++ template-based optimization with manual cp.async prefetch implementation and FP8 state quantization with vectorized memory operations.
+- **PTX Inline Assembly**: Provides maximum performance through embedded PTX instructions for warp shuffle, fast math, memory operations with cache hints, cp.async prefetch for memory latency hiding, and FP8/F4 state quantization with per-row scaling.
+- **CUDA C++**: Enhanced with TMA and cp.async bulk operations for 2D tile loads with memory latency hiding, achieving significant performance improvements with FP8/F4 quantization support.
+- **CuTe DSL**: Offers automatic optimization through MLIR compilation pipeline with vectorization, shared memory optimization, warp specialization, async copy insertion, and FP8/F4 quantization support.
+- **CuTe C++**: Provides traditional C++ template-based optimization with manual cp.async prefetch implementation and FP8/F4 state quantization with vectorized memory operations.
 
-Benchmarking on Modal B200 compares the solution against the baseline and reports latency, reference latency, speedup, and correctness metrics across all kernel technologies, including FP8 quantization variants.
+Benchmarking on Modal B200 compares the solution against the baseline and reports latency, reference latency, speedup, and correctness metrics across all kernel technologies, including FP8/F4 quantization variants.
 
 **Section sources**
 - [kernel.py:1-101](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py#L1-L101)
@@ -345,7 +357,7 @@ PTX kernels provide the highest level of hardware control through embedded assem
 - **Cache Control**: `ld.global.nc`, `st.global.wb` for L1/L2 bypass and write-back optimization
 - **Predicated Execution**: `selp.f32` for branchless conditional operations
 - **cp.async Prefetch**: `ptx_cp_async_ca`, `ptx_cp_async_cg` for memory latency hiding
-- **FP8 Quantization**: `ptx_fp32_to_fp8`, `ptx_fp8_to_fp32`, `ptx_pack_fp8x4`, `ptx_unpack_fp8x4` for state compression
+- **FP8/F4 Quantization**: `ptx_fp32_to_fp8`, `ptx_fp8_to_fp32`, `ptx_pack_fp8x4`, `ptx_unpack_fp8x4` and FP4 E2M1 equivalents for state compression
 
 **Performance Benefits:**
 - Maximum performance extraction (~100% of theoretical limits)
@@ -353,13 +365,13 @@ PTX kernels provide the highest level of hardware control through embedded assem
 - Warp-level primitives for efficient reductions
 - Branchless execution for better occupancy
 - Memory latency hiding through async prefetch
-- **Enhanced**: 4x memory compression with FP8 quantization and per-row scaling
+- **Enhanced**: 4x/8x memory compression with FP8/F4 quantization and per-row scaling
 
 **Section sources**
 - [README.md:52-179](file://src/kernels/ptx/README.md#L52-L179)
 - [gdn_decode_ptx.cuh:31-147](file://src/kernels/ptx/gdn_decode_ptx.cuh#L31-L147)
 - [gdn_decode_ptx.cuh:112-176](file://src/kernels/ptx/gdn_decode_ptx.cuh#L112-L176)
-- [gdn_decode_ptx.cuh:468-673](file://src/kernels/ptx/gdn_decode_ptx.cuh#L468-L673)
+- [gdn_decode_ptx.cuh:245-320](file://src/kernels/ptx/gdn_decode_ptx.cuh#L245-L320)
 
 ### CUDA C++ Kernels with TMA and cp.async
 CUDA C++ kernels now feature advanced memory management with TMA and cp.async prefetch:
@@ -370,7 +382,7 @@ CUDA C++ kernels now feature advanced memory management with TMA and cp.async pr
 - **cp.async Bulk Operations**: `cp.async.ca.shared.global` for async prefetch
 - **Vectorized Operations**: `float4` loads/stores for 16-byte aligned access
 - **Warp Specialization**: Producer/consumer warps for optimal pipeline utilization
-- **FP8 Quantization Primitives**: `__nv_fp8_e4m3`, `pack_fp8x4`, `unpack_fp8x4` for state compression
+- **FP8/F4 Quantization Primitives**: `__nv_fp8_e4m3`, `pack_fp8x4`, `unpack_fp8x4` and FP4 equivalents for state compression
 - **Per-Row Scaling**: Dynamic scaling factors for each state row
 
 **Performance Benefits:**
@@ -378,7 +390,7 @@ CUDA C++ kernels now feature advanced memory management with TMA and cp.async pr
 - Memory latency hiding with async prefetch
 - Reduced synchronization overhead
 - Improved memory coalescing patterns
-- **Enhanced**: 4x memory reduction with FP8 quantization and vectorized memory operations
+- **Enhanced**: 4x/8x memory reduction with FP8/F4 quantization and vectorized memory operations
 
 **Section sources**
 - [README.md:141-179](file://src/kernels/ptx/README.md#L141-L179)
@@ -402,13 +414,13 @@ Python DSL → MLIR Dialects → LLVM IR → PTX → SASS
 - **AsyncCopyInsertion**: TMA/cp.async instruction insertion
 - **WarpSpecialization**: Automatic warp specialization
 - **RegisterAllocation**: Optimized register scheduling
-- **FP8 Quantization Insertion**: Automatic FP8 state compression
+- **FP8/F4 Quantization Insertion**: Automatic FP8/F4 state compression
 
 **Kernel Variants:**
 - **Simplified DSL**: Basic State @ Q computation for demonstration
 - **Optimized DSL**: Full delta rule with SMEM staging and vectorization
 - **Prefill DSL**: Chunk-based processing for compute density optimization
-- **FP8 DSL**: Enhanced with automatic FP8 quantization support
+- **FP8/F4 DSL**: Enhanced with automatic FP8/F4 quantization support
 
 **Performance Characteristics:**
 - Development efficiency: High (Python-based)
@@ -416,7 +428,7 @@ Python DSL → MLIR Dialects → LLVM IR → PTX → SASS
 - Compilation time: Seconds (JIT compilation)
 - Typical performance: 25-40 GB/s on B200
 - Memory latency hiding: Through automatic async copy insertion
-- **Enhanced**: Automatic FP8 quantization with per-row scaling
+- **Enhanced**: Automatic FP8/F4 quantization with per-row scaling
 
 **Section sources**
 - [README.md:1-188](file://src/kernels/cute_dsl/README.md#L1-L188)
@@ -433,11 +445,11 @@ Traditional C++ template-based approach with manual optimization:
 - **TMA Abstraction**: Simplified asynchronous memory operations
 - **WGMMA Support**: Tensor Core operation abstraction
 - **cp.async Prefetch**: Manual implementation for memory latency hiding
-- **FP8 Quantization**: Manual implementation with per-row scaling and vectorized memory operations
+- **FP8/F4 Quantization**: Manual implementation with per-row scaling and vectorized memory operations
 
 **Version Evolution:**
 - **v9**: Manual XOR swizzle implementation
-- **v10**: CuTe `Swizzle<3,3,3>` with automatic optimization, cp.async prefetch, and FP8 quantization
+- **v10**: CuTe `Swizzle<3,3,3>` with automatic optimization, cp.async prefetch, and FP8/F4 quantization
 - **Performance**: 25-40 GB/s on B200, with v10 showing slight improvements
 
 **Development Trade-offs:**
@@ -446,7 +458,7 @@ Traditional C++ template-based approach with manual optimization:
 - **Maintenance**: Better than raw CUDA
 - **Performance**: ~100% of optimized hand-written code
 - **Memory Latency Hiding**: Through cp.async prefetch implementation
-- **Enhanced**: FP8 quantization with per-row scaling and vectorized memory operations
+- **Enhanced**: FP8/F4 quantization with per-row scaling and vectorized memory operations
 
 **Section sources**
 - [README.md:1-142](file://src/kernels/cute_cpp/README.md#L1-L142)
@@ -461,14 +473,14 @@ High-level Python kernel with JIT compilation:
 - **Broadcasting**: Automatic broadcasting for gate computation
 - **Integration**: Seamless PyTorch integration
 - **Adaptive Blocking**: BLOCK_V varies based on batch size for optimal occupancy
-- **FP8 Support**: Enhanced with FP8 state quantization capabilities
+- **FP8/F4 Support**: Enhanced with FP8/F4 state quantization capabilities
 
 **Performance Characteristics:**
 - **Adaptive BLOCK_V**: 16 for B≤16, 32 for B≤128, 64 for B>128
 - **Typical Performance**: 24-40 GB/s on B200
 - **Development Efficiency**: Very high (Python-based)
 - **Memory Latency Hiding**: Through coalesced access patterns and register blocking
-- **Enhanced**: FP8 quantization support for memory compression
+- **Enhanced**: FP8/F4 quantization support for memory compression
 
 **Section sources**
 - [kernel.py:85-136](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L85-L136)
@@ -476,7 +488,7 @@ High-level Python kernel with JIT compilation:
 - [kernel_v3.py:86-130](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel_v3.py#L86-L130)
 
 ## Dependency Analysis
-The solution kernel depends on Triton for JIT compilation and CUDA execution, and on PyTorch for tensor creation and shape handling in the wrapper. The baseline kernel depends on PyTorch for all computations. The PTX implementation requires CUDA runtime and supports embedded assembly instructions including cp.async prefetch and FP8 quantization primitives. The CUDA C++ implementation requires TMA support and modern CUDA toolkit with FP8 quantization support. The CuTe DSL implementation requires CUTLASS 4.0+ with MLIR support and automatic FP8 quantization insertion. The configuration ties the solution to the trace definition and build specification.
+The solution kernel depends on Triton for JIT compilation and CUDA execution, and on PyTorch for tensor creation and shape handling in the wrapper. The baseline kernel depends on PyTorch for all computations. The PTX implementation requires CUDA runtime and supports embedded assembly instructions including cp.async prefetch and FP8/F4 quantization primitives. The CUDA C++ implementation requires TMA support and modern CUDA toolkit with FP8/F4 quantization support. The CuTe DSL implementation requires CUTLASS 4.0+ with MLIR support and automatic FP8/F4 quantization insertion. The configuration ties the solution to the trace definition and build specification.
 
 ```mermaid
 graph TB
@@ -490,18 +502,19 @@ H --> D
 I["gdn_decode_ptx.cuh"] --> J["CUDA Runtime"]
 I --> K["Embedded PTX Assembly"]
 I --> L["cp.async Prefetch"]
-I --> M["FP8 Quantization Primitives"]
+I --> M["FP8/F4 Quantization Primitives"]
 N["gdn_decode_v7.cuh"] --> O["CUDA Toolkit + TMA"]
 N --> P["cp.async Bulk Operations"]
-N --> Q["FP8 Quantization Support"]
+N --> Q["FP8/F4 Quantization Support"]
 R["gdn_decode_dsl.py"] --> S["CuTe DSL (MLIR)"]
-R --> T["Automatic FP8 Insertion"]
+R --> T["Automatic FP8/F4 Insertion"]
 U["gdn_decode_dsl_optimized.py"] --> S
 U --> T
 V["gdn_decode_v10.cuh"] --> W["CuTe C++ (NVCC)"]
 V --> X["Manual cp.async Implementation"]
-V --> Y["FP8 Quantization with Per-Row Scaling"]
-Z["test_fp8_accuracy.py"] --> AA["FP8 Accuracy Testing Framework"]
+V --> Y["FP8/F4 Quantization with Per-Row Scaling"]
+Z["test_fp8_accuracy.py"] --> AA["FP8/F4 Accuracy Testing Framework"]
+BB["build_cuda.py"] --> CC["FP4 Export Functions"]
 ```
 
 **Diagram sources**
@@ -515,6 +528,7 @@ Z["test_fp8_accuracy.py"] --> AA["FP8 Accuracy Testing Framework"]
 - [gdn_decode_dsl_optimized.py:26-35](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L26-L35)
 - [gdn_decode_v10.cuh:1-200](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L1-L200)
 - [test_fp8_accuracy.py:1-243](file://tests/test_fp8_accuracy.py#L1-L243)
+- [build_cuda.py:398-402](file://scripts/build_cuda.py#L398-L402)
 
 **Section sources**
 - [config.toml:1-10](file://gdn_decode_qk4_v8_d128_k_last/config.toml#L1-L10)
@@ -529,11 +543,11 @@ Z["test_fp8_accuracy.py"] --> AA["FP8 Accuracy Testing Framework"]
   - Coalesce HBM access for state [B, H, K, V] by using k-last layout and aligned access patterns.
   - Leverage technology-specific optimizations: PTX fast math, CuTe automatic optimization, Triton auto-tuning.
   - **Enhanced**: Implement cp.async prefetch for memory latency hiding across all kernel technologies.
-  - **Enhanced**: Utilize FP8 state quantization for 4x memory compression and per-row dynamic scaling.
+  - **Enhanced**: Utilize FP8/F4 state quantization for 4x/8x memory compression and per-row dynamic scaling.
 - **Memory latency hiding**: All implementations now feature mechanisms to overlap memory transfers with computation, reducing stall time and improving overall throughput.
-- **FP8 Performance Benefits**: With FP8 quantization, memory bandwidth utilization improves significantly, potentially achieving 2-4x speedup for memory-bound decode kernels.
+- **FP8/F4 Performance Benefits**: With FP8 quantization, memory bandwidth utilization improves significantly, potentially achieving 2-4x speedup for memory-bound decode kernels. FP4 quantization provides 8x compression with experimental accuracy characteristics.
 
-These strategies are validated by roofline analysis and implemented across all kernel implementations, with PTX kernels achieving the highest performance through embedded assembly and CuTe DSL providing near-optimal performance with automatic optimization. The addition of FP8 quantization provides substantial memory bandwidth savings with acceptable accuracy for inference scenarios.
+These strategies are validated by roofline analysis and implemented across all kernel implementations, with PTX kernels achieving the highest performance through embedded assembly and CuTe DSL providing near-optimal performance with automatic optimization. The addition of FP8/F4 quantization provides substantial memory bandwidth savings with acceptable accuracy for inference scenarios, with FP4 offering extreme compression at the cost of experimental accuracy.
 
 **Section sources**
 - [ROOFLINE.md:16-59](file://docs/ROOFLINE.md#L16-L59)
@@ -554,9 +568,10 @@ These strategies are validated by roofline analysis and implemented across all k
 - **Memory alignment**: PTX kernels require proper memory alignment for vectorized operations.
 - **cp.async prefetch issues**: Ensure proper commit/wait sequences are used in CUDA/PTX implementations.
 - **TMA compatibility**: Verify TMA support is available for CUDA kernels using cp.async bulk operations.
-- **FP8 quantization issues**: Verify FP8 support is available on the target GPU and that per-row scaling factors are properly computed.
-- **Memory compression errors**: Ensure proper packing/unpacking of FP8 values and that memory addresses are properly aligned for vectorized operations.
-- **Accuracy validation**: Use the FP8 accuracy testing framework to validate quantization effects over multiple decode steps.
+- **FP8/F4 quantization issues**: Verify FP8/F4 support is available on the target GPU and that per-row scaling factors are properly computed.
+- **Memory compression errors**: Ensure proper packing/unpacking of FP8/F4 values and that memory addresses are properly aligned for vectorized operations.
+- **Accuracy validation**: Use the FP8/F4 accuracy testing framework to validate quantization effects over multiple decode steps, with special attention to FP4 experimental error characteristics.
+- **FP4 experimental risks**: Monitor for potential error accumulation over extended inference sequences due to higher experimental error rates.
 
 **Section sources**
 - [gdn_decode_qk4_v8_d128_k_last.json:44-48](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L44-L48)
@@ -567,4 +582,4 @@ These strategies are validated by roofline analysis and implemented across all k
 - [test_fp8_accuracy.py:117-243](file://tests/test_fp8_accuracy.py#L117-L243)
 
 ## Conclusion
-The GDN Decode Kernel achieves significant performance improvements over the baseline Python implementation by fusing operations, using register blocking over the V-dimension, and leveraging multiple compilation technologies. The Triton solution provides excellent balance of performance and development efficiency, while PTX inline assembly kernels deliver maximum performance through embedded assembly instructions, cp.async prefetch for memory latency hiding, and FP8 state quantization with 4x memory compression. CUDA C++ kernels now feature TMA and advanced cp.async bulk operations for coalesced 2D tile loads, enhanced with FP8 quantization support. CuTe DSL offers automatic optimization with high development efficiency, including automatic FP8 quantization insertion. CuTe C++ provides traditional template-based optimization with manual cp.async prefetch implementation and FP8 state quantization with per-row scaling. The k-last state layout and GVA mechanism enable efficient state persistence and head sharing across all implementations, while autotuning identifies optimal configurations for BLOCK_V and num_warps. The enhanced cp.async prefetch capabilities across all kernel technologies provide substantial memory latency hiding benefits, with PTX kernels achieving the highest performance through embedded assembly and CuTe DSL providing near-optimal performance with significantly reduced development effort. The addition of FP8 state quantization delivers 4x memory compression with per-row dynamic scaling, achieving 2-4x potential speedup for memory-bound decode kernels while maintaining acceptable accuracy for inference scenarios. The expanded technology stack now provides flexible deployment options depending on specific requirements for performance, development efficiency, memory bandwidth, and maintenance considerations.
+The GDN Decode Kernel achieves significant performance improvements over the baseline Python implementation by fusing operations, using register blocking over the V-dimension, and leveraging multiple compilation technologies. The Triton solution provides excellent balance of performance and development efficiency, while PTX inline assembly kernels deliver maximum performance through embedded assembly instructions, cp.async prefetch for memory latency hiding, and FP8/F4 state quantization with 4x/8x memory compression. CUDA C++ kernels now feature TMA and advanced cp.async bulk operations for coalesced 2D tile loads, enhanced with FP8/F4 quantization support. CuTe DSL offers automatic optimization with high development efficiency, including automatic FP8/F4 quantization insertion. CuTe C++ provides traditional template-based optimization with manual cp.async prefetch implementation and FP8/F4 state quantization with per-row scaling. The k-last state layout and GVA mechanism enable efficient state persistence and head sharing across all implementations, while autotuning identifies optimal configurations for BLOCK_V and num_warps. The enhanced cp.async prefetch capabilities across all kernel technologies provide substantial memory latency hiding benefits, with PTX kernels achieving the highest performance through embedded assembly and CuTe DSL providing near-optimal performance with significantly reduced development effort. The addition of FP8/F4 state quantization delivers 4x/8x memory compression with per-row dynamic scaling, achieving 2-4x potential speedup for memory-bound decode kernels while maintaining acceptable accuracy for inference scenarios. FP8 quantization provides stable accuracy without error accumulation, while FP4 quantization offers extreme compression with experimental accuracy characteristics suitable for specific use cases. The expanded technology stack now provides flexible deployment options depending on specific requirements for performance, development efficiency, memory bandwidth, and maintenance considerations.
