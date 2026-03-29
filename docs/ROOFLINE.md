@@ -26,15 +26,17 @@
 
 ### Compute Performance
 
-| Precision | Dense | Sparse (2:4) |
-|-----------|-------|--------------|
-| **FP4 Tensor** | 9 PFLOPS | 18 PFLOPS |
-| **FP8 Tensor** | 4.5 PFLOPS | 9 PFLOPS |
-| **FP16/BF16 Tensor** | **2.25 PFLOPS** | 4.5 PFLOPS |
-| TF32 Tensor | 1.125 PFLOPS | 2.25 PFLOPS |
-| FP32 (CUDA) | 74.45 TFLOPS | - |
-| FP64 (CUDA) | 34 TFLOPS | - |
-| FP64 Tensor | 40 TFLOPS | - |
+| Precision | Dense | Sparse (2:4) | Instruction |
+|-----------|-------|--------------|-------------|
+| **FP4 Tensor** | 9 PFLOPS | 18 PFLOPS | tcgen05.mma.mxf4 |
+| **FP8 Tensor** | 4.5 PFLOPS | 9 PFLOPS | tcgen05.mma.f8f6f4 |
+| **FP16/BF16 Tensor** | **2.25 PFLOPS** | 4.5 PFLOPS | tcgen05.mma.f16 |
+| TF32 Tensor | 1.125 PFLOPS | 2.25 PFLOPS | tcgen05.mma.tf32 |
+| FP32 (CUDA) | 74.45 TFLOPS | - | CUDA cores |
+| FP64 (CUDA) | 34 TFLOPS | - | CUDA cores |
+| FP64 Tensor | 40 TFLOPS | - | tcgen05.mma |
+
+**Note**: Blackwell uses `tcgen05.mma`, which is 2-4x faster than Hopper's `wgmma`.
 
 ### Ridge Points (Arithmetic Intensity)
 
@@ -153,11 +155,11 @@ State `[8,128,128]` f32 = 4MB read+write once (if chunked) or L times (if not ch
 Without chunking: AI = 1 FLOP/byte → Memory-bound
 With chunking:    AI = 7.5 FLOP/byte → Near ridge point (9.3)
 
-→ Chunked prefill CAN use Tensor Cores (WGMMA)!
+→ Chunked prefill CAN use Tensor Cores (tcgen05.mma)!
 ```
 
-| Mode | AI | Bottleneck | Can Use WGMMA? |
-|------|-----|-----------|----------------|
+| Mode | AI | Bottleneck | Can Use tcgen05.mma? |
+|------|-----|-----------|----------------------|
 | Sequential | 1 | Memory | No |
 | Chunked (C=64) | 7.5 | Near ridge | **Yes** |
 | Chunked (C=128) | ~12 | Compute | **Yes** |
@@ -165,7 +167,7 @@ With chunking:    AI = 7.5 FLOP/byte → Near ridge point (9.3)
 ### Optimization strategy (prefill)
 
 1. **Chunked recurrence**: process C=64 tokens per SMEM tile, keep state in registers
-2. **WGMMA**: Use Tensor Cores for S@Q matrix multiply (C tokens at once)
+2. **tcgen05.mma**: Use Tensor Cores for S@Q matrix multiply (C tokens at once)
 3. **TMA**: Async bulk loads for q,k,v tiles
 4. **Vectorized loads**: 128-bit LDG for state matrix rows
 5. **Future**: Flash-linear-attention style online algorithm for better cache reuse
@@ -178,6 +180,6 @@ With chunking:    AI = 7.5 FLOP/byte → Near ridge point (9.3)
 |--------|--------|-------------------|
 | Arithmetic Intensity | 1 FLOP/byte | 7.5 FLOP/byte |
 | Bottleneck | **Memory BW** | Near Compute |
-| Can use WGMMA? | No (mat-vec) | **Yes** (mat-mat) |
-| Primary Optimization | SMEM swizzle, BW | Chunking, WGMMA |
+| Can use tcgen05.mma? | No (mat-vec) | **Yes** (mat-mat) |
+| Primary Optimization | SMEM swizzle, BW | Chunking, tcgen05.mma |
 | Achieved Efficiency | 95% BW | TBD |
