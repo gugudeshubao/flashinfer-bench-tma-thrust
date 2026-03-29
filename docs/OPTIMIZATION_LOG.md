@@ -264,27 +264,30 @@ Recommend FP8 for inference, FP32 for training.
 
 Tested with realistic parameters over 100 decode steps:
 
-| Metric | FP8 E4M3 | FP4 E2M1 | Notes |
-|--------|----------|----------|-------|
-| **Compression** | 4x | **8x** | State size reduction |
-| Output max error | 5.6e-05 | 3.4e-04 | 6x worse for FP4 |
-| Output rel error | **11.4%** | **54.6%** | FP4 too aggressive |
-| State max error | 2.5e-03 | 1.6e-02 | 6x worse for FP4 |
-| State rel error | **10.5%** | **64.9%** | FP4 too aggressive |
-| Error accumulation | **0.16x** | **0.11x** | Both stable! |
+| Metric | BF16 | FP8 E4M3 | FP4 E2M1 |
+|--------|------|----------|----------|
+| **Compression** | 2x | 4x | 8x |
+| **Mantissa bits** | 7 | 3 | 1 |
+| Output max error | 3.2e-06 | 5.6e-05 | 3.4e-04 |
+| Output rel error | **0.57%** | **11.4%** | **54.6%** |
+| State max error | 1.1e-04 | 2.5e-03 | 1.6e-02 |
+| State rel error | **0.64%** | **10.5%** | **64.9%** |
+| Error accumulation | 0.15x | 0.16x | 0.11x |
 
 ### Precision Recommendation
 
 | Precision | Memory/Head | Relative Error | Recommended Use |
 |-----------|-------------|----------------|-----------------|
 | FP32 | 64 KB | 0% | Training, exact inference |
-| **FP8** | **16 KB** | **~11%** | **Inference (recommended)** |
-| FP4 | 8 KB | ~55-65% | Extreme compression only |
+| **BF16** | **32 KB** | **~0.6%** | High-precision inference |
+| **FP8** | **16 KB** | **~11%** | **Standard inference (recommended)** |
+| FP4 | 8 KB | ~55-65% | Not recommended |
 
 **Key findings**:
-1. **FP8 is the sweet spot**: 4x compression with only ~11% relative error
-2. **FP4 is too aggressive**: 8x compression but ~55-65% error - likely unacceptable
-3. **Neither accumulates errors**: Critical for long sequence inference
+1. **BF16 is near-lossless**: 2x compression with <1% error
+2. **FP8 is the sweet spot**: 4x compression with ~11% relative error
+3. **FP4 is too aggressive**: 8x compression but ~55-65% error - unacceptable
+4. **All are stable**: Errors don't accumulate over time
 
 ### Benchmark Status
 - [x] FP8 accuracy test completed (2026-03-28)

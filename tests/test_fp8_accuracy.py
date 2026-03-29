@@ -74,6 +74,35 @@ def fp4_e2m1_dequantize(quantized, scale):
 
 
 # ============================================================
+# BF16 Simulation (PyTorch)
+# ============================================================
+
+def bf16_quantize(x):
+    """
+    Simulate BF16 quantization (no scaling needed).
+    
+    BF16: 1 sign + 8 exponent + 7 mantissa
+    Same range as FP32, but lower precision (~0.8% relative error)
+    
+    Returns: (quantized_tensor, scale=1.0)
+    """
+    import torch
+    
+    # Convert to BF16 and back to FP32 to simulate precision loss
+    x_bf16 = x.to(torch.bfloat16).to(torch.float32)
+    
+    # BF16 doesn't need scaling (same range as FP32)
+    scale = torch.ones(x.shape[:-1] + (1,), device=x.device, dtype=x.dtype)
+    
+    return x_bf16, scale
+
+
+def bf16_dequantize(quantized, scale):
+    """Dequantize BF16 back to FP32 (no-op for BF16)."""
+    return quantized  # scale is 1.0, so no multiplication needed
+
+
+# ============================================================
 # FP8 E4M3 Simulation (PyTorch) - Deferred import
 # ============================================================
 
@@ -151,7 +180,7 @@ def gdn_decode_fp32(q, k, v, state, g, beta, scale=None):
 
 def gdn_decode_quantized(q, k, v, state_quant, state_scale, g, beta, precision='fp8', scale=None):
     """
-    GDN decode step with quantized state (FP8 or FP4).
+    GDN decode step with quantized state (BF16, FP8 or FP4).
     
     Returns: (output, new_state_quant, new_state_scale, dequantized_state)
     """
@@ -159,6 +188,9 @@ def gdn_decode_quantized(q, k, v, state_quant, state_scale, g, beta, precision='
     if precision == 'fp4':
         dequantize_fn = fp4_e2m1_dequantize
         quantize_fn = fp4_e2m1_quantize
+    elif precision == 'bf16':
+        dequantize_fn = bf16_dequantize
+        quantize_fn = bf16_quantize
     else:  # fp8
         dequantize_fn = fp8_e4m3_dequantize
         quantize_fn = fp8_e4m3_quantize
@@ -199,6 +231,10 @@ def test_fp8_accuracy(batch_size: int = 4, d: int = 128, num_steps: int = 100, s
         quantize_fn = fp4_e2m1_quantize
         precision_label = "FP4 E2M1"
         compression = "8x"
+    elif precision == 'bf16':
+        quantize_fn = bf16_quantize
+        precision_label = "BF16"
+        compression = "2x"
     else:
         quantize_fn = fp8_e4m3_quantize
         precision_label = "FP8 E4M3"
