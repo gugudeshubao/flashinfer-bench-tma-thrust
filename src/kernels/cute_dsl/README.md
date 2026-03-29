@@ -6,48 +6,86 @@
 
 | 特性 | 描述 |
 |------|------|
-| **库** | CUTLASS 4.0+ |
+| **库** | CUTLASS 4.4.2 |
 | **语言** | Python |
 | **编译** | JIT (秒级) |
 | **性能** | ~100% C++ 性能 |
+| **GPU** | B200 (sm100) |
 
-## 典型应用
+## 当前实现
 
-- **FlashAttention-4**: 完全使用 CuTe DSL 实现
-- 编译时间从分钟级降到秒级 (20-30x 更快)
+### gdn_decode_dsl.py
 
-## API 示例
+简化版 GDN decode kernel，演示 CuTe DSL 基本模式：
+
+- **功能**: 计算 `out = scale * State @ Q` (矩阵-向量乘法)
+- **状态**: ✅ 已测试通过 (Modal B200)
+- **精度**: Max diff vs PyTorch < 0.01 (bf16 precision)
 
 ```python
-import cute
-from cutlass import Float16, Float32
+@cute.kernel
+def _gdn_state_matmul_kernel(
+    gState: cute.Tensor,   # [B * 8 * D * D]
+    gQ: cute.Tensor,       # [B * 4 * D]
+    gOut: cute.Tensor,     # [B * 8 * D]
+):
+    tidx, _, _ = cute.arch.thread_idx()
+    bidx, _, _ = cute.arch.block_idx()
+    
+    # ... compute State @ Q
+    gOut[out_idx] = acc
+```
 
+### 完整 GDN Delta Rule
+
+完整的 GDN kernel 需要：
+1. 门控计算 (softplus, sigmoid) 
+2. 状态衰减和 rank-1 更新
+3. Tensor Core MMA 优化
+
+对于生产环境，建议使用 **Triton kernel** (`gdn_decode_triton.py`)。
+
+## 使用方法
+
+```bash
+# 安装 CUTLASS DSL
+pip install nvidia-cutlass-dsl>=4.3
+
+# 测试 (Modal B200)
+modal run scripts/test_cute_dsl.py
+```
+
+## API 模式
+
+```python
+import cutlass.cute as cute
+from cutlass.cute.runtime import from_dlpack
+
+# 1. 定义 kernel
+@cute.kernel
+def my_kernel(gInput: cute.Tensor, gOutput: cute.Tensor):
+    tidx, _, _ = cute.arch.thread_idx()
+    bidx, _, _ = cute.arch.block_idx()
+    idx = bidx * 128 + tidx
+    gOutput[idx] = gInput[idx]
+
+# 2. 定义 host function
 @cute.jit
-def gdn_decode_dsl(state, q, k, v, out):
-    # Layout 定义 (与 C++ CuTe 一致)
-    state_layout = cute.make_layout(
-        cute.make_shape(V, D),
-        cute.make_stride(D, 1)
+def launch(mInput, mOutput, num_blocks: int):
+    my_kernel(mInput, mOutput).launch(
+        grid=[num_blocks, 1, 1],
+        block=[128, 1, 1],
     )
-    
-    # SMEM 分配
-    smem_state = cute.SharedMemory(state_layout, dtype=Float32)
-    
-    # TiledMMA (tcgen05.mma for Blackwell)
-    mma_atom = cute.tcgen05.MmaF16BF16Op(
-        io_dtype=Float16,
-        acc_dtype=Float32,
-        mma_inst_shape_mnk=(128, 128, 64),
-    )
-    tiled_mma = cute.make_tiled_mma(mma_atom)
-    
-    # 计算
-    # ...
+
+# 3. 调用
+mInput = from_dlpack(torch_tensor).mark_layout_dynamic()
+mOutput = from_dlpack(output_tensor).mark_layout_dynamic()
+launch(mInput, mOutput, num_blocks)
 ```
 
 ## 状态
 
-🚧 **规划中** - 等待 CUTLASS 4.0 稳定版本
+✅ **已验证** - CuTe DSL 4.4.2 在 Modal B200 上可用
 
 ## 参考
 
