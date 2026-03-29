@@ -2,50 +2,50 @@
 
 <cite>
 **Referenced Files in This Document**
-- [benchmarks/bench_modal.py](file://benchmarks/bench_modal.py)
-- [benchmarks/bench_quantization_perf.py](file://benchmarks/bench_quantization_perf.py)
-- [tests/test_quantization_accuracy.py](file://tests/test_quantization_accuracy.py)
-- [docs/PERFORMANCE.md](file://docs/PERFORMANCE.md)
-- [docs/ROOFLINE.md](file://docs/ROOFLINE.md)
-- [docs/ZHIHU_GDN_QUANTIZATION.md](file://docs/ZHIHU_GDN_QUANTIZATION.md)
-- [docs/ZHIHU_GDN_TENSOR_CORE.md](file://docs/ZHIHU_GDN_TENSOR_CORE.md)
-- [scripts/debug_prefill.py](file://scripts/debug_prefill.py)
-- [scripts/debug_prefill2.py](file://scripts/debug_prefill2.py)
-- [scripts/setup_volume.py](file://scripts/setup_volume.py)
-- [scripts/bench_all_versions.py](file://scripts/bench_all_versions.py)
-- [scripts/bench_cuda_real.py](file://scripts/bench_cuda_real.py)
-- [scripts/build_cuda.py](file://scripts/build_cuda.py)
-- [scripts/explore_cute_dsl.py](file://scripts/explore_cute_dsl.py)
-- [scripts/test_cute_dsl.py](file://scripts/test_cute_dsl.py)
-- [scripts/test_cute_minimal.py](file://scripts/test_cute_minimal.py)
-- [scripts/bench_cute_vs_triton.py](file://scripts/bench_cute_vs_triton.py)
-- [scripts/bench_cute_dsl_vs_cpp.py](file://scripts/bench_cute_dsl_vs_cpp.py)
-- [scripts/bench_kernels.py](file://scripts/bench_kernels.py)
-- [src/kernels/cute/README.md](file://src/kernels/cute/README.md)
-- [src/kernels/cute/gdn_decode_v5.cuh](file://src/kernels/cute/gdn_decode_v5.cuh)
-- [src/kernels/cute/gdn_decode_v6.cuh](file://src/kernels/cute/gdn_decode_v6.cuh)
-- [src/kernels/cute/gdn_decode_v7.cuh](file://src/kernels/cute/gdn_decode_v7.cuh)
-- [src/kernels/cute/gdn_decode_v8.cuh](file://src/kernels/cute/gdn_decode_v8.cuh)
-- [src/kernels/cute/gdn_decode_v9.cuh](file://src/kernels/cute/gdn_decode_v9.cuh)
-- [src/kernels/cute/gdn_decode_v10.cuh](file://src/kernels/cute/gdn_decode_v10.cuh)
-- [src/kernels/cute_cpp/gdn_decode_v9.cuh](file://src/kernels/cute_cpp/gdn_decode_v9.cuh)
-- [src/kernels/cute_cpp/gdn_decode_v10.cuh](file://src/kernels/cute_cpp/gdn_decode_v10.cuh)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py](file://src/kernels/cute_dsl/gdn_decode_dsl.py)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py)
-- [src/kernels/ptx/gdn_decode_ptx.cuh](file://src/kernels/ptx/gdn_decode_ptx.cuh)
-- [src/kernels/ptx/gdn_prefill_ptx.cuh](file://src/kernels/ptx/gdn_prefill_ptx.cuh)
-- [src/kernels/triton/gdn_decode_triton.py](file://src/kernels/triton/gdn_decode_triton.py)
-- [src/gdn_kernels.cu](file://src/gdn_kernels.cu)
-- [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py)
-- [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py)
-- [gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py)
-- [gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py)
-- [gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py)
-- [gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py)
-- [src/kernels/gdn_decode_v5.cuh](file://src/kernels/gdn_decode_v5.cuh)
-- [src/kernels/gdn_prefill_v5.cuh](file://src/kernels/gdn_prefill_v5.cuh)
-- [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json)
-- [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json)
+- [bench_modal.py](file://gdn/benchmarks/bench_modal.py)
+- [bench_quantization_perf.py](file://gdn/benchmarks/bench_quantization_perf.py)
+- [test_quantization_accuracy.py](file://gdn/tests/test_quantization_accuracy.py)
+- [PERFORMANCE.md](file://gdn/docs/PERFORMANCE.md)
+- [ROOFLINE.md](file://gdn/docs/ROOFLINE.md)
+- [ZHIHU_GDN_QUANTIZATION.md](file://gdn/docs/ZHIHU_GDN_QUANTIZATION.md)
+- [ZHIHU_GDN_TENSOR_CORE.md](file://gdn/docs/ZHIHU_GDN_TENSOR_CORE.md)
+- [debug_prefill.py](file://gdn/scripts/debug_prefill.py)
+- [debug_prefill2.py](file://gdn/scripts/debug_prefill2.py)
+- [setup_volume.py](file://gdn/scripts/setup_volume.py)
+- [bench_all_versions.py](file://gdn/scripts/bench_all_versions.py)
+- [bench_cuda_real.py](file://gdn/scripts/bench_cuda_real.py)
+- [build_cuda.py](file://gdn/scripts/build_cuda.py)
+- [explore_cute_dsl.py](file://gdn/scripts/explore_cute_dsl.py)
+- [test_cute_dsl.py](file://gdn/scripts/test_cute_dsl.py)
+- [test_cute_minimal.py](file://gdn/scripts/test_cute_minimal.py)
+- [bench_cute_dsl_vs_cpp.py](file://gdn/scripts/bench_cute_dsl_vs_cpp.py)
+- [bench_cute_vs_triton.py](file://gdn/scripts/bench_cute_vs_triton.py)
+- [bench_kernels.py](file://gdn/scripts/bench_kernels.py)
+- [README.md](file://gdn/kernels/cute/README.md)
+- [gdn_decode_v5.cuh](file://gdn/kernels/cute/gdn_decode_v5.cuh)
+- [gdn_decode_v6.cuh](file://gdn/kernels/cute/gdn_decode_v6.cuh)
+- [gdn_decode_v7.cuh](file://gdn/kernels/cute/gdn_decode_v7.cuh)
+- [gdn_decode_v8.cuh](file://gdn/kernels/cute/gdn_decode_v8.cuh)
+- [gdn_decode_v9.cuh](file://gdn/kernels/cute/gdn_decode_v9.cuh)
+- [gdn_decode_v10.cuh](file://gdn/kernels/cute/gdn_decode_v10.cuh)
+- [gdn_decode_v9.cuh](file://gdn/kernels/cute_cpp/gdn_decode_v9.cuh)
+- [gdn_decode_v10.cuh](file://gdn/kernels/cute_cpp/gdn_decode_v10.cuh)
+- [gdn_decode_dsl.py](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py)
+- [gdn_decode_dsl_optimized.py](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py)
+- [gdn_decode_ptx.cuh](file://gdn/kernels/ptx/gdn_decode_ptx.cuh)
+- [gdn_prefill_ptx.cuh](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh)
+- [gdn_decode_triton.py](file://gdn/kernels/triton/gdn_decode_triton.py)
+- [gdn_kernels.cu](file://gdn/gdn_kernels.cu)
+- [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py](file://gdn/decode/solution/triton/kernel.py)
+- [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py](file://gdn/decode/baseline/triton/kernel.py)
+- [gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py](file://gdn/prefill/solution/triton/kernel.py)
+- [gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py](file://gdn/prefill/baseline/triton/kernel.py)
+- [gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py](file://gdn/decode/solution/cuda/kernel.py)
+- [gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py](file://gdn/prefill/solution/cuda/kernel.py)
+- [gdn_decode_v5.cuh](file://gdn/kernels/gdn_decode_v5.cuh)
+- [gdn_prefill_v5.cuh](file://gdn/kernels/gdn_prefill_v5.cuh)
+- [gdn_decode_qk4_v8_d128_k_last.json](file://gdn/trace_definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json)
+- [gdn_prefill_qk4_v8_d128_k_last.json](file://gdn/trace_definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json)
 </cite>
 
 ## Update Summary
@@ -57,6 +57,9 @@
 - Enhanced quantization research framework with BF16/FP8/FP4 precision evaluation and mixed-precision strategy validation
 - Added PTX assembly kernel benchmarking demonstrating 95% peak bandwidth achievement
 - Expanded roofline analysis with accurate Blackwell architecture documentation using correct tcgen05.mma terminology
+- Added comprehensive CuTe DSL testing infrastructure with Modal deployment and numerical accuracy validation
+- Integrated systematic performance comparison framework between CuTe DSL, PTX, and Triton kernels
+- Enhanced PTX kernel optimizations with embedded assembly primitives and memory access patterns
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -73,7 +76,7 @@
 ## Introduction
 This document presents a comprehensive performance analysis and measurement methodology for the GDN kernels benchmark suite. It explains how roofline analysis characterizes kernel performance limits and identifies bottlenecks in terms of compute and memory bandwidth. It documents the performance tracking system, including metrics collection, version history management, and comparative analysis frameworks. It details the arithmetic mean speedup calculation used for contest evaluation, including reference implementation comparisons and statistical validation procedures. Practical examples demonstrate performance profiling, bottleneck identification, and optimization impact measurement. Finally, it covers performance validation ensuring correctness while maximizing speed, including edge case testing and regression prevention, and outlines debugging techniques and systematic approaches to identifying optimization opportunities.
 
-**Updated** Enhanced with comprehensive performance improvements showcasing new v9/v10 kernels achieving 7,600 GB/s peak bandwidth (95% of B200 peak), new decode performance metrics (2,798 GB/s at batch 256, 3,465 GB/s at batch 512), comprehensive prefill workloads including 'Many long' and 'Max' configurations, updated framework comparison showing CuTe C++ achieving 7,602 GB/s peak bandwidth, and enhanced quantization research framework with BF16/FP8/FP4 precision evaluation.
+**Updated** Enhanced with comprehensive performance improvements showcasing new decode kernels achieving 7,600 GB/s peak bandwidth (95% of B200 peak), new decode performance metrics (2,798 GB/s at batch 256, 3,465 GB/s at batch 512), comprehensive prefill workloads including 'Many long' and 'Max' configurations with 1088x and 1886x speedup respectively, updated framework comparison showing CuTe C++ achieving 7,602 GB/s peak bandwidth, and enhanced quantization research framework with BF16/FP8/FP4 precision evaluation.
 
 ## Project Structure
 The repository organizes performance-critical components into modular directories and shared documentation:
@@ -87,58 +90,58 @@ The repository organizes performance-critical components into modular directorie
 ```mermaid
 graph TB
 subgraph "Runner"
-BM["benchmarks/bench_modal.py"]
-SV["scripts/setup_volume.py"]
-BAV["scripts/bench_all_versions.py"]
-BCR["scripts/bench_cuda_real.py"]
-BCL["scripts/build_cuda.py"]
-BCVT["scripts/bench_cute_vs_triton.py"]
-BCDC["scripts/bench_cute_dsl_vs_cpp.py"]
-BK["scripts/bench_kernels.py"]
-BQP["benchmarks/bench_quantization_perf.py"]
+BM["bench_modal.py"]
+SV["setup_volume.py"]
+BAV["bench_all_versions.py"]
+BCR["bench_cuda_real.py"]
+BCL["build_cuda.py"]
+BCVT["bench_cute_vs_triton.py"]
+BCDC["bench_cute_dsl_vs_cpp.py"]
+BK["bench_kernels.py"]
+BQP["bench_quantization_perf.py"]
 end
 subgraph "Quantization Research"
-QA["tests/test_quantization_accuracy.py"]
-QDOC["docs/ZHIHU_GDN_QUANTIZATION.md"]
+QA["test_quantization_accuracy.py"]
+QDOC["ZHIHU_GDN_QUANTIZATION.md"]
 end
 subgraph "Trace Definitions"
-DEF_DEC["flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json"]
-DEF_PRE["flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json"]
+DEF_DEC["gdn_decode_qk4_v8_d128_k_last.json"]
+DEF_PRE["gdn_prefill_qk4_v8_d128_k_last.json"]
 end
 subgraph "Kernels"
-CUDA_DEC["gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py"]
-CUDA_PRE["gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py"]
-TRITON_DEC["gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py"]
-TRITON_PRE["gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py"]
-BASELINE_DEC["gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py"]
-BASELINE_PRE["gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py"]
-TRITON_KERNEL["src/kernels/triton/gdn_decode_triton.py"]
-CUTE_DSL["src/kernels/cute_dsl/gdn_decode_dsl.py"]
-CUTE_DSL_OPT["src/kernels/cute_dsl/gdn_decode_dsl_optimized.py"]
-PTX_DEC["src/kernels/ptx/gdn_decode_ptx.cuh"]
-PTX_PRE["src/kernels/ptx/gdn_prefill_ptx.cuh"]
-V10["src/kernels/cute/gdn_decode_v10.cuh"]
-PTX_Q["src/kernels/ptx/gdn_decode_ptx.cuh"]
+CUDA_DEC["decode/solution/cuda/kernel.py"]
+CUDA_PRE["prefill/solution/cuda/kernel.py"]
+TRITON_DEC["decode/solution/triton/kernel.py"]
+TRITON_PRE["prefill/solution/triton/kernel.py"]
+BASELINE_DEC["decode/baseline/triton/kernel.py"]
+BASELINE_PRE["prefill/baseline/triton/kernel.py"]
+TRITON_KERNEL["gdn_decode_triton.py"]
+CUTE_DSL["gdn_decode_dsl.py"]
+CUTE_DSL_OPT["gdn_decode_dsl_optimized.py"]
+PTX_DEC["gdn_decode_ptx.cuh"]
+PTX_PRE["gdn_prefill_ptx.cuh"]
+V10["gdn_decode_v10.cuh"]
+PTX_Q["gdn_decode_ptx.cuh"]
 end
 subgraph "CUDA Sources"
-SRC_DEC["src/kernels/gdn_decode_v5.cuh"]
-SRC_PRE["src/kernels/gdn_prefill_v5.cuh"]
-CU9["src/kernels/cute/gdn_decode_v9.cuh"]
-GDNK["src/gdn_kernels.cu"]
+SRC_DEC["gdn_decode_v5.cuh"]
+SRC_PRE["gdn_prefill_v5.cuh"]
+CU9["gdn_decode_v9.cuh"]
+GDNK["gdn_kernels.cu"]
 end
 subgraph "CuTe DSL Testing"
-EXPLORE["scripts/explore_cute_dsl.py"]
-TESTDSL["scripts/test_cute_dsl.py"]
-MINIMAL["scripts/test_cute_minimal.py"]
+EXPLORE["explore_cute_dsl.py"]
+TESTDSL["test_cute_dsl.py"]
+MINIMAL["test_cute_minimal.py"]
 end
 subgraph "Docs"
-PERF["docs/PERFORMANCE.md"]
-ROOF["docs/ROOFLINE.md"]
-QRESEARCH["docs/ZHIHU_GDN_QUANTIZATION.md"]
-ZH["docs/ZHIHU_GDN_TENSOR_CORE.md"]
-CUDER["src/kernels/cute/README.md"]
-DBG1["scripts/debug_prefill.py"]
-DBG2["scripts/debug_prefill2.py"]
+PERF["PERFORMANCE.md"]
+ROOF["ROOFLINE.md"]
+QRESEARCH["ZHIHU_GDN_QUANTIZATION.md"]
+ZH["ZHIHU_GDN_TENSOR_CORE.md"]
+CUDER["README.md"]
+DBG1["debug_prefill.py"]
+DBG2["debug_prefill2.py"]
 end
 BM --> DEF_DEC
 BM --> DEF_PRE
@@ -181,55 +184,56 @@ PTX_Q --> PERF
 ```
 
 **Diagram sources**
-- [benchmarks/bench_modal.py:1-330](file://benchmarks/bench_modal.py#L1-L330)
-- [benchmarks/bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
-- [tests/test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
-- [scripts/setup_volume.py:1-220](file://scripts/setup_volume.py#L1-L220)
-- [scripts/bench_all_versions.py:1-444](file://scripts/bench_all_versions.py#L1-L444)
-- [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
-- [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
-- [scripts/bench_cute_vs_triton.py:1-179](file://scripts/bench_cute_vs_triton.py#L1-L179)
-- [scripts/bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
-- [scripts/bench_kernels.py:1-403](file://scripts/bench_kernels.py#L1-L403)
-- [scripts/explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
-- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
-- [scripts/test_cute_minimal.py:1-194](file://scripts/test_cute_minimal.py#L1-L194)
-- [src/kernels/triton/gdn_decode_triton.py:1-136](file://src/kernels/triton/gdn_decode_triton.py#L1-L136)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1-491](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
-- [src/kernels/ptx/gdn_prefill_ptx.cuh:1-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
-- [src/kernels/cute/gdn_decode_v10.cuh:1-1355](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
-- [docs/PERFORMANCE.md:1-160](file://docs/PERFORMANCE.md#L1-L160)
-- [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
-- [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
-- [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
-- [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
-- [src/gdn_kernels.cu:1-171](file://src/gdn_kernels.cu#L1-L171)
+- [bench_modal.py:1-331](file://gdn/benchmarks/bench_modal.py#L1-L331)
+- [bench_quantization_perf.py:1-336](file://gdn/benchmarks/bench_quantization_perf.py#L1-L336)
+- [test_quantization_accuracy.py:1-361](file://gdn/tests/test_quantization_accuracy.py#L1-L361)
+- [setup_volume.py:1-220](file://gdn/scripts/setup_volume.py#L1-L220)
+- [bench_all_versions.py:1-444](file://gdn/scripts/bench_all_versions.py#L1-L444)
+- [bench_cuda_real.py:1-604](file://gdn/scripts/bench_cuda_real.py#L1-L604)
+- [build_cuda.py:1-436](file://gdn/scripts/build_cuda.py#L1-L436)
+- [bench_cute_vs_triton.py:1-179](file://gdn/scripts/bench_cute_vs_triton.py#L1-L179)
+- [bench_cute_dsl_vs_cpp.py:1-333](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
+- [bench_kernels.py:1-403](file://gdn/scripts/bench_kernels.py#L1-L403)
+- [explore_cute_dsl.py:1-207](file://gdn/scripts/explore_cute_dsl.py#L1-L207)
+- [test_cute_dsl.py:1-137](file://gdn/scripts/test_cute_dsl.py#L1-L137)
+- [test_cute_minimal.py:1-194](file://gdn/scripts/test_cute_minimal.py#L1-L194)
+- [gdn_decode_triton.py:1-136](file://gdn/kernels/triton/gdn_decode_triton.py#L1-L136)
+- [gdn_decode_dsl.py:1-283](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+- [gdn_decode_dsl_optimized.py:1-442](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [gdn_decode_ptx.cuh:1-491](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
+- [gdn_prefill_ptx.cuh:1-358](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
+- [gdn_decode_v10.cuh:1-1355](file://gdn/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
+- [PERFORMANCE.md:1-160](file://gdn/docs/PERFORMANCE.md#L1-L160)
+- [ROOFLINE.md:1-186](file://gdn/docs/ROOFLINE.md#L1-L186)
+- [ZHIHU_GDN_QUANTIZATION.md:1-195](file://gdn/docs/ZHIHU_GDN_QUANTIZATION.md#L1-L195)
+- [ZHIHU_GDN_TENSOR_CORE.md:1-837](file://gdn/docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
+- [README.md:1-130](file://gdn/kernels/cute/README.md#L1-L130)
+- [gdn_decode_v9.cuh:1-549](file://gdn/kernels/cute/gdn_decode_v9.cuh#L1-L549)
+- [gdn_kernels.cu:1-171](file://gdn/gdn_kernels.cu#L1-L171)
 
 **Section sources**
-- [benchmarks/bench_modal.py:1-330](file://benchmarks/bench_modal.py#L1-L330)
-- [benchmarks/bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
-- [tests/test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
-- [scripts/setup_volume.py:1-220](file://scripts/setup_volume.py#L1-L220)
-- [scripts/bench_all_versions.py:1-444](file://scripts/bench_all_versions.py#L1-L444)
-- [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
-- [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
-- [scripts/bench_cute_vs_triton.py:1-179](file://scripts/bench_cute_vs_triton.py#L1-L179)
-- [scripts/bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
-- [scripts/bench_kernels.py:1-403](file://scripts/bench_kernels.py#L1-L403)
-- [scripts/explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
-- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
-- [scripts/test_cute_minimal.py:1-194](file://scripts/test_cute_minimal.py#L1-L194)
-- [src/kernels/triton/gdn_decode_triton.py:1-136](file://src/kernels/triton/gdn_decode_triton.py#L1-L136)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1-491](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
-- [src/kernels/ptx/gdn_prefill_ptx.cuh:1-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
-- [src/kernels/cute/gdn_decode_v10.cuh:1-1355](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
-- [docs/PERFORMANCE.md:1-160](file://docs/PERFORMANCE.md#L1-L160)
-- [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
-- [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
+- [bench_modal.py:1-331](file://gdn/benchmarks/bench_modal.py#L1-L331)
+- [bench_quantization_perf.py:1-336](file://gdn/benchmarks/bench_quantization_perf.py#L1-L336)
+- [test_quantization_accuracy.py:1-361](file://gdn/tests/test_quantization_accuracy.py#L1-L361)
+- [setup_volume.py:1-220](file://gdn/scripts/setup_volume.py#L1-L220)
+- [bench_all_versions.py:1-444](file://gdn/scripts/bench_all_versions.py#L1-L444)
+- [bench_cuda_real.py:1-604](file://gdn/scripts/bench_cuda_real.py#L1-L604)
+- [build_cuda.py:1-436](file://gdn/scripts/build_cuda.py#L1-L436)
+- [bench_cute_vs_triton.py:1-179](file://gdn/scripts/bench_cute_vs_triton.py#L1-L179)
+- [bench_cute_dsl_vs_cpp.py:1-333](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
+- [bench_kernels.py:1-403](file://gdn/scripts/bench_kernels.py#L1-L403)
+- [explore_cute_dsl.py:1-207](file://gdn/scripts/explore_cute_dsl.py#L1-L207)
+- [test_cute_dsl.py:1-137](file://gdn/scripts/test_cute_dsl.py#L1-L137)
+- [test_cute_minimal.py:1-194](file://gdn/scripts/test_cute_minimal.py#L1-L194)
+- [gdn_decode_triton.py:1-136](file://gdn/kernels/triton/gdn_decode_triton.py#L1-L136)
+- [gdn_decode_dsl.py:1-283](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+- [gdn_decode_dsl_optimized.py:1-442](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [gdn_decode_ptx.cuh:1-491](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
+- [gdn_prefill_ptx.cuh:1-358](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
+- [gdn_decode_v10.cuh:1-1355](file://gdn/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
+- [PERFORMANCE.md:1-160](file://gdn/docs/PERFORMANCE.md#L1-L160)
+- [ROOFLINE.md:1-186](file://gdn/docs/ROOFLINE.md#L1-L186)
+- [ZHIHU_GDN_TENSOR_CORE.md:1-837](file://gdn/docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
 
 ## Core Components
 - Benchmark runner: builds solutions and baselines, runs workloads on Modal B200, collects latency and correctness metrics, and computes speedups.
@@ -260,26 +264,26 @@ Key responsibilities:
 - **Peak bandwidth achievement**: demonstrates 95% B200 peak bandwidth utilization across all kernel versions.
 
 **Section sources**
-- [benchmarks/bench_modal.py:106-330](file://benchmarks/bench_modal.py#L106-L330)
-- [benchmarks/bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
-- [tests/test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
-- [scripts/bench_all_versions.py:1-444](file://scripts/bench_all_versions.py#L1-L444)
-- [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
-- [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
-- [scripts/bench_cute_vs_triton.py:1-179](file://scripts/bench_cute_vs_triton.py#L1-L179)
-- [scripts/bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
-- [scripts/bench_kernels.py:1-403](file://scripts/bench_kernels.py#L1-L403)
-- [scripts/explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
-- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
-- [scripts/test_cute_minimal.py:1-194](file://scripts/test_cute_minimal.py#L1-L194)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1-491](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
-- [src/kernels/ptx/gdn_prefill_ptx.cuh:1-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
-- [src/kernels/cute/gdn_decode_v10.cuh:1-1355](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
-- [docs/PERFORMANCE.md:1-160](file://docs/PERFORMANCE.md#L1-L160)
-- [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
-- [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
+- [bench_modal.py:106-331](file://gdn/benchmarks/bench_modal.py#L106-L331)
+- [bench_quantization_perf.py:1-336](file://gdn/benchmarks/bench_quantization_perf.py#L1-L336)
+- [test_quantization_accuracy.py:1-361](file://gdn/tests/test_quantization_accuracy.py#L1-L361)
+- [bench_all_versions.py:1-444](file://gdn/scripts/bench_all_versions.py#L1-L444)
+- [bench_cuda_real.py:1-604](file://gdn/scripts/bench_cuda_real.py#L1-L604)
+- [build_cuda.py:1-436](file://gdn/scripts/build_cuda.py#L1-L436)
+- [bench_cute_vs_triton.py:1-179](file://gdn/scripts/bench_cute_vs_triton.py#L1-L179)
+- [bench_cute_dsl_vs_cpp.py:1-333](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
+- [bench_kernels.py:1-403](file://gdn/scripts/bench_kernels.py#L1-L403)
+- [explore_cute_dsl.py:1-207](file://gdn/scripts/explore_cute_dsl.py#L1-L207)
+- [test_cute_dsl.py:1-137](file://gdn/scripts/test_cute_dsl.py#L1-L137)
+- [test_cute_minimal.py:1-194](file://gdn/scripts/test_cute_minimal.py#L1-L194)
+- [gdn_decode_dsl.py:1-283](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+- [gdn_decode_dsl_optimized.py:1-442](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [gdn_decode_ptx.cuh:1-491](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
+- [gdn_prefill_ptx.cuh:1-358](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
+- [gdn_decode_v10.cuh:1-1355](file://gdn/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
+- [PERFORMANCE.md:1-160](file://gdn/docs/PERFORMANCE.md#L1-L160)
+- [ROOFLINE.md:1-186](file://gdn/docs/ROOFLINE.md#L1-L186)
+- [ZHIHU_GDN_TENSOR_CORE.md:1-837](file://gdn/docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
 
 ## Architecture Overview
 The performance measurement pipeline integrates the benchmark runner with kernel implementations and trace definitions. Workloads are generated (synthetic or from HF), uploaded to a Modal volume, and executed on B200 GPUs. The system now supports comprehensive cross-version benchmarking with real CUDA libraries, extensive correctness validation, CuTe DSL API testing with Modal deployment, systematic performance comparison between CuTe DSL, PTX, and Triton kernels, and PTX assembly kernel benchmarking with embedded optimizations.
@@ -330,19 +334,19 @@ PerfComp->>PyTorch : "verify against reference implementation"
 ```
 
 **Diagram sources**
-- [benchmarks/bench_modal.py:250-330](file://benchmarks/bench_modal.py#L250-L330)
-- [scripts/bench_all_versions.py:32-444](file://scripts/bench_all_versions.py#L32-L444)
-- [scripts/bench_cuda_real.py:22-604](file://scripts/bench_cuda_real.py#L22-L604)
-- [tests/test_quantization_accuracy.py:337-361](file://tests/test_quantization_accuracy.py#L337-L361)
-- [benchmarks/bench_quantization_perf.py:231-267](file://benchmarks/bench_quantization_perf.py#L231-L267)
-- [scripts/debug_prefill.py:168-302](file://scripts/debug_prefill.py#L168-L302)
-- [scripts/debug_prefill2.py:124-184](file://scripts/debug_prefill2.py#L124-L184)
-- [scripts/bench_cute_vs_triton.py:42-179](file://scripts/bench_cute_vs_triton.py#L42-L179)
-- [scripts/bench_cute_dsl_vs_cpp.py:42-333](file://scripts/bench_cute_dsl_vs_cpp.py#L42-L333)
-- [scripts/bench_kernels.py:33-403](file://scripts/bench_kernels.py#L33-L403)
-- [scripts/test_cute_dsl.py:31-136](file://scripts/test_cute_dsl.py#L31-L136)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:125-183](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L125-L183)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:248-413](file://src/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
+- [bench_modal.py:250-331](file://gdn/benchmarks/bench_modal.py#L250-L331)
+- [bench_all_versions.py:32-444](file://gdn/scripts/bench_all_versions.py#L32-L444)
+- [bench_cuda_real.py:22-604](file://gdn/scripts/bench_cuda_real.py#L22-L604)
+- [test_quantization_accuracy.py:337-361](file://gdn/tests/test_quantization_accuracy.py#L337-L361)
+- [bench_quantization_perf.py:231-267](file://gdn/benchmarks/bench_quantization_perf.py#L231-L267)
+- [debug_prefill.py:168-302](file://gdn/scripts/debug_prefill.py#L168-L302)
+- [debug_prefill2.py:124-184](file://gdn/scripts/debug_prefill2.py#L124-L184)
+- [bench_cute_vs_triton.py:42-179](file://gdn/scripts/bench_cute_vs_triton.py#L42-L179)
+- [bench_cute_dsl_vs_cpp.py:42-333](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L42-L333)
+- [bench_kernels.py:33-403](file://gdn/scripts/bench_kernels.py#L33-L403)
+- [test_cute_dsl.py:31-136](file://gdn/scripts/test_cute_dsl.py#L31-L136)
+- [gdn_decode_dsl.py:125-183](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L125-L183)
+- [gdn_decode_ptx.cuh:248-413](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
 
 ## Detailed Component Analysis
 
@@ -378,24 +382,24 @@ PeakAchievement --> End(["End"])
 ```
 
 **Diagram sources**
-- [scripts/bench_all_versions.py:32-444](file://scripts/bench_all_versions.py#L32-L444)
-- [scripts/bench_cuda_real.py:22-604](file://scripts/bench_cuda_real.py#L22-L604)
-- [tests/test_quantization_accuracy.py:219-330](file://tests/test_quantization_accuracy.py#L219-L330)
-- [benchmarks/bench_quantization_perf.py:127-228](file://benchmarks/bench_quantization_perf.py#L127-L228)
-- [scripts/build_cuda.py:63-436](file://scripts/build_cuda.py#L63-L436)
-- [scripts/bench_cute_vs_triton.py:69-179](file://scripts/bench_cute_vs_triton.py#L69-L179)
-- [scripts/bench_cute_dsl_vs_cpp.py:286-333](file://scripts/bench_cute_dsl_vs_cpp.py#L286-L333)
-- [scripts/bench_kernels.py:168-282](file://scripts/bench_kernels.py#L168-L282)
+- [bench_all_versions.py:32-444](file://gdn/scripts/bench_all_versions.py#L32-L444)
+- [bench_cuda_real.py:22-604](file://gdn/scripts/bench_cuda_real.py#L22-L604)
+- [test_quantization_accuracy.py:219-330](file://gdn/tests/test_quantization_accuracy.py#L219-L330)
+- [bench_quantization_perf.py:127-228](file://gdn/benchmarks/bench_quantization_perf.py#L127-L228)
+- [build_cuda.py:63-436](file://gdn/scripts/build_cuda.py#L63-L436)
+- [bench_cute_vs_triton.py:69-179](file://gdn/scripts/bench_cute_vs_triton.py#L69-L179)
+- [bench_cute_dsl_vs_cpp.py:286-333](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L286-L333)
+- [bench_kernels.py:168-282](file://gdn/scripts/bench_kernels.py#L168-L282)
 
 **Section sources**
-- [scripts/bench_all_versions.py:1-444](file://scripts/bench_all_versions.py#L1-L444)
-- [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
-- [tests/test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
-- [benchmarks/bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
-- [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
-- [scripts/bench_cute_vs_triton.py:1-179](file://scripts/bench_cute_vs_triton.py#L1-L179)
-- [scripts/bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
-- [scripts/bench_kernels.py:1-403](file://scripts/bench_kernels.py#L1-L403)
+- [bench_all_versions.py:1-444](file://gdn/scripts/bench_all_versions.py#L1-L444)
+- [bench_cuda_real.py:1-604](file://gdn/scripts/bench_cuda_real.py#L1-L604)
+- [test_quantization_accuracy.py:1-361](file://gdn/tests/test_quantization_accuracy.py#L1-L361)
+- [bench_quantization_perf.py:1-336](file://gdn/benchmarks/bench_quantization_perf.py#L1-L336)
+- [build_cuda.py:1-436](file://gdn/scripts/build_cuda.py#L1-L436)
+- [bench_cute_vs_triton.py:1-179](file://gdn/scripts/bench_cute_vs_triton.py#L1-L179)
+- [bench_cute_dsl_vs_cpp.py:1-333](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
+- [bench_kernels.py:1-403](file://gdn/scripts/bench_kernels.py#L1-L403)
 
 ### Quantization Research Framework
 The system now includes comprehensive quantization research framework with BF16/FP8/FP4 precision evaluation:
@@ -435,14 +439,14 @@ PeakAchievement --> End(["Research Findings"])
 ```
 
 **Diagram sources**
-- [tests/test_quantization_accuracy.py:219-330](file://tests/test_quantization_accuracy.py#L219-L330)
-- [benchmarks/bench_quantization_perf.py:127-228](file://benchmarks/bench_quantization_perf.py#L127-L228)
-- [docs/ZHIHU_GDN_QUANTIZATION.md:24-44](file://docs/ZHIHU_GDN_QUANTIZATION.md#L24-L44)
+- [test_quantization_accuracy.py:219-330](file://gdn/tests/test_quantization_accuracy.py#L219-L330)
+- [bench_quantization_perf.py:127-228](file://gdn/benchmarks/bench_quantization_perf.py#L127-L228)
+- [ZHIHU_GDN_QUANTIZATION.md:24-44](file://gdn/docs/ZHIHU_GDN_QUANTIZATION.md#L24-L44)
 
 **Section sources**
-- [tests/test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
-- [benchmarks/bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
-- [docs/ZHIHU_GDN_QUANTIZATION.md:1-195](file://docs/ZHIHU_GDN_QUANTIZATION.md#L1-L195)
+- [test_quantization_accuracy.py:1-361](file://gdn/tests/test_quantization_accuracy.py#L1-L361)
+- [bench_quantization_perf.py:1-336](file://gdn/benchmarks/bench_quantization_perf.py#L1-L336)
+- [ZHIHU_GDN_QUANTIZATION.md:1-195](file://gdn/docs/ZHIHU_GDN_QUANTIZATION.md#L1-L195)
 
 ### Real CUDA Library Integration
 The system now includes comprehensive CUDA library integration with ctypes interface:
@@ -497,17 +501,17 @@ KernelImplementations --> LibraryValidation : "validated by"
 ```
 
 **Diagram sources**
-- [scripts/build_cuda.py:69-436](file://scripts/build_cuda.py#L69-L436)
-- [src/gdn_kernels.cu:26-171](file://src/gdn_kernels.cu#L26-L171)
-- [src/kernels/cute/gdn_decode_v10.cuh:1066-1355](file://src/kernels/cute/gdn_decode_v10.cuh#L1066-L1355)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1121-1423](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1121-L1423)
+- [build_cuda.py:69-436](file://gdn/scripts/build_cuda.py#L69-L436)
+- [gdn_kernels.cu:26-171](file://gdn/gdn_kernels.cu#L26-L171)
+- [gdn_decode_v10.cuh:1066-1355](file://gdn/kernels/cute/gdn_decode_v10.cuh#L1066-L1355)
+- [gdn_decode_ptx.cuh:1121-1423](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1121-L1423)
 
 **Section sources**
-- [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
-- [src/gdn_kernels.cu:1-171](file://src/gdn_kernels.cu#L1-L171)
-- [src/kernels/cute/gdn_decode_v10.cuh:1-1355](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1-1423](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
-- [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
+- [build_cuda.py:1-436](file://gdn/scripts/build_cuda.py#L1-L436)
+- [gdn_kernels.cu:1-171](file://gdn/gdn_kernels.cu#L1-L171)
+- [gdn_decode_v10.cuh:1-1355](file://gdn/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
+- [gdn_decode_ptx.cuh:1-1423](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
+- [bench_cuda_real.py:1-604](file://gdn/scripts/bench_cuda_real.py#L1-L604)
 
 ### CuTe DSL Testing Infrastructure
 The system now includes comprehensive CuTe DSL testing infrastructure with Modal deployment:
@@ -531,18 +535,18 @@ PeakAchievement --> End(["Testing Complete"])
 ```
 
 **Diagram sources**
-- [scripts/explore_cute_dsl.py:31-207](file://scripts/explore_cute_dsl.py#L31-L207)
-- [scripts/test_cute_dsl.py:36-136](file://scripts/test_cute_dsl.py#L36-L136)
-- [scripts/test_cute_minimal.py:29-194](file://scripts/test_cute_minimal.py#L29-L194)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:125-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L125-L283)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:125-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L125-L442)
+- [explore_cute_dsl.py:31-207](file://gdn/scripts/explore_cute_dsl.py#L31-L207)
+- [test_cute_dsl.py:36-136](file://gdn/scripts/test_cute_dsl.py#L36-L136)
+- [test_cute_minimal.py:29-194](file://gdn/scripts/test_cute_minimal.py#L29-L194)
+- [gdn_decode_dsl.py:125-283](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L125-L283)
+- [gdn_decode_dsl_optimized.py:125-442](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L125-L442)
 
 **Section sources**
-- [scripts/explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
-- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
-- [scripts/test_cute_minimal.py:1-194](file://scripts/test_cute_minimal.py#L1-L194)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [explore_cute_dsl.py:1-207](file://gdn/scripts/explore_cute_dsl.py#L1-L207)
+- [test_cute_dsl.py:1-137](file://gdn/scripts/test_cute_dsl.py#L1-L137)
+- [test_cute_minimal.py:1-194](file://gdn/scripts/test_cute_minimal.py#L1-L194)
+- [gdn_decode_dsl.py:1-283](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+- [gdn_decode_dsl_optimized.py:1-442](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
 
 ### Systematic CuTe DSL vs PTX vs Triton Performance Comparison
 The system now includes comprehensive performance comparison analysis between CuTe DSL, PTX, and Triton kernels for GDN decoding:
@@ -583,17 +587,17 @@ Report --> End(["Comparison Complete"])
 ```
 
 **Diagram sources**
-- [scripts/bench_cute_dsl_vs_cpp.py:42-333](file://scripts/bench_cute_dsl_vs_cpp.py#L42-L333)
-- [src/kernels/triton/gdn_decode_triton.py:85-136](file://src/kernels/triton/gdn_decode_triton.py#L85-L136)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:125-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L125-L442)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:248-413](file://src/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
+- [bench_cute_dsl_vs_cpp.py:42-333](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L42-L333)
+- [gdn_decode_triton.py:85-136](file://gdn/kernels/triton/gdn_decode_triton.py#L85-L136)
+- [gdn_decode_dsl_optimized.py:125-442](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L125-L442)
+- [gdn_decode_ptx.cuh:248-413](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
 
 **Section sources**
-- [scripts/bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
-- [src/kernels/triton/gdn_decode_triton.py:1-136](file://src/kernels/triton/gdn_decode_triton.py#L1-L136)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1-491](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
+- [bench_cute_dsl_vs_cpp.py:1-333](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
+- [gdn_decode_triton.py:1-136](file://gdn/kernels/triton/gdn_decode_triton.py#L1-L136)
+- [gdn_decode_dsl.py:1-283](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+- [gdn_decode_dsl_optimized.py:1-442](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [gdn_decode_ptx.cuh:1-491](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
 
 ### PTX Kernel Optimizations and Assembly Analysis
 The system now includes comprehensive PTX kernel implementations with embedded assembly optimizations:
@@ -632,14 +636,14 @@ PeakAchievement --> End(["Optimized PTX Kernel"])
 ```
 
 **Diagram sources**
-- [src/kernels/ptx/gdn_decode_ptx.cuh:32-235](file://src/kernels/ptx/gdn_decode_ptx.cuh#L32-L235)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:248-413](file://src/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
-- [src/kernels/ptx/gdn_prefill_ptx.cuh:34-108](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L34-L108)
-- [src/kernels/ptx/gdn_prefill_ptx.cuh:121-301](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L121-L301)
+- [gdn_decode_ptx.cuh:32-235](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L32-L235)
+- [gdn_decode_ptx.cuh:248-413](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
+- [gdn_prefill_ptx.cuh:34-108](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L34-L108)
+- [gdn_prefill_ptx.cuh:121-301](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L121-L301)
 
 **Section sources**
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1-1423](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
-- [src/kernels/ptx/gdn_prefill_ptx.cuh:1-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
+- [gdn_decode_ptx.cuh:1-1423](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
+- [gdn_prefill_ptx.cuh:1-358](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
 
 ### Kernel Implementations and Version History
 - Optimized CUDA v5-v10 kernels with CuTe swizzle optimization for memory bandwidth improvement.
@@ -724,29 +728,29 @@ TritonFull --> BaselineDecode : "reference implementation"
 ```
 
 **Diagram sources**
-- [src/kernels/gdn_decode_v5.cuh:75-317](file://src/kernels/gdn_decode_v5.cuh#L75-L317)
-- [src/kernels/cute/gdn_decode_v9.cuh:121-300](file://src/kernels/cute/gdn_decode_v9.cuh#L121-L300)
-- [src/kernels/cute/gdn_decode_v10.cuh:67-218](file://src/kernels/cute/gdn_decode_v10.cuh#L67-L218)
-- [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py:86-130](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L86-L130)
-- [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py:27-101](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py#L27-L101)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:125-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L125-L283)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:125-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L125-L442)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:248-413](file://src/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
-- [src/kernels/triton/gdn_decode_triton.py:23-136](file://src/kernels/triton/gdn_decode_triton.py#L23-L136)
+- [gdn_decode_v5.cuh:75-317](file://gdn/kernels/gdn_decode_v5.cuh#L75-L317)
+- [gdn_decode_v9.cuh:121-300](file://gdn/kernels/cute/gdn_decode_v9.cuh#L121-L300)
+- [gdn_decode_v10.cuh:67-218](file://gdn/kernels/cute/gdn_decode_v10.cuh#L67-L218)
+- [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py:86-130](file://gdn/decode/solution/triton/kernel.py#L86-L130)
+- [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py:27-101](file://gdn/decode/baseline/triton/kernel.py#L27-L101)
+- [gdn_decode_dsl.py:125-283](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L125-L283)
+- [gdn_decode_dsl_optimized.py:125-442](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L125-L442)
+- [gdn_decode_ptx.cuh:248-413](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
+- [gdn_decode_triton.py:23-136](file://gdn/kernels/triton/gdn_decode_triton.py#L23-L136)
 
 **Section sources**
-- [docs/PERFORMANCE.md:51-160](file://docs/PERFORMANCE.md#L51-L160)
-- [src/kernels/gdn_decode_v5.cuh:1-320](file://src/kernels/gdn_decode_v5.cuh#L1-L320)
-- [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
-- [src/kernels/cute/gdn_decode_v10.cuh:1-1355](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
-- [gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py:1-248](file://gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py#L1-L248)
-- [gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py:1-256](file://gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py#L1-L256)
-- [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py:1-101](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py#L1-L101)
-- [gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py:1-99](file://gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py#L1-L99)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1-1423](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
-- [src/kernels/triton/gdn_decode_triton.py:1-136](file://src/kernels/triton/gdn_decode_triton.py#L1-L136)
+- [PERFORMANCE.md:51-160](file://gdn/docs/PERFORMANCE.md#L51-L160)
+- [gdn_decode_v5.cuh:1-320](file://gdn/kernels/gdn_decode_v5.cuh#L1-L320)
+- [gdn_decode_v9.cuh:1-549](file://gdn/kernels/cute/gdn_decode_v9.cuh#L1-L549)
+- [gdn_decode_v10.cuh:1-1355](file://gdn/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
+- [gdn_decode_qk4_v8_d128_k_last/solution/cuda/kernel.py:1-248](file://gdn/decode/solution/cuda/kernel.py#L1-L248)
+- [gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py:1-256](file://gdn/prefill/solution/cuda/kernel.py#L1-L256)
+- [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py:1-101](file://gdn/decode/baseline/triton/kernel.py#L1-L101)
+- [gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py:1-99](file://gdn/prefill/baseline/triton/kernel.py#L1-L99)
+- [gdn_decode_dsl.py:1-283](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+- [gdn_decode_dsl_optimized.py:1-442](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [gdn_decode_ptx.cuh:1-1423](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
+- [gdn_decode_triton.py:1-136](file://gdn/kernels/triton/gdn_decode_triton.py#L1-L136)
 
 ### Trace Definitions and Workload Generation
 Trace definitions specify operation metadata, axes, constraints, inputs/outputs, and reference implementations. Workloads are generated either synthetically or from HuggingFace, with cu_seqlens and normalized k vectors for stability.
@@ -764,16 +768,16 @@ Upload --> Ready["TraceSet Ready"]
 ```
 
 **Diagram sources**
-- [scripts/setup_volume.py:32-138](file://scripts/setup_volume.py#L32-L138)
-- [scripts/setup_volume.py:175-220](file://scripts/setup_volume.py#L175-L220)
-- [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json:1-153](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L1-L153)
-- [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json:1-156](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json#L1-L156)
+- [setup_volume.py:32-138](file://gdn/scripts/setup_volume.py#L32-L138)
+- [setup_volume.py:175-220](file://gdn/scripts/setup_volume.py#L175-L220)
+- [gdn_decode_qk4_v8_d128_k_last.json:1-153](file://gdn/trace_definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L1-L153)
+- [gdn_prefill_qk4_v8_d128_k_last.json:1-156](file://gdn/trace_definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json#L1-L156)
 
 **Section sources**
-- [scripts/setup_volume.py:32-138](file://scripts/setup_volume.py#L32-L138)
-- [scripts/setup_volume.py:175-220](file://scripts/setup_volume.py#L175-L220)
-- [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json:1-153](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L1-L153)
-- [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json:1-156](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json#L1-L156)
+- [setup_volume.py:32-138](file://gdn/scripts/setup_volume.py#L32-L138)
+- [setup_volume.py:175-220](file://gdn/scripts/setup_volume.py#L175-L220)
+- [gdn_decode_qk4_v8_d128_k_last.json:1-153](file://gdn/trace_definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L1-L153)
+- [gdn_prefill_qk4_v8_d128_k_last.json:1-156](file://gdn/trace_definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json#L1-L156)
 
 ### Debugging Utilities and Framework Evaluation
 Debug scripts validate correctness by comparing reference outputs with solution outputs and by evaluating the benchmark framework directly without subprocesses.
@@ -792,12 +796,12 @@ Debug-->>Debug : "print diffs and stats"
 ```
 
 **Diagram sources**
-- [scripts/debug_prefill.py:168-302](file://scripts/debug_prefill.py#L168-L302)
-- [scripts/debug_prefill2.py:124-184](file://scripts/debug_prefill2.py#L124-L184)
+- [debug_prefill.py:168-302](file://gdn/scripts/debug_prefill.py#L168-L302)
+- [debug_prefill2.py:124-184](file://gdn/scripts/debug_prefill2.py#L124-L184)
 
 **Section sources**
-- [scripts/debug_prefill.py:14-306](file://scripts/debug_prefill.py#L14-L306)
-- [scripts/debug_prefill2.py:17-184](file://scripts/debug_prefill2.py#L17-L184)
+- [debug_prefill.py:14-306](file://gdn/scripts/debug_prefill.py#L14-L306)
+- [debug_prefill2.py:17-184](file://gdn/scripts/debug_prefill2.py#L17-L184)
 
 ### Quantization Accuracy Testing Framework
 The system now includes comprehensive quantization accuracy testing framework with BF16/FP8/FP4 precision evaluation:
@@ -838,15 +842,15 @@ Report --> End(["Test Complete"])
 ```
 
 **Diagram sources**
-- [tests/test_quantization_accuracy.py:219-330](file://tests/test_quantization_accuracy.py#L219-L330)
-- [tests/test_quantization_accuracy.py:337-361](file://tests/test_quantization_accuracy.py#L337-L361)
-- [src/kernels/cute/gdn_decode_v10.cuh:821-855](file://src/kernels/cute/gdn_decode_v10.cuh#L821-L855)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:880-912](file://src/kernels/ptx/gdn_decode_ptx.cuh#L880-L912)
+- [test_quantization_accuracy.py:219-330](file://gdn/tests/test_quantization_accuracy.py#L219-L330)
+- [test_quantization_accuracy.py:337-361](file://gdn/tests/test_quantization_accuracy.py#L337-L361)
+- [gdn_decode_v10.cuh:821-855](file://gdn/kernels/cute/gdn_decode_v10.cuh#L821-L855)
+- [gdn_decode_ptx.cuh:880-912](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L880-L912)
 
 **Section sources**
-- [tests/test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
-- [src/kernels/cute/gdn_decode_v10.cuh:1-1355](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1-1423](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
+- [test_quantization_accuracy.py:1-361](file://gdn/tests/test_quantization_accuracy.py#L1-L361)
+- [gdn_decode_v10.cuh:1-1355](file://gdn/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
+- [gdn_decode_ptx.cuh:1-1423](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
 
 ### Quantization Performance Benchmarking
 The system now includes comprehensive quantization performance benchmarking capabilities with memory-bound simulation:
@@ -885,13 +889,13 @@ Report --> End(["Benchmark Complete"])
 ```
 
 **Diagram sources**
-- [benchmarks/bench_quantization_perf.py:127-228](file://benchmarks/bench_quantization_perf.py#L127-L228)
-- [benchmarks/bench_quantization_perf.py:231-267](file://benchmarks/bench_quantization_perf.py#L231-L267)
-- [benchmarks/bench_quantization_perf.py:329-336](file://benchmarks/bench_quantization_perf.py#L329-L336)
+- [bench_quantization_perf.py:127-228](file://gdn/benchmarks/bench_quantization_perf.py#L127-L228)
+- [bench_quantization_perf.py:231-267](file://gdn/benchmarks/bench_quantization_perf.py#L231-L267)
+- [bench_quantization_perf.py:329-336](file://gdn/benchmarks/bench_quantization_perf.py#L329-L336)
 
 **Section sources**
-- [benchmarks/bench_quantization_perf.py:1-336](file://benchmarks/bench_quantization_perf.py#L1-L336)
-- [tests/test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
+- [bench_quantization_perf.py:1-336](file://gdn/benchmarks/bench_quantization_perf.py#L1-L336)
+- [test_quantization_accuracy.py:1-361](file://gdn/tests/test_quantization_accuracy.py#L1-L361)
 
 ## Dependency Analysis
 The performance system exhibits clear separation of concerns with enhanced cross-version support and CuTe DSL testing infrastructure:
@@ -909,63 +913,63 @@ The performance system exhibits clear separation of concerns with enhanced cross
 
 ```mermaid
 graph LR
-Runner["benchmarks/bench_modal.py"] --> Defs["Trace Definitions"]
+Runner["bench_modal.py"] --> Defs["Trace Definitions"]
 Runner --> Kernels["Kernel Implementations"]
 Kernels --> CUDA["CUDA Runtime"]
 Kernels --> Torch["PyTorch"]
 Kernels --> Triton["Triton (fallback)"]
 Kernels --> PTX["PTX Assembly"]
 Runner --> Volume["Modal Volume"]
-Debug1["scripts/debug_prefill.py"] --> Runner
-Debug2["scripts/debug_prefill2.py"] --> Runner
-AllVersions["scripts/bench_all_versions.py"] --> Kernels
-RealCUDA["scripts/bench_cuda_real.py"] --> Lib["libgdn_kernels.so"]
-BuildCUDA["scripts/build_cuda.py"] --> Lib
+Debug1["debug_prefill.py"] --> Runner
+Debug2["debug_prefill2.py"] --> Runner
+AllVersions["bench_all_versions.py"] --> Kernels
+RealCUDA["bench_cuda_real.py"] --> Lib["libgdn_kernels.so"]
+BuildCUDA["build_cuda.py"] --> Lib
 Lib --> Kernels
-CuTeTest["scripts/test_cute_dsl.py"] --> CuTeDSL["CuTe DSL Kernel"]
+CuTeTest["test_cute_dsl.py"] --> CuTeDSL["CuTe DSL Kernel"]
 CuTeTest --> ModalEnv["Modal B200 Environment"]
 ModalEnv --> CUTLASS["CUTLASS 4.x Installation"]
-PerfComp["scripts/bench_cute_dsl_vs_cpp.py"] --> TritonKernel["Triton Full Kernel"]
+PerfComp["bench_cute_dsl_vs_cpp.py"] --> TritonKernel["Triton Full Kernel"]
 PerfComp --> CuTeKernel["CuTe DSL Optimized Kernel"]
 PerfComp --> PTXKernel["PTX Assembly Kernel"]
 PerfComp --> ModalEnv
-PTXBench["scripts/bench_kernels.py"] --> PTXKernel
-QuantTest["tests/test_quantization_accuracy.py"] --> Torch
+PTXBench["bench_kernels.py"] --> PTXKernel
+QuantTest["test_quantization_accuracy.py"] --> Torch
 QuantTest --> ModalEnv
-QuantBench["benchmarks/bench_quantization_perf.py"] --> Torch
+QuantBench["bench_quantization_perf.py"] --> Torch
 QuantBench --> ModalEnv
 Kernels --> CUDA_SRC["CUDA Sources (.cuh)"]
 ```
 
 **Diagram sources**
-- [benchmarks/bench_modal.py:106-168](file://benchmarks/bench_modal.py#L106-L168)
-- [scripts/bench_all_versions.py:32-444](file://scripts/bench_all_versions.py#L32-L444)
-- [scripts/bench_cuda_real.py:22-604](file://scripts/bench_cuda_real.py#L22-L604)
-- [scripts/debug_prefill.py:168-302](file://scripts/debug_prefill.py#L168-L302)
-- [scripts/debug_prefill2.py:124-184](file://scripts/debug_prefill2.py#L124-L184)
-- [scripts/bench_cute_vs_triton.py:16-34](file://scripts/bench_cute_vs_triton.py#L16-L34)
-- [scripts/bench_cute_dsl_vs_cpp.py:16-34](file://scripts/bench_cute_dsl_vs_cpp.py#L16-L34)
-- [scripts/bench_kernels.py:33-403](file://scripts/bench_kernels.py#L33-L403)
-- [tests/test_quantization_accuracy.py:15-28](file://tests/test_quantization_accuracy.py#L15-L28)
-- [benchmarks/bench_quantization_perf.py:19-26](file://benchmarks/bench_quantization_perf.py#L19-L26)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:22-31](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L22-L31)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:22-31](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L22-L31)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:22-24](file://src/kernels/ptx/gdn_decode_ptx.cuh#L22-L24)
+- [bench_modal.py:106-168](file://gdn/benchmarks/bench_modal.py#L106-L168)
+- [bench_all_versions.py:32-444](file://gdn/scripts/bench_all_versions.py#L32-L444)
+- [bench_cuda_real.py:22-604](file://gdn/scripts/bench_cuda_real.py#L22-L604)
+- [debug_prefill.py:168-302](file://gdn/scripts/debug_prefill.py#L168-L302)
+- [debug_prefill2.py:124-184](file://gdn/scripts/debug_prefill2.py#L124-L184)
+- [bench_cute_vs_triton.py:16-34](file://gdn/scripts/bench_cute_vs_triton.py#L16-L34)
+- [bench_cute_dsl_vs_cpp.py:16-34](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L16-L34)
+- [bench_kernels.py:33-403](file://gdn/scripts/bench_kernels.py#L33-L403)
+- [test_quantization_accuracy.py:15-28](file://gdn/tests/test_quantization_accuracy.py#L15-L28)
+- [bench_quantization_perf.py:19-26](file://gdn/benchmarks/bench_quantization_perf.py#L19-L26)
+- [gdn_decode_dsl.py:22-31](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L22-L31)
+- [gdn_decode_dsl_optimized.py:22-31](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L22-L31)
+- [gdn_decode_ptx.cuh:22-24](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L22-L24)
 
 **Section sources**
-- [benchmarks/bench_modal.py:106-168](file://benchmarks/bench_modal.py#L106-L168)
-- [scripts/bench_all_versions.py:32-444](file://scripts/bench_all_versions.py#L32-L444)
-- [scripts/bench_cuda_real.py:22-604](file://scripts/bench_cuda_real.py#L22-L604)
-- [scripts/debug_prefill.py:168-302](file://scripts/debug_prefill.py#L168-L302)
-- [scripts/debug_prefill2.py:124-184](file://scripts/debug_prefill2.py#L124-L184)
-- [scripts/bench_cute_vs_triton.py:16-34](file://scripts/bench_cute_vs_triton.py#L16-L34)
-- [scripts/bench_cute_dsl_vs_cpp.py:16-34](file://scripts/bench_cute_dsl_vs_cpp.py#L16-L34)
-- [scripts/bench_kernels.py:33-403](file://scripts/bench_kernels.py#L33-L403)
-- [tests/test_quantization_accuracy.py:15-28](file://tests/test_quantization_accuracy.py#L15-L28)
-- [benchmarks/bench_quantization_perf.py:19-26](file://benchmarks/bench_quantization_perf.py#L19-L26)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:22-31](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L22-L31)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:22-31](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L22-L31)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:22-24](file://src/kernels/ptx/gdn_decode_ptx.cuh#L22-L24)
+- [bench_modal.py:106-168](file://gdn/benchmarks/bench_modal.py#L106-L168)
+- [bench_all_versions.py:32-444](file://gdn/scripts/bench_all_versions.py#L32-L444)
+- [bench_cuda_real.py:22-604](file://gdn/scripts/bench_cuda_real.py#L22-L604)
+- [debug_prefill.py:168-302](file://gdn/scripts/debug_prefill.py#L168-L302)
+- [debug_prefill2.py:124-184](file://gdn/scripts/debug_prefill2.py#L124-L184)
+- [bench_cute_vs_triton.py:16-34](file://gdn/scripts/bench_cute_vs_triton.py#L16-L34)
+- [bench_cute_dsl_vs_cpp.py:16-34](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L16-L34)
+- [bench_kernels.py:33-403](file://gdn/scripts/bench_kernels.py#L33-L403)
+- [test_quantization_accuracy.py:15-28](file://gdn/tests/test_quantization_accuracy.py#L15-L28)
+- [bench_quantization_perf.py:19-26](file://gdn/benchmarks/bench_quantization_perf.py#L19-L26)
+- [gdn_decode_dsl.py:22-31](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L22-L31)
+- [gdn_decode_dsl_optimized.py:22-31](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L22-L31)
+- [gdn_decode_ptx.cuh:22-24](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L22-L24)
 
 ## Performance Considerations
 Roofline analysis characterizes kernel performance limits and identifies bottlenecks:
@@ -1003,26 +1007,26 @@ GapAnalysis --> End(["Optimization Plan"])
 ```
 
 **Diagram sources**
-- [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
-- [docs/PERFORMANCE.md:75-160](file://docs/PERFORMANCE.md#L75-L160)
-- [src/kernels/cute/gdn_decode_v9.cuh:240-278](file://src/kernels/cute/gdn_decode_v9.cuh#L240-L278)
-- [src/kernels/cute/gdn_decode_v10.cuh:159-200](file://src/kernels/cute/gdn_decode_v10.cuh#L159-L200)
-- [docs/ZHIHU_GDN_TENSOR_CORE.md:78-87](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L87)
-- [tests/test_quantization_accuracy.py:99-114](file://tests/test_quantization_accuracy.py#L99-114)
-- [scripts/bench_cute_vs_triton.py:136-145](file://scripts/bench_cute_vs_triton.py#L136-L145)
-- [scripts/bench_cute_dsl_vs_cpp.py:300-323](file://scripts/bench_cute_dsl_vs_cpp.py#L300-L323)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:248-413](file://src/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
+- [ROOFLINE.md:1-186](file://gdn/docs/ROOFLINE.md#L1-L186)
+- [PERFORMANCE.md:75-160](file://gdn/docs/PERFORMANCE.md#L75-L160)
+- [gdn_decode_v9.cuh:240-278](file://gdn/kernels/cute/gdn_decode_v9.cuh#L240-L278)
+- [gdn_decode_v10.cuh:159-200](file://gdn/kernels/cute/gdn_decode_v10.cuh#L159-L200)
+- [ZHIHU_GDN_TENSOR_CORE.md:78-87](file://gdn/docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L87)
+- [test_quantization_accuracy.py:99-114](file://gdn/tests/test_quantization_accuracy.py#L99-L114)
+- [bench_cute_vs_triton.py:136-145](file://gdn/scripts/bench_cute_vs_triton.py#L136-L145)
+- [bench_cute_dsl_vs_cpp.py:300-323](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L300-L323)
+- [gdn_decode_ptx.cuh:248-413](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
 
 **Section sources**
-- [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
-- [docs/PERFORMANCE.md:75-160](file://docs/PERFORMANCE.md#L75-L160)
-- [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
-- [src/kernels/cute/gdn_decode_v10.cuh:1-1355](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
-- [docs/ZHIHU_GDN_TENSOR_CORE.md:78-87](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L87)
-- [tests/test_quantization_accuracy.py:99-114](file://tests/test_quantization_accuracy.py#L99-114)
-- [scripts/bench_cute_vs_triton.py:136-145](file://scripts/bench_cute_vs_triton.py#L136-L145)
-- [scripts/bench_cute_dsl_vs_cpp.py:300-323](file://scripts/bench_cute_dsl_vs_cpp.py#L300-L323)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1-1423](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
+- [ROOFLINE.md:1-186](file://gdn/docs/ROOFLINE.md#L1-L186)
+- [PERFORMANCE.md:75-160](file://gdn/docs/PERFORMANCE.md#L75-L160)
+- [gdn_decode_v9.cuh:1-549](file://gdn/kernels/cute/gdn_decode_v9.cuh#L1-L549)
+- [gdn_decode_v10.cuh:1-1355](file://gdn/kernels/cute/gdn_decode_v10.cuh#L1-L1355)
+- [ZHIHU_GDN_TENSOR_CORE.md:78-87](file://gdn/docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L87)
+- [test_quantization_accuracy.py:99-114](file://gdn/tests/test_quantization_accuracy.py#L99-L114)
+- [bench_cute_vs_triton.py:136-145](file://gdn/scripts/bench_cute_vs_triton.py#L136-L145)
+- [bench_cute_dsl_vs_cpp.py:300-323](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L300-L323)
+- [gdn_decode_ptx.cuh:1-1423](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
 
 ## Troubleshooting Guide
 Common issues and systematic approaches:
@@ -1060,17 +1064,17 @@ Practical steps:
 - **Verify 95% B200 peak bandwidth achievement across all kernel versions.**
 
 **Section sources**
-- [scripts/debug_prefill.py:168-302](file://scripts/debug_prefill.py#L168-L302)
-- [scripts/debug_prefill2.py:124-184](file://scripts/debug_prefill2.py#L124-L184)
-- [scripts/setup_volume.py:96-104](file://scripts/setup_volume.py#L96-L104)
-- [scripts/build_cuda.py:28-34](file://scripts/build_cuda.py#L28-L34)
-- [src/kernels/cute/gdn_decode_v9.cuh:240-278](file://src/kernels/cute/gdn_decode_v9.cuh#L240-L278)
-- [src/kernels/cute/gdn_decode_v10.cuh:159-200](file://src/kernels/cute/gdn_decode_v10.cuh#L159-L200)
-- [tests/test_quantization_accuracy.py:45-53](file://tests/test_quantization_accuracy.py#L45-L53)
-- [tests/test_quantization_accuracy.py:99-114](file://tests/test_quantization_accuracy.py#L99-114)
-- [scripts/bench_cute_vs_triton.py:57-57](file://scripts/bench_cute_vs_triton.py#L57-57)
-- [scripts/bench_cute_dsl_vs_cpp.py:300-323](file://scripts/bench_cute_dsl_vs_cpp.py#L300-L323)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:248-413](file://src/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
+- [debug_prefill.py:168-302](file://gdn/scripts/debug_prefill.py#L168-L302)
+- [debug_prefill2.py:124-184](file://gdn/scripts/debug_prefill2.py#L124-L184)
+- [setup_volume.py:96-104](file://gdn/scripts/setup_volume.py#L96-L104)
+- [build_cuda.py:28-34](file://gdn/scripts/build_cuda.py#L28-L34)
+- [gdn_decode_v9.cuh:240-278](file://gdn/kernels/cute/gdn_decode_v9.cuh#L240-L278)
+- [gdn_decode_v10.cuh:159-200](file://gdn/kernels/cute/gdn_decode_v10.cuh#L159-L200)
+- [test_quantization_accuracy.py:45-53](file://gdn/tests/test_quantization_accuracy.py#L45-L53)
+- [test_quantization_accuracy.py:99-114](file://gdn/tests/test_quantization_accuracy.py#L99-L114)
+- [bench_cute_vs_triton.py:57-57](file://gdn/scripts/bench_cute_vs_triton.py#L57-57)
+- [bench_cute_dsl_vs_cpp.py:300-323](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L300-L323)
+- [gdn_decode_ptx.cuh:248-413](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L248-L413)
 
 ## Conclusion
 The repository provides a robust performance analysis and measurement framework combining roofline modeling, structured trace definitions, optimized CUDA v5-v10 kernels with CuTe swizzle optimization, comprehensive benchmarking on Modal B200, and advanced PTX assembly kernel implementations. The documented comparative analysis and arithmetic mean speedup calculations enable rigorous contest evaluation and optimization validation. Debugging utilities and correctness checks ensure correctness while maximizing speed, with systematic approaches to identifying bottlenecks and measuring optimization impact. The addition of CUDA v9/v10 implementations with CuTe swizzle optimization demonstrates substantial performance improvements with approximately 7,600 GB/s peak bandwidth utilization (95% of B200 peak) and kernel selection recommendations based on batch size characteristics. The new CuTe DSL optimized implementations showcase advanced compilation techniques, while PTX assembly kernels achieve the same performance level through embedded assembly optimizations.
@@ -1093,11 +1097,11 @@ PeakAchievement --> End(["Report average speedup"])
 ```
 
 **Diagram sources**
-- [benchmarks/bench_modal.py:179-209](file://benchmarks/bench_modal.py#L179-L209)
-- [benchmarks/bench_modal.py:211-248](file://benchmarks/bench_modal.py#L211-L248)
+- [bench_modal.py:179-209](file://gdn/benchmarks/bench_modal.py#L179-L209)
+- [bench_modal.py:211-248](file://gdn/benchmarks/bench_modal.py#L211-L248)
 
 **Section sources**
-- [benchmarks/bench_modal.py:179-248](file://benchmarks/bench_modal.py#L179-L248)
+- [bench_modal.py:179-248](file://gdn/benchmarks/bench_modal.py#L179-L248)
 
 ### Comprehensive Version History Management
 Version history tracks improvements across all kernel versions with decode and prefill averages, highlighting kernel optimizations and occupancy improvements.
@@ -1121,14 +1125,14 @@ PTXOpt --> QuantRes["Quantization Research<br/>BF16/FP8/FP4 Evaluation"]
 QuantRes --> PeakAchievement["Achieve 95% B200 peak bandwidth<br/>across all versions"]
 PeakAchievement --> Metrics["Comprehensive benchmarking<br/>across all versions"]
 Metrics --> Recommendations["Kernel selection<br/>recommendations"]
-Recommendations --> Docs["docs/PERFORMANCE.md"]
+Recommendations --> Docs["PERFORMANCE.md"]
 ```
 
 **Diagram sources**
-- [docs/PERFORMANCE.md:100-160](file://docs/PERFORMANCE.md#L100-L160)
+- [PERFORMANCE.md:100-160](file://gdn/docs/PERFORMANCE.md#L100-L160)
 
 **Section sources**
-- [docs/PERFORMANCE.md:100-160](file://docs/PERFORMANCE.md#L100-L160)
+- [PERFORMANCE.md:100-160](file://gdn/docs/PERFORMANCE.md#L100-L160)
 
 ### NVIDIA B200 Blackwell Architecture Details
 The system is optimized for NVIDIA B200 (Blackwell, sm_100) architecture with comprehensive hardware specifications:
@@ -1171,9 +1175,9 @@ The system is optimized for NVIDIA B200 (Blackwell, sm_100) architecture with co
 - **Ampere (A100, sm_80)**: mma.sync (1.0x base)
 
 **Section sources**
-- [docs/ROOFLINE.md:3-48](file://docs/ROOFLINE.md#L3-L48)
-- [docs/PERFORMANCE.md:3-17](file://docs/PERFORMANCE.md#L3-L17)
-- [docs/ZHIHU_GDN_TENSOR_CORE.md:78-87](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L87)
+- [ROOFLINE.md:3-48](file://gdn/docs/ROOFLINE.md#L3-L48)
+- [PERFORMANCE.md:3-17](file://gdn/docs/PERFORMANCE.md#L3-L17)
+- [ZHIHU_GDN_TENSOR_CORE.md:78-87](file://gdn/docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L87)
 
 ### Ridge Point Calculations and Arithmetic Intensity Analysis
 The system provides precise Ridge Point calculations for different precisions and computational modes:
@@ -1196,7 +1200,7 @@ The system provides precise Ridge Point calculations for different precisions an
 - Precision combinations: BF16/FP8 for optimal Tensor Core efficiency
 
 **Section sources**
-- [docs/ROOFLINE.md:62-186](file://docs/ROOFLINE.md#L62-L186)
+- [ROOFLINE.md:62-186](file://gdn/docs/ROOFLINE.md#L62-L186)
 
 ### CuTe Swizzle Optimization and Delta Rule Validation
 CuTe swizzle optimization provides significant memory bandwidth improvements through bank conflict avoidance:
@@ -1228,12 +1232,12 @@ CuTe swizzle optimization provides significant memory bandwidth improvements thr
 - **Quantization-aware performance**: BF16 achieves 95% peak with 2x memory reduction
 
 **Section sources**
-- [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
-- [src/kernels/cute/gdn_decode_v9.cuh:88-90](file://src/kernels/cute/gdn_decode_v9.cuh#L88-L90)
-- [src/kernels/cute/gdn_decode_v10.cuh:48-61](file://src/kernels/cute/gdn_decode_v10.cuh#L48-L61)
-- [src/kernels/cute/gdn_decode_v9.cuh:240-278](file://src/kernels/cute/gdn_decode_v9.cuh#L240-L278)
-- [src/kernels/cute/gdn_decode_v10.cuh:159-200](file://src/kernels/cute/gdn_decode_v10.cuh#L159-L200)
-- [docs/PERFORMANCE.md:37-48](file://docs/PERFORMANCE.md#L37-L48)
+- [README.md:1-130](file://gdn/kernels/cute/README.md#L1-L130)
+- [gdn_decode_v9.cuh:88-90](file://gdn/kernels/cute/gdn_decode_v9.cuh#L88-L90)
+- [gdn_decode_v10.cuh:48-61](file://gdn/kernels/cute/gdn_decode_v10.cuh#L48-L61)
+- [gdn_decode_v9.cuh:240-278](file://gdn/kernels/cute/gdn_decode_v9.cuh#L240-L278)
+- [gdn_decode_v10.cuh:159-200](file://gdn/kernels/cute/gdn_decode_v10.cuh#L159-L200)
+- [PERFORMANCE.md:37-48](file://gdn/docs/PERFORMANCE.md#L37-L48)
 
 ### Kernel Selection Recommendations
 Based on comprehensive benchmarking across all kernel versions, optimal kernel selection varies by batch size and precision requirements:
@@ -1275,12 +1279,12 @@ def select_kernel(batch_size, precision="fp32"):
 **Updated** Enhanced kernel selection recommendations to include quantization-aware strategies, BF16/FP8/FP4 precision evaluation results, and comprehensive performance comparison analysis between CuTe DSL, PTX, and Triton kernels, documenting the significant performance gaps and engineering trade-offs, with PTX achieving 95% peak bandwidth at batch≥128. All recommendations now reflect the 95% B200 peak bandwidth achievement.
 
 **Section sources**
-- [docs/PERFORMANCE.md:75-83](file://docs/PERFORMANCE.md#L75-L83)
-- [docs/PERFORMANCE.md:18-18](file://docs/PERFORMANCE.md#L18-L18)
-- [src/kernels/cute/README.md:43-44](file://src/kernels/cute/README.md#L43-L44)
-- [tests/test_quantization_accuracy.py:24-44](file://tests/test_quantization_accuracy.py#L24-L44)
-- [scripts/bench_cute_vs_triton.py:136-145](file://scripts/bench_cute_vs_triton.py#L136-L145)
-- [scripts/bench_cute_dsl_vs_cpp.py:300-323](file://scripts/bench_cute_dsl_vs_cpp.py#L300-L323)
+- [PERFORMANCE.md:75-83](file://gdn/docs/PERFORMANCE.md#L75-L83)
+- [PERFORMANCE.md:18-18](file://gdn/docs/PERFORMANCE.md#L18-L18)
+- [README.md:43-44](file://gdn/kernels/cute/README.md#L43-L44)
+- [test_quantization_accuracy.py:24-44](file://gdn/tests/test_quantization_accuracy.py#L24-L44)
+- [bench_cute_vs_triton.py:136-145](file://gdn/scripts/bench_cute_vs_triton.py#L136-L145)
+- [bench_cute_dsl_vs_cpp.py:300-323](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L300-L323)
 
 ### Comprehensive Memory Bandwidth Utilization Analysis
 The system provides detailed memory bandwidth analysis across all kernel versions and batch sizes:
@@ -1311,10 +1315,10 @@ The system provides detailed memory bandwidth analysis across all kernel version
 - **Peak bandwidth achievement**: All configurations achieve 95% B200 peak bandwidth
 
 **Section sources**
-- [docs/PERFORMANCE.md:88-96](file://docs/PERFORMANCE.md#L88-L96)
-- [src/kernels/cute/README.md:35-42](file://src/kernels/cute/README.md#L35-L42)
-- [scripts/bench_kernels.py:254-282](file://scripts/bench_kernels.py#L254-L282)
-- [tests/test_quantization_accuracy.py:28-44](file://tests/test_quantization_accuracy.py#L28-L44)
+- [PERFORMANCE.md:88-96](file://gdn/docs/PERFORMANCE.md#L88-L96)
+- [README.md:35-42](file://gdn/kernels/cute/README.md#L35-L42)
+- [bench_kernels.py:254-282](file://gdn/scripts/bench_kernels.py#L254-L282)
+- [test_quantization_accuracy.py:28-44](file://gdn/tests/test_quantization_accuracy.py#L28-L44)
 
 ### Real CUDA Library Benchmarking Results
 The system provides comprehensive benchmarking results across all kernel versions with detailed performance metrics:
@@ -1351,10 +1355,10 @@ new_s = decayed_s + delta * k[d];        // ← No need to multiply g again
 - **Memory bandwidth**: 95% B200 peak achieved with quantized states
 
 **Section sources**
-- [docs/PERFORMANCE.md:20-48](file://docs/PERFORMANCE.md#L20-L48)
-- [docs/PERFORMANCE.md:35-48](file://docs/PERFORMANCE.md#L35-L48)
-- [tests/test_quantization_accuracy.py:24-44](file://tests/test_quantization_accuracy.py#L24-L44)
-- [scripts/bench_cuda_real.py:418-492](file://scripts/bench_cuda_real.py#L418-L492)
+- [PERFORMANCE.md:20-48](file://gdn/docs/PERFORMANCE.md#L20-L48)
+- [PERFORMANCE.md:35-48](file://gdn/docs/PERFORMANCE.md#L35-L48)
+- [test_quantization_accuracy.py:24-44](file://gdn/tests/test_quantization_accuracy.py#L24-L44)
+- [bench_cuda_real.py:418-492](file://gdn/scripts/bench_cuda_real.py#L418-L492)
 
 ### Blackwell Architecture tcgen05.mma Instruction Set
 The system provides comprehensive documentation of Blackwell architecture Tensor Core instructions:
@@ -1379,10 +1383,10 @@ The system provides comprehensive documentation of Blackwell architecture Tensor
 - Minimum tile requirements: M, N, K ≥ 16 (BF16)
 
 **Section sources**
-- [docs/ROOFLINE.md:30-40](file://docs/ROOFLINE.md#L30-L40)
-- [docs/ROOFLINE.md:157-165](file://docs/ROOFLINE.md#L157-L165)
-- [docs/ZHIHU_GDN_TENSOR_CORE.md:78-96](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L96)
-- [docs/ZHIHU_GDN_TENSOR_CORE.md:143-153](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L143-L153)
+- [ROOFLINE.md:30-40](file://gdn/docs/ROOFLINE.md#L30-L40)
+- [ROOFLINE.md:157-165](file://gdn/docs/ROOFLINE.md#L157-L165)
+- [ZHIHU_GDN_TENSOR_CORE.md:78-96](file://gdn/docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L96)
+- [ZHIHU_GDN_TENSOR_CORE.md:143-153](file://gdn/docs/ZHIHU_GDN_TENSOR_CORE.md#L143-L153)
 
 ### CuTe DSL Testing Infrastructure and Validation
 The system provides comprehensive testing infrastructure for validating CuTe DSL kernels:
@@ -1402,11 +1406,11 @@ The system provides comprehensive testing infrastructure for validating CuTe DSL
 - **Optimization Validation**: Verifies SMEM staging and vectorized load performance
 
 **Section sources**
-- [scripts/explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
-- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
-- [scripts/test_cute_minimal.py:1-194](file://scripts/test_cute_minimal.py#L1-L194)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [explore_cute_dsl.py:1-207](file://gdn/scripts/explore_cute_dsl.py#L1-L207)
+- [test_cute_dsl.py:1-137](file://gdn/scripts/test_cute_dsl.py#L1-L137)
+- [test_cute_minimal.py:1-194](file://gdn/scripts/test_cute_minimal.py#L1-L194)
+- [gdn_decode_dsl.py:1-283](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+- [gdn_decode_dsl_optimized.py:1-442](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
 
 ### Systematic Performance Comparison Framework
 The system provides comprehensive performance comparison analysis between CuTe DSL, PTX, and Triton kernels:
@@ -1434,11 +1438,11 @@ The system provides comprehensive performance comparison analysis between CuTe D
 - **Peak Bandwidth Achievement**: All frameworks achieve 95% B200 peak bandwidth
 
 **Section sources**
-- [scripts/bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
-- [src/kernels/triton/gdn_decode_triton.py:1-136](file://src/kernels/triton/gdn_decode_triton.py#L1-L136)
-- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
-- [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py:1-442](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1-491](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
+- [bench_cute_dsl_vs_cpp.py:1-333](file://gdn/scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
+- [gdn_decode_triton.py:1-136](file://gdn/kernels/triton/gdn_decode_triton.py#L1-L136)
+- [gdn_decode_dsl.py:1-283](file://gdn/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+- [gdn_decode_dsl_optimized.py:1-442](file://gdn/kernels/cute_dsl/gdn_decode_dsl_optimized.py#L1-L442)
+- [gdn_decode_ptx.cuh:1-491](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
 
 ### PTX Assembly Kernel Benchmarking
 The system provides comprehensive benchmarking for PTX assembly kernels demonstrating advanced optimization techniques:
@@ -1467,9 +1471,9 @@ The system provides comprehensive benchmarking for PTX assembly kernels demonstr
 - **Execution**: Direct GPU execution of assembly primitives
 
 **Section sources**
-- [src/kernels/ptx/gdn_decode_ptx.cuh:1-1423](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
-- [src/kernels/ptx/gdn_prefill_ptx.cuh:1-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
-- [scripts/bench_kernels.py:254-282](file://scripts/bench_kernels.py#L254-L282)
+- [gdn_decode_ptx.cuh:1-1423](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L1-L1423)
+- [gdn_prefill_ptx.cuh:1-358](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
+- [bench_kernels.py:254-282](file://gdn/scripts/bench_kernels.py#L254-L282)
 
 ### Quantization Research Methodology and Findings
 The system provides comprehensive quantization research methodology with detailed findings:
@@ -1498,6 +1502,6 @@ The system provides comprehensive quantization research methodology with detaile
 - **Implementation**: Dequantize on load, compute in FP32, quantize on store
 
 **Section sources**
-- [docs/ZHIHU_GDN_QUANTIZATION.md:1-195](file://docs/ZHIHU_GDN_QUANTIZATION.md#L1-L195)
-- [tests/test_quantization_accuracy.py:219-330](file://tests/test_quantization_accuracy.py#L219-L330)
-- [benchmarks/bench_quantization_perf.py:127-228](file://benchmarks/bench_quantization_perf.py#L127-L228)
+- [ZHIHU_GDN_QUANTIZATION.md:1-195](file://gdn/docs/ZHIHU_GDN_QUANTIZATION.md#L1-L195)
+- [test_quantization_accuracy.py:219-330](file://gdn/tests/test_quantization_accuracy.py#L219-L330)
+- [bench_quantization_perf.py:127-228](file://gdn/benchmarks/bench_quantization_perf.py#L127-L228)

@@ -587,6 +587,120 @@ This requires significant algorithm refactoring.
 
 ---
 
+## Iteration 5: Parallel Scan Analysis + Warp-Cooperative Reduction (2026-03-30)
+
+### Motivation
+
+Can we break the sequential token dependency using parallel scan?
+
+### GDN Recurrence Analysis
+
+```python
+# Sequential token scan (current implementation)
+for t in range(seq_len):
+    S = g * S                          # decay
+    old_v = S @ k                      # read state (DEPENDENCY!)
+    delta = beta * (v - old_v)         # depends on old_v
+    S = S + delta * k^T                # rank-1 update
+    out = scale * S @ q                # output
+```
+
+The sequential dependency chain:
+```
+S_{t-1} → old_v = S @ k → delta → S_t → S_t → old_v' → ...
+```
+
+### Can We Use Parallel Scan?
+
+**For linear RNN** (like linear attention):
+```
+S_t = S_{t-1} + k_t * v_t^T   # No read-from-state
+```
+This IS parallelizable via prefix scan.
+
+**For GDN with delta rule**:
+```
+delta_t = beta * (v_t - S_{t-1} @ k_t)   # DEPENDS on S_{t-1}
+S_t = g * S_{t-1} + delta_t * k_t^T
+```
+The `S_{t-1} @ k_t` term creates **non-linear** state dependency.
+
+**Conclusion**: GDN delta rule fundamentally requires sequential processing due to the read-from-state term. Cannot use parallel scan without approximation.
+
+### Approximation Option (NOT IMPLEMENTED)
+
+If we ignore read-from-state (`old_v ≈ 0`):
+```
+delta_t ≈ beta * v_t
+S_t = g * S_{t-1} + beta * v_t * k_t^T
+```
+This becomes parallelizable but changes the algorithm semantically.
+
+### Alternative: Warp-Cooperative Parallel Reduction
+
+Instead of parallelizing across tokens, we parallelize **within each token**:
+
+```
+Current (single thread per row):
+  Thread i computes: old_v[i] = sum_k(S[i,k] * K[k])  // 128 FMAs
+
+Warp-coop (8 threads per row):
+  Each thread computes 16 elements, then reduce across threads
+  Thread (i, j) computes: partial[j] = sum_{k=16j}^{16j+15}(S[i,k] * K[k])
+  Then: old_v[i] = sum_j(partial[j])  // warp shuffle reduction
+```
+
+### Changes Made
+
+**PTX (`gdn_prefill_ptx.cuh`):**
+```cpp
+// Added warp shuffle primitives
+__device__ __forceinline__ float ptx_shfl_down_f32(float val, int offset);
+__device__ __forceinline__ float ptx_shfl_idx_f32(float val, int lane);
+__device__ __forceinline__ float warp_reduce_sum(float val);
+
+// New kernel: gdn_prefill_kernel_ptx_warp_coop
+// - 128 threads / 16 rows = 8 threads per row
+// - Each group computes partial sum for D/8 = 16 elements
+// - Cross-thread reduction via shared memory
+```
+
+### Thread Mapping
+
+```
+128 threads, BLOCK_V=16 rows, D=128 columns
+
+Thread tid:
+  row_id = tid / 8        # 0-15 (which V row)
+  lane_in_row = tid % 8   # 0-7 (position in reduction)
+
+Each thread handles: D / 8 = 16 elements
+  start_k = lane_in_row * 16
+  end_k = start_k + 16
+```
+
+### Expected Benefits
+
+| Metric | Single-Thread | Warp-Coop | Improvement |
+|--------|---------------|-----------|-------------|
+| **Dot product parallelism** | 1 thread | 8 threads | **8x** |
+| **Memory reads per row** | 128 | 16 per thread | Coalesced |
+| **FMA throughput** | Limited by 1 core | 8 cores | Better ILP |
+
+### Why This Helps
+
+The matrix-vector operation `S @ k` and `S @ q` are the dominant compute:
+- 16 rows × 128 FMAs per row = 2048 FMAs per token
+- With warp-coop: 16 rows × 16 FMAs per thread × 8 threads = same work, 8x parallel
+
+### Benchmark Status
+- [x] Parallel scan analysis completed
+- [x] Warp shuffle primitives added
+- [x] Warp-cooperative kernel implemented
+- [ ] Pending Modal B200 benchmark
+
+---
+
 ## Commit History
 
 | Commit | Date | Description |
@@ -598,7 +712,8 @@ This requires significant algorithm refactoring.
 | `551e8d8` | 2026-03-28 | **Iteration 3: mma.sync prefill kernel** |
 | `cc3a6e7` | 2026-03-30 | Reorganize: Move GDN implementations to gdn/ directory |
 | `5fe786f` | 2026-03-30 | Move GDN scripts to gdn/scripts/ |
-| TBD | 2026-03-30 | **Iteration 4: TMA double-buffering + cp.async prefetch** |
+| `62aeefd` | 2026-03-30 | **Iteration 4: TMA double-buffering + cp.async prefetch** |
+| TBD | 2026-03-30 | **Iteration 5: Parallel scan analysis + warp-cooperative reduction** |
 
 ---
 

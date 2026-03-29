@@ -3,21 +3,21 @@
 <cite>
 **Referenced Files in This Document**
 - [README.md](file://README.md)
-- [tests/test_correctness.py](file://tests/test_correctness.py)
-- [tests/test_quantization_accuracy.py](file://tests/test_quantization_accuracy.py)
-- [scripts/debug_prefill.py](file://scripts/debug_prefill.py)
-- [scripts/debug_prefill2.py](file://scripts/debug_prefill2.py)
-- [benchmarks/bench_modal.py](file://benchmarks/bench_modal.py)
+- [gdn/tests/test_correctness.py](file://gdn/tests/test_correctness.py)
+- [gdn/tests/test_quantization_accuracy.py](file://gdn/tests/test_quantization_accuracy.py)
+- [gdn/scripts/debug_prefill.py](file://gdn/scripts/debug_prefill.py)
+- [gdn/scripts/debug_prefill2.py](file://gdn/scripts/debug_prefill2.py)
+- [gdn/benchmarks/bench_modal.py](file://gdn/benchmarks/bench_modal.py)
 - [scripts/setup_volume.py](file://scripts/setup_volume.py)
-- [scripts/bench_all_versions.py](file://scripts/bench_all_versions.py)
-- [src/kernels/cute_cpp/gdn_decode_v10.cuh](file://src/kernels/cute_cpp/gdn_decode_v10.cuh)
-- [src/kernels/cuda/gdn_decode_v8.cuh](file://src/kernels/cuda/gdn_decode_v8.cuh)
-- [src/kernels/ptx/gdn_decode_ptx.cuh](file://src/kernels/ptx/gdn_decode_ptx.cuh)
-- [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py)
-- [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py)
-- [gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py)
-- [gdn_decode_qk4_v8_d128_k_last/config.toml](file://gdn_decode_qk4_v8_d128_k_last/config.toml)
-- [gdn_prefill_qk4_v8_d128_k_last/config.toml](file://gdn_prefill_qk4_v8_d128_k_last/config.toml)
+- [gdn/scripts/bench_all_versions.py](file://gdn/scripts/bench_all_versions.py)
+- [gdn/kernels/cute_cpp/gdn_decode_v10.cuh](file://gdn/kernels/cute_cpp/gdn_decode_v10.cuh)
+- [gdn/kernels/cuda/gdn_decode_v8.cuh](file://gdn/kernels/cuda/gdn_decode_v8.cuh)
+- [gdn/kernels/ptx/gdn_decode_ptx.cuh](file://gdn/kernels/ptx/gdn_decode_ptx.cuh)
+- [gdn/decode/baseline/triton/kernel.py](file://gdn/decode/baseline/triton/kernel.py)
+- [gdn/decode/solution/triton/kernel.py](file://gdn/decode/solution/triton/kernel.py)
+- [gdn/prefill/baseline/triton/kernel.py](file://gdn/prefill/baseline/triton/kernel.py)
+- [gdn/decode/config.toml](file://gdn/decode/config.toml)
+- [gdn/prefill/config.toml](file://gdn/prefill/config.toml)
 </cite>
 
 ## Update Summary
@@ -32,6 +32,7 @@
 - **Enhanced kernel implementations with native FP8/FP4/BF16 support in CUDA and CuTe kernels**
 - **Added comprehensive quantization accuracy testing framework with statistical analysis**
 - **Renamed test_fp8_accuracy.py to test_quantization_accuracy.py to reflect expanded capabilities**
+- **Restructured testing framework under gdn/tests/ for better organization and maintainability**
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -41,7 +42,7 @@
 5. [Benchmarking System](#benchmarking-system)
 6. [Volume Management](#volume-management)
 7. [Kernel Implementation Analysis](#kernel-implementation-analysis)
-8. [Performance Validation](#performance-validation)
+8 [Performance Validation](#performance-validation)
 9. [Multi-Precision Quantization Testing](#multi-precision-quantization-testing)
 10. [Troubleshooting Guide](#troubleshooting-guide)
 11. [Best Practices](#best-practices)
@@ -90,10 +91,10 @@ I --> A
 ```
 
 **Diagram sources**
-- [tests/test_correctness.py:1-363](file://tests/test_correctness.py#L1-L363)
-- [tests/test_quantization_accuracy.py:1-361](file://tests/test_quantization_accuracy.py#L1-L361)
-- [scripts/debug_prefill.py:1-306](file://scripts/debug_prefill.py#L1-L306)
-- [benchmarks/bench_modal.py:1-330](file://benchmarks/bench_modal.py#L1-L330)
+- [gdn/tests/test_correctness.py:1-363](file://gdn/tests/test_correctness.py#L1-L363)
+- [gdn/tests/test_quantization_accuracy.py:1-361](file://gdn/tests/test_quantization_accuracy.py#L1-L361)
+- [gdn/scripts/debug_prefill.py:1-306](file://gdn/scripts/debug_prefill.py#L1-L306)
+- [gdn/benchmarks/bench_modal.py:1-331](file://gdn/benchmarks/bench_modal.py#L1-L331)
 
 The architecture consists of four primary layers:
 
@@ -128,7 +129,7 @@ Results-->>Test : Enhanced validation status
 ```
 
 **Diagram sources**
-- [tests/test_correctness.py:29-277](file://tests/test_correctness.py#L29-L277)
+- [gdn/tests/test_correctness.py:29-277](file://gdn/tests/test_correctness.py#L29-L277)
 
 ### Advanced Test Categories
 
@@ -142,7 +143,7 @@ The framework implements several enhanced test categories:
 6. **Multi-Precision Quantization Testing**: **Comprehensive validation of quantization accuracy across BF16, FP8, and FP4 formats with Modal-based testing**
 
 **Section sources**
-- [tests/test_correctness.py:186-277](file://tests/test_correctness.py#L186-L277)
+- [gdn/tests/test_correctness.py:186-277](file://gdn/tests/test_correctness.py#L186-L277)
 
 ## Debugging Tools
 
@@ -172,8 +173,8 @@ J --> K
 ```
 
 **Diagram sources**
-- [scripts/debug_prefill.py:14-306](file://scripts/debug_prefill.py#L14-L306)
-- [scripts/debug_prefill2.py:23-184](file://scripts/debug_prefill2.py#L23-L184)
+- [gdn/scripts/debug_prefill.py:14-306](file://gdn/scripts/debug_prefill.py#L14-L306)
+- [gdn/scripts/debug_prefill2.py:23-184](file://gdn/scripts/debug_prefill2.py#L23-L184)
 
 ### Enhanced Debug Capabilities
 
@@ -186,8 +187,8 @@ The debugging tools provide:
 5. **Direct Framework Comparison**: Ability to compare custom solutions against baseline implementations within the framework
 
 **Section sources**
-- [scripts/debug_prefill.py:14-306](file://scripts/debug_prefill.py#L14-L306)
-- [scripts/debug_prefill2.py:23-184](file://scripts/debug_prefill2.py#L23-L184)
+- [gdn/scripts/debug_prefill.py:14-306](file://gdn/scripts/debug_prefill.py#L14-L306)
+- [gdn/scripts/debug_prefill2.py:23-184](file://gdn/scripts/debug_prefill2.py#L23-L184)
 
 ## Benchmarking System
 
@@ -220,7 +221,7 @@ F --> L
 ```
 
 **Diagram sources**
-- [scripts/bench_all_versions.py:32-444](file://scripts/bench_all_versions.py#L32-L444)
+- [gdn/scripts/bench_all_versions.py:32-444](file://gdn/scripts/bench_all_versions.py#L32-L444)
 
 ### Enhanced Benchmark Configuration
 
@@ -233,7 +234,7 @@ The benchmarking system supports:
 5. **Framework Integration**: Direct integration with flashinfer-bench for comprehensive validation against baselines
 
 **Section sources**
-- [scripts/bench_all_versions.py:260-404](file://scripts/bench_all_versions.py#L260-L404)
+- [gdn/scripts/bench_all_versions.py:260-404](file://gdn/scripts/bench_all_versions.py#L260-L404)
 
 ## Volume Management
 
@@ -307,22 +308,22 @@ TritonKernel --> OptimizedKernel : "implements optimizations"
 ```
 
 **Diagram sources**
-- [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py:23-136](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L23-L136)
-- [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py:27-101](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py#L27-L101)
+- [gdn/decode/solution/triton/kernel.py:23-136](file://gdn/decode/solution/triton/kernel.py#L23-L136)
+- [gdn/decode/baseline/triton/kernel.py:27-101](file://gdn/decode/baseline/triton/kernel.py#L27-L101)
 
 ### Enhanced CUDA Kernel Optimizations
 
 The CUDA implementations leverage advanced GPU optimization techniques with comprehensive validation:
 
 **Section sources**
-- [src/kernels/cute_cpp/gdn_decode_v10.cuh:67-218](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L67-L218)
+- [gdn/kernels/cute_cpp/gdn_decode_v10.cuh:67-218](file://gdn/kernels/cute_cpp/gdn_decode_v10.cuh#L67-L218)
 
 ### PTX Assembly Integration
 
 The PTX assembly kernels provide low-level optimization for FP8 quantization operations:
 
 **Section sources**
-- [src/kernels/ptx/gdn_decode_ptx.cuh:221-258](file://src/kernels/ptx/gdn_decode_ptx.cuh#L221-L258)
+- [gdn/kernels/ptx/gdn_decode_ptx.cuh:221-258](file://gdn/kernels/ptx/gdn_decode_ptx.cuh#L221-L258)
 
 ## Performance Validation
 
@@ -385,7 +386,7 @@ Stats-->>Test : Report accuracy results
 ```
 
 **Diagram sources**
-- [tests/test_quantization_accuracy.py:152-179](file://tests/test_quantization_accuracy.py#L152-L179)
+- [gdn/tests/test_quantization_accuracy.py:152-179](file://gdn/tests/test_quantization_accuracy.py#L152-L179)
 
 ### Quantization Methods
 
@@ -431,7 +432,7 @@ I --> J[Report Results]
 ```
 
 **Diagram sources**
-- [tests/test_quantization_accuracy.py:186-293](file://tests/test_quantization_accuracy.py#L186-L293)
+- [gdn/tests/test_quantization_accuracy.py:186-293](file://gdn/tests/test_quantization_accuracy.py#L186-L293)
 
 ### Key Features
 
@@ -468,9 +469,9 @@ The framework provides detailed quantization implementations:
 - Optimized for memory bandwidth efficiency with 8 FP4 values packed into 32-bit integers
 
 **Section sources**
-- [tests/test_quantization_accuracy.py:16-124](file://tests/test_quantization_accuracy.py#L16-L124)
-- [tests/test_quantization_accuracy.py:186-293](file://tests/test_quantization_accuracy.py#L186-L293)
-- [src/kernels/cute_cpp/gdn_decode_v10.cuh:90-158](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L90-L158)
+- [gdn/tests/test_quantization_accuracy.py:16-124](file://gdn/tests/test_quantization_accuracy.py#L16-L124)
+- [gdn/tests/test_quantization_accuracy.py:186-293](file://gdn/tests/test_quantization_accuracy.py#L186-L293)
+- [gdn/kernels/cute_cpp/gdn_decode_v10.cuh:90-158](file://gdn/kernels/cute_cpp/gdn_decode_v10.cuh#L90-L158)
 
 ## Troubleshooting Guide
 
@@ -507,9 +508,9 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 6. **Modal Platform**: Leverage Modal for consistent cloud-based testing environment
 
 **Section sources**
-- [benchmarks/bench_modal.py:115-120](file://benchmarks/bench_modal.py#L115-L120)
+- [gdn/benchmarks/bench_modal.py:115-120](file://gdn/benchmarks/bench_modal.py#L115-L120)
 - [scripts/setup_volume.py:141-145](file://scripts/setup_volume.py#L141-L145)
-- [tests/test_quantization_accuracy.py:306-323](file://tests/test_quantization_accuracy.py#L306-L323)
+- [gdn/tests/test_quantization_accuracy.py:306-323](file://gdn/tests/test_quantization_accuracy.py#L306-L323)
 
 ## Best Practices
 
@@ -554,4 +555,4 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 8. **Native Support**: Leverage native CUDA FP8/FP4/BF16 support for optimal performance
 
 **Section sources**
-- [tests/test_quantization_accuracy.py:186-293](file://tests/test_quantization_accuracy.py#L186-L293)
+- [gdn/tests/test_quantization_accuracy.py:186-293](file://gdn/tests/test_quantization_accuracy.py#L186-L293)

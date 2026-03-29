@@ -1,41 +1,74 @@
 # MoE (Mixture of Experts) Kernels
 
-FP8 Mixture of Experts kernel implementations for NVIDIA B200 (Blackwell, sm_100).
+FP8 Block-Scale Fused MoE kernel for DeepSeek-V3/R1 on NVIDIA B200 (Blackwell, sm_100).
+
+## Operator Specification
+
+| Parameter | Value |
+|-----------|-------|
+| **Definition** | `moe_fp8_block_scale_ds_routing_topk8_ng8_kg4_e32_h7168_i2048` |
+| **Model** | DeepSeek-V3/R1 |
+| **Quantization** | FP8 (float8_e4m3fn) + block scale (block_size=128) |
+| **Routing** | DeepSeek no-aux: sigmoid + group selection + top-k |
+| **Experts** | 256 total, 32 local (EP=8) |
+| **Hidden Size** | 7168 |
+| **Intermediate Size** | 2048 |
+| **Top-K** | 8 |
+| **N_GROUP** | 8 |
+| **TOPK_GROUP** | 4 |
+
+## Pipeline
+
+```
+Routing (DeepSeek no-aux) → Token Permutation → GEMM1 (gate+up) → SwiGLU → GEMM2 (down) → Weighted Accumulation
+```
 
 ## Directory Structure
 
 ```
 moe/
-├── kernels/             # CUDA/Triton/PTX implementations
-├── scripts/             # MoE-specific scripts
-├── benchmarks/          # Modal benchmark runners
-├── tests/               # Correctness tests
-└── docs/                # Documentation
+├── config.toml                    # Solution configuration
+├── solution/triton/kernel.py      # Triton kernel implementation
+├── trace_definitions/             # Kernel definition JSON
+├── scripts/                       # Setup scripts
+│   └── setup_moe_volume.py       # Modal volume setup
+├── benchmarks/                    # Benchmark runners
+│   └── bench_modal.py            # Modal B200 benchmark
+├── tests/                         # Correctness tests
+└── docs/                          # Documentation
 ```
 
 ## Quick Start
 
 ```bash
-# Setup Modal volume (shared)
-modal run scripts/setup_volume.py
+# 1. Setup Modal volume (download official workloads from HuggingFace)
+modal run moe/scripts/setup_moe_volume.py
 
-# Run MoE benchmarks
+# 2. Run MoE benchmark on Modal B200
 modal run moe/benchmarks/bench_modal.py
 
-# Run correctness tests
-modal run moe/tests/test_correctness.py
+# 3. Run with custom parameters
+modal run moe/benchmarks/bench_modal.py --warmup 5 --iters 100 --trials 5
 ```
 
 ## Target Hardware
 
 - **GPU**: NVIDIA B200 (Blackwell, sm_100)
 - **Memory**: 8 TB/s HBM3e
-- **Compute**: 2.25 PFLOPS BF16, FP8 Tensor Core
+- **Compute**: 2.25 PFLOPS BF16, 4.5 PFLOPS FP8 Tensor Core
 
-## Key Optimizations (TODO)
+## Evaluation Criteria
 
-- [ ] FP8 quantization (E4M3/E5M2)
-- [ ] Expert routing optimization
-- [ ] Token-to-expert load balancing
-- [ ] TMA bulk memory operations
-- [ ] Tensor Core mma.sync for matmul
+- **Correctness**: atol=1, rtol=0.3, required_matched_ratio=0.9
+- **Performance**: Arithmetic mean speedup over reference implementation
+- **Metric**: Speedup = reference_latency / solution_latency
+
+## Optimization Roadmap
+
+- [x] Correct baseline implementation (PyTorch dequant + matmul)
+- [ ] Fused Triton FP8 GEMM with block-scale dequantization
+- [ ] Triton grouped GEMM (batch experts together)
+- [ ] Fused SwiGLU activation
+- [ ] Token permutation optimization
+- [ ] TMA bulk memory operations for weight loading
+- [ ] FP8 Tensor Core (mma) on Blackwell

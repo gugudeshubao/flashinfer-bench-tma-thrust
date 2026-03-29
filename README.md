@@ -14,7 +14,7 @@
 | Operator | Description | Status |
 |----------|-------------|--------|
 | **[GDN](gdn/)** | Gated Delta Net attention | ✅ Production |
-| **MoE** | Mixture of Experts | 🚧 Coming Soon |
+| **[MoE](moe/)** | FP8 Fused Mixture of Experts (DeepSeek-V3/R1) | 🚧 In Progress |
 
 ---
 
@@ -74,7 +74,13 @@ modal run gdn/tests/test_correctness.py
 │   ├── tests/                        # Correctness tests
 │   ├── docs/                         # Documentation
 │   └── README.md                     # GDN documentation
-├── moe/                              # Mixture of Experts (coming soon)
+├── moe/                              # FP8 Fused MoE (DeepSeek-V3/R1)
+│   ├── config.toml                   # Solution configuration
+│   ├── solution/triton/              # Triton kernel implementation
+│   ├── trace_definitions/            # Kernel definition JSON
+│   ├── scripts/                      # MoE setup scripts
+│   ├── benchmarks/                   # MoE benchmarks
+│   └── README.md                     # MoE documentation
 ├── scripts/                          # Shared utility scripts
 │   └── setup_volume.py               # Modal volume setup
 ├── CMakeLists.txt                    # CUDA build configuration

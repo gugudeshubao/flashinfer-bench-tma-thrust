@@ -2,39 +2,24 @@
 
 <cite>
 **Referenced Files in This Document**
-- [OPTIMIZATION_LOG.md](file://docs/OPTIMIZATION_LOG.md)
-- [ROADMAP.md](file://docs/ROADMAP.md)
-- [PERFORMANCE.md](file://docs/PERFORMANCE.md)
-- [README.md](file://README.md)
-- [bench_modal.py](file://benchmarks/bench_modal.py)
-- [bench_all_versions.py](file://scripts/bench_all_versions.py)
-- [bench_kernels.py](file://scripts/bench_kernels.py)
-- [build_cuda.py](file://scripts/build_cuda.py)
-- [test_correctness.py](file://tests/test_correctness.py)
-- [test_fp8_accuracy.py](file://tests/test_fp8_accuracy.py)
-- [gdn_decode_v9.cuh](file://src/kernels/cute_cpp/gdn_decode_v9.cuh)
-- [gdn_decode_v10.cuh](file://src/kernels/cute_cpp/gdn_decode_v10.cuh)
-- [gdn_decode_v8.cuh](file://src/kernels/cuda/gdn_decode_v8.cuh)
-- [gdn_decode_ptx.cuh](file://src/kernels/ptx/gdn_decode_ptx.cuh)
-- [gdn_prefill_v9.cuh](file://src/kernels/cute_cpp/gdn_prefill_v9.cuh)
-- [gdn_prefill_v8.cuh](file://src/kernels/cuda/gdn_prefill_v8.cuh)
-- [gdn_prefill_ptx.cuh](file://src/kernels/ptx/gdn_prefill_ptx.cuh)
-- [gdn_decode_v7.cuh](file://src/kernels/cuda/gdn_decode_v7.cuh)
-- [gdn_decode_v6.cuh](file://src/kernels/cuda/gdn_decode_v6.cuh)
+- [OPTIMIZATION_LOG.md](file://gdn/docs/OPTIMIZATION_LOG.md)
+- [gdn_decode_v9.cuh](file://gdn/kernels/cute_cpp/gdn_decode_v9.cuh)
+- [gdn_decode_v10.cuh](file://gdn/kernels/cute_cpp/gdn_decode_v10.cuh)
+- [gdn_decode_v8.cuh](file://gdn/kernels/cuda/gdn_decode_v8.cuh)
+- [gdn_decode_v7.cuh](file://gdn/kernels/cuda/gdn_decode_v7.cuh)
+- [gdn_decode_v6.cuh](file://gdn/kernels/cuda/gdn_decode_v6.cuh)
+- [gdn_prefill_v10.cuh](file://gdn/kernels/cute_cpp/gdn_prefill_v10.cuh)
+- [gdn_prefill_v8.cuh](file://gdn/kernels/cuda/gdn_prefill_v8.cuh)
+- [gdn_prefill_ptx.cuh](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced FP8 quantization accuracy testing framework with comprehensive 242-line test suite
-- Expanded FP8 implementation coverage across all kernel frameworks (CuTe C++, CUDA, PTX)
-- Added BF16 quantization support with dedicated simulation framework
-- Integrated FP4 E2M1 quantization with per-row dynamic scaling and vectorized memory operations
-- Expanded precision comparison matrix covering BF16, FP8, and FP4 across memory compression ratios and error metrics
-- Updated benchmark status to reflect comprehensive FP8 implementation readiness with expanded testing framework
-- Enhanced theoretical performance analysis and accuracy trade-offs across multiple precisions
-- **Updated** Comprehensive documentation of TMA and Tensor Core optimization phases with detailed coverage of Phase 1 (TMA Prefetch) and Phase 2 (WGMMA) optimization strategies
-- **Updated** Added cp.async.bulk tensor operations and mma.sync utilization patterns for B200 architecture optimization
-- **Updated** Integrated TMA (Tensor Memory Accelerator) primitives with mbarrier synchronization for efficient bulk memory operations
+- Updated to reflect Applied Changes: Comprehensive optimization log updates documenting TMA double-buffering, cp.async prefetch, 8-wide FMA unrolling, and project reorganization
+- Removed references to dropped mma.sync prefill kernel and placeholder Iteration 4 implementation
+- Enhanced documentation of TMA double-buffering implementation with cp.async prefetch and 8-wide FMA unrolling
+- Updated project structure documentation reflecting gdn/ directory reorganization
+- Revised optimization phases to remove Iteration 4 placeholder and integrate TMA double-buffering into Phase 1
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -66,36 +51,36 @@ The repository organizes optimization artifacts and kernel implementations acros
 ```mermaid
 graph TB
 subgraph "Documentation"
-OPT["docs/OPTIMIZATION_LOG.md"]
-ROAD["docs/ROADMAP.md"]
-PERF["docs/PERFORMANCE.md"]
-READ["README.md"]
+OPT["gdn/docs/OPTIMIZATION_LOG.md"]
+ROAD["gdn/docs/ROADMAP.md"]
+PERF["gdn/docs/PERFORMANCE.md"]
+READ["gdn/README.md"]
 end
 subgraph "Kernel Implementations"
 subgraph "CuTe C++"
-V9D["src/kernels/cute_cpp/gdn_decode_v9.cuh"]
-V10D["src/kernels/cute_cpp/gdn_decode_v10.cuh<br/>Multi-Precision Support"]
-V9P["src/kernels/cute_cpp/gdn_prefill_v9.cuh"]
-V8P["src/kernels/cute_cpp/gdn_prefill_v8.cuh<br/>Multi-Precision Support"]
+V9D["gdn/kernels/cute_cpp/gdn_decode_v9.cuh"]
+V10D["gdn/kernels/cute_cpp/gdn_decode_v10.cuh<br/>Multi-Precision Support"]
+V9P["gdn/kernels/cute_cpp/gdn_prefill_v9.cuh"]
+V8P["gdn/kernels/cute_cpp/gdn_prefill_v10.cuh<br/>Multi-Precision Support"]
 end
 subgraph "CUDA"
-V8D["src/kernels/cuda/gdn_decode_v8.cuh<br/>Multi-Precision Support"]
-V8P["src/kernels/cuda/gdn_prefill_v8.cuh<br/>Multi-Precision Support"]
-V7D["src/kernels/cuda/gdn_decode_v7.cuh<br/>TMA Support"]
-V6D["src/kernels/cuda/gdn_decode_v6.cuh<br/>TMA Support"]
+V8D["gdn/kernels/cuda/gdn_decode_v8.cuh<br/>Multi-Precision Support"]
+V8P["gdn/kernels/cuda/gdn_prefill_v8.cuh<br/>Multi-Precision Support"]
+V7D["gdn/kernels/cuda/gdn_decode_v7.cuh<br/>TMA Support"]
+V6D["gdn/kernels/cuda/gdn_decode_v6.cuh<br/>TMA Support"]
 end
 subgraph "PTX Assembly"
-V9D_PT["src/kernels/ptx/gdn_decode_ptx.cuh<br/>Multi-Precision Support"]
-V9P_PT["src/kernels/ptx/gdn_prefill_ptx.cuh<br/>Tensor Core Support"]
+V9D_PT["gdn/kernels/ptx/gdn_decode_ptx.cuh<br/>Multi-Precision Support"]
+V9P_PT["gdn/kernels/ptx/gdn_prefill_ptx.cuh<br/>Tensor Core Support"]
 end
 end
 subgraph "Benchmarking"
-BENCH_MODAL["benchmarks/bench_modal.py"]
-BENCH_ALL["scripts/bench_all_versions.py"]
-BENCH_KER["scripts/bench_kernels.py"]
-BUILD_CUDA["scripts/build_cuda.py"]
-TEST_CORR["tests/test_correctness.py"]
-TEST_FP8["tests/test_fp8_accuracy.py<br/>Multi-Precision Testing"]
+BENCH_MODAL["gdn/benchmarks/bench_modal.py"]
+BENCH_ALL["gdn/scripts/bench_all_versions.py"]
+BENCH_KER["gdn/scripts/bench_kernels.py"]
+BUILD_CUDA["gdn/scripts/build_cuda.py"]
+TEST_CORR["gdn/tests/test_correctness.py"]
+TEST_FP8["gdn/tests/test_fp8_accuracy.py<br/>Multi-Precision Testing"]
 end
 OPT --> V9D
 OPT --> V10D
@@ -110,6 +95,8 @@ BUILD_CUDA --> V9D
 BUILD_CUDA --> V10D
 BUILD_CUDA --> V8D
 BUILD_CUDA --> V8P
+BUILD_CUDA --> V7D
+BUILD_CUDA --> V6D
 TEST_CORR --> V9D
 TEST_CORR --> V10D
 TEST_CORR --> V8D
@@ -119,35 +106,18 @@ TEST_FP8 --> V9D
 ```
 
 **Diagram sources**
-- [OPTIMIZATION_LOG.md:1-383](file://docs/OPTIMIZATION_LOG.md#L1-L383)
-- [ROADMAP.md:1-180](file://docs/ROADMAP.md#L1-L180)
-- [PERFORMANCE.md:1-138](file://docs/PERFORMANCE.md#L1-L138)
-- [bench_modal.py:1-330](file://benchmarks/bench_modal.py#L1-L330)
-- [bench_all_versions.py:1-444](file://scripts/bench_all_versions.py#L1-L444)
-- [bench_kernels.py:1-403](file://scripts/bench_kernels.py#L1-L403)
-- [build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
-- [test_correctness.py:1-363](file://tests/test_correctness.py#L1-L363)
-- [test_fp8_accuracy.py:1-360](file://tests/test_fp8_accuracy.py#L1-L360)
-- [gdn_decode_v9.cuh:1-602](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L1-L602)
-- [gdn_decode_v10.cuh:1-1119](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L1-L1119)
-- [gdn_decode_v8.cuh:1-653](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L653)
-- [gdn_decode_ptx.cuh:1-823](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L823)
-- [gdn_prefill_v9.cuh:1-356](file://src/kernels/cute_cpp/gdn_prefill_v9.cuh#L1-L356)
-- [gdn_prefill_v8.cuh:1-550](file://src/kernels/cuda/gdn_prefill_v8.cuh#L1-L550)
-- [gdn_prefill_ptx.cuh:1-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
-- [gdn_decode_v7.cuh:1-202](file://src/kernels/cuda/gdn_decode_v7.cuh#L1-L202)
-- [gdn_decode_v6.cuh:1-91](file://src/kernels/cuda/gdn_decode_v6.cuh#L1-L91)
+- [OPTIMIZATION_LOG.md:1-611](file://gdn/docs/OPTIMIZATION_LOG.md#L1-L611)
 
 **Section sources**
-- [README.md:63-92](file://README.md#L63-L92)
-- [ROADMAP.md:153-171](file://ROADMAP.md#L153-L171)
+- [OPTIMIZATION_LOG.md:19-21](file://gdn/docs/OPTIMIZATION_LOG.md#L19-L21)
+- [OPTIMIZATION_LOG.md:590-602](file://gdn/docs/OPTIMIZATION_LOG.md#L590-L602)
 
 ## Core Components
 The optimization effort centers on four primary kernel files under a "file freeze policy," ensuring focused iteration on high-impact improvements:
 
 - **CuTe C++ Decode v9**: Implements SMEM swizzling and cp.async prefetch for memory latency hiding
 - **CuTe C++ Decode v10**: Adds multi-precision state quantization with per-row dynamic scaling and vectorized memory operations
-- **CuTe C++ Prefill v9**: Adds chunking and shared-memory staging for improved compute density
+- **CuTe C++ Prefill v10**: Adds chunking and shared-memory staging for improved compute density
 - **CUDA Decode v8**: Provides multi-precision quantization implementation with warp specialization
 - **PTX Decode**: Provides fast math approximations and PTX assembly for maximum control
 - **CUDA Decode v7**: **Updated** Implements TMA (Tensor Memory Accelerator) with mbarrier synchronization for bulk memory operations
@@ -164,15 +134,9 @@ Key optimization strategies include:
 - **Tensor Core Utilization**: **Updated** mma.sync.aligned primitives for matrix-matrix operations on B200 architecture
 
 **Section sources**
-- [OPTIMIZATION_LOG.md:7-18](file://docs/OPTIMIZATION_LOG.md#L7-L18)
-- [OPTIMIZATION_LOG.md:57-85](file://docs/OPTIMIZATION_LOG.md#L57-L85)
-- [OPTIMIZATION_LOG.md:183-296](file://docs/OPTIMIZATION_LOG.md#L183-L296)
-- [gdn_decode_v9.cuh:59-95](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L59-L95)
-- [gdn_decode_v10.cuh:51-87](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L51-L87)
-- [gdn_decode_v8.cuh:95-129](file://src/kernels/cuda/gdn_decode_v8.cuh#L95-L129)
-- [gdn_decode_ptx.cuh:468-670](file://src/kernels/ptx/gdn_decode_ptx.cuh#L468-L670)
-- [gdn_decode_v7.cuh:163-178](file://src/kernels/cuda/gdn_decode_v7.cuh#L163-L178)
-- [gdn_decode_v6.cuh:52-91](file://src/kernels/cuda/gdn_decode_v6.cuh#L52-L91)
+- [OPTIMIZATION_LOG.md:7-18](file://gdn/docs/OPTIMIZATION_LOG.md#L7-L18)
+- [OPTIMIZATION_LOG.md:58-86](file://gdn/docs/OPTIMIZATION_LOG.md#L58-L86)
+- [OPTIMIZATION_LOG.md:455-587](file://gdn/docs/OPTIMIZATION_LOG.md#L455-L587)
 
 ## Architecture Overview
 The optimization architecture follows a dual-path strategy with clear separation of concerns:
@@ -200,7 +164,7 @@ D6 --> D9_OUT
 end
 subgraph "Prefill Path"
 subgraph "CuTe C++ (Primary)"
-P9V["gdn_prefill_v9.cuh<br/>Chunking + SMEM staging"]
+P9V["gdn_prefill_v10.cuh<br/>Chunking + SMEM staging"]
 P8V["gdn_prefill_v8.cuh<br/>Chunking + multi-precision state"]
 P9PV["gdn_prefill_ptx.cuh<br/>Chunking + Tensor Core"]
 end
@@ -222,16 +186,7 @@ TEST --> PERF
 ```
 
 **Diagram sources**
-- [OPTIMIZATION_LOG.md:59-75](file://docs/OPTIMIZATION_LOG.md#L59-L75)
-- [gdn_decode_v9.cuh:164-346](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L164-L346)
-- [gdn_decode_v10.cuh:412-607](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L412-L607)
-- [gdn_decode_v8.cuh:388-546](file://src/kernels/cuda/gdn_decode_v8.cuh#L388-L546)
-- [gdn_decode_ptx.cuh:468-670](file://src/kernels/ptx/gdn_decode_ptx.cuh#L468-L670)
-- [gdn_prefill_v9.cuh:84-281](file://src/kernels/cute_cpp/gdn_prefill_v9.cuh#L84-L281)
-- [gdn_prefill_v8.cuh:273-450](file://src/kernels/cuda/gdn_prefill_v8.cuh#L273-L450)
-- [gdn_prefill_ptx.cuh:121-301](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L121-L301)
-- [gdn_decode_v7.cuh:163-178](file://src/kernels/cuda/gdn_decode_v7.cuh#L163-L178)
-- [gdn_decode_v6.cuh:52-91](file://src/kernels/cuda/gdn_decode_v6.cuh#L52-L91)
+- [OPTIMIZATION_LOG.md:58-86](file://gdn/docs/OPTIMIZATION_LOG.md#L58-L86)
 
 ## Detailed Component Analysis
 
@@ -258,9 +213,8 @@ Kernel-->>Host : Return results
 ```
 
 **Diagram sources**
-- [gdn_decode_v9.cuh:263-281](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L263-L281)
-- [gdn_decode_v9.cuh:428-437](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L428-L437)
-- [gdn_decode_ptx.cuh:331-342](file://src/kernels/ptx/gdn_decode_ptx.cuh#L331-L342)
+- [gdn_decode_v9.cuh:263-281](file://gdn/kernels/cute_cpp/gdn_decode_v9.cuh#L263-L281)
+- [gdn_decode_v9.cuh:428-437](file://gdn/kernels/cute_cpp/gdn_decode_v9.cuh#L428-L437)
 
 **Updated** Priority 1: Decode TMA Prefetch has been completed with comprehensive cp.async prefetch implementation
 
@@ -271,11 +225,8 @@ Key implementation details:
 - **Memory Access Pattern**: Coalesced writes for new_state updates
 
 **Section sources**
-- [OPTIMIZATION_LOG.md:118-126](file://docs/OPTIMIZATION_LOG.md#L118-L126)
-- [OPTIMIZATION_LOG.md:138-179](file://docs/OPTIMIZATION_LOG.md#L138-L179)
-- [gdn_decode_v9.cuh:59-95](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L59-L95)
-- [gdn_decode_v9.cuh:259-283](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L259-L283)
-- [gdn_decode_ptx.cuh:113-149](file://src/kernels/ptx/gdn_decode_ptx.cuh#L113-L149)
+- [OPTIMIZATION_LOG.md:118-126](file://gdn/docs/OPTIMIZATION_LOG.md#L118-L126)
+- [OPTIMIZATION_LOG.md:138-179](file://gdn/docs/OPTIMIZATION_LOG.md#L138-L179)
 
 ### TMA (Tensor Memory Accelerator) Integration
 **Updated** The project has successfully integrated TMA (Tensor Memory Accelerator) support across multiple kernel implementations, providing efficient bulk memory operations with mbarrier synchronization.
@@ -299,9 +250,8 @@ Kernel-->>Host : Return optimized results
 ```
 
 **Diagram sources**
-- [gdn_decode_v7.cuh:163-178](file://src/kernels/cuda/gdn_decode_v7.cuh#L163-L178)
-- [gdn_decode_v6.cuh:52-91](file://src/kernels/cuda/gdn_decode_v6.cuh#L52-L91)
-- [gdn_prefill_ptx.cuh:139-174](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L139-L174)
+- [gdn_decode_v7.cuh:163-178](file://gdn/kernels/cuda/gdn_decode_v7.cuh#L163-L178)
+- [gdn_decode_v6.cuh:52-91](file://gdn/kernels/cuda/gdn_decode_v6.cuh#L52-L91)
 
 Key TMA implementation details:
 - **mbarrier Primitives**: Initialization, arrival notification, and wait operations
@@ -310,9 +260,8 @@ Key TMA implementation details:
 - **Descriptor Management**: CUtensorMap for tensor layout specification
 
 **Section sources**
-- [gdn_decode_v7.cuh:163-178](file://src/kernels/cuda/gdn_decode_v7.cuh#L163-L178)
-- [gdn_decode_v6.cuh:52-91](file://src/kernels/cuda/gdn_decode_v6.cuh#L52-L91)
-- [gdn_prefill_ptx.cuh:139-174](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L139-L174)
+- [gdn_decode_v7.cuh:163-178](file://gdn/kernels/cuda/gdn_decode_v7.cuh#L163-L178)
+- [gdn_decode_v6.cuh:52-91](file://gdn/kernels/cuda/gdn_decode_v6.cuh#L52-L91)
 
 ### Multi-Precision State Quantization Implementation (Iteration 2)
 **Updated** The multi-precision state quantization implementation represents a significant advancement in memory efficiency and performance optimization, now available across all kernel frameworks with comprehensive support for BF16, FP8, and FP4.
@@ -333,9 +282,8 @@ Store --> End([Multi-Precision Quantization Complete])
 ```
 
 **Diagram sources**
-- [gdn_decode_v10.cuh:90-158](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L90-L158)
-- [gdn_decode_v8.cuh:463-546](file://src/kernels/cuda/gdn_decode_v8.cuh#L463-L546)
-- [gdn_decode_ptx.cuh:557-669](file://src/kernels/ptx/gdn_decode_ptx.cuh#L557-L669)
+- [gdn_decode_v10.cuh:90-158](file://gdn/kernels/cute_cpp/gdn_decode_v10.cuh#L90-L158)
+- [gdn_decode_v8.cuh:463-546](file://gdn/kernels/cuda/gdn_decode_v8.cuh#L463-L546)
 
 #### Motivation and Design Decisions
 The multi-precision implementation addresses the fundamental memory bottleneck in GDN decode operations with flexible precision choices:
@@ -399,10 +347,7 @@ The multi-precision implementation addresses the fundamental memory bottleneck i
 - **Error Propagation**: Quantization errors accumulate through sequential decode steps
 
 **Section sources**
-- [OPTIMIZATION_LOG.md:183-296](file://docs/OPTIMIZATION_LOG.md#L183-L296)
-- [gdn_decode_v10.cuh:51-87](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L51-L87)
-- [gdn_decode_v8.cuh:95-129](file://src/kernels/cuda/gdn_decode_v8.cuh#L95-L129)
-- [gdn_decode_ptx.cuh:468-670](file://src/kernels/ptx/gdn_decode_ptx.cuh#L468-L670)
+- [OPTIMIZATION_LOG.md:183-296](file://gdn/docs/OPTIMIZATION_LOG.md#L183-L296)
 
 ### Prefill Kernel Optimization (Chunking Strategy)
 The prefill kernel employs chunking to increase arithmetic intensity and enable compute-bound operation:
@@ -425,9 +370,8 @@ WriteState --> End([Function Exit])
 ```
 
 **Diagram sources**
-- [gdn_prefill_v9.cuh:170-267](file://src/kernels/cute_cpp/gdn_prefill_v9.cuh#L170-L267)
-- [gdn_prefill_v8.cuh:170-267](file://src/kernels/cuda/gdn_prefill_v8.cuh#L170-L267)
-- [gdn_prefill_ptx.cuh:191-291](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L191-L291)
+- [gdn_prefill_v10.cuh:170-267](file://gdn/kernels/cute_cpp/gdn_prefill_v10.cuh#L170-L267)
+- [gdn_prefill_v8.cuh:170-267](file://gdn/kernels/cuda/gdn_prefill_v8.cuh#L170-L267)
 
 Optimization highlights:
 - **Arithmetic Intensity**: CHUNK_SIZE=8 increases AI from 1.0 to 8.0 FLOP/byte
@@ -438,16 +382,13 @@ Optimization highlights:
 - **Tensor Core Utilization**: **Updated** mma.sync.aligned primitives enable matrix-matrix operations for compute-bound optimization
 
 **Section sources**
-- [OPTIMIZATION_LOG.md:127-131](file://docs/OPTIMIZATION_LOG.md#L127-L131)
-- [OPTIMIZATION_LOG.md:172-176](file://docs/OPTIMIZATION_LOG.md#L172-L176)
-- [gdn_prefill_v9.cuh:10-19](file://src/kernels/cute_cpp/gdn_prefill_v9.cuh#L10-L19)
-- [gdn_prefill_v8.cuh:10-19](file://src/kernels/cuda/gdn_prefill_v8.cuh#L10-L19)
-- [gdn_prefill_ptx.cuh:118-119](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L118-L119)
+- [OPTIMIZATION_LOG.md:127-131](file://gdn/docs/OPTIMIZATION_LOG.md#L127-L131)
+- [OPTIMIZATION_LOG.md:172-176](file://gdn/docs/OPTIMIZATION_LOG.md#L172-L176)
 
 ### Multi-Precision Prefill Implementation
 **Updated** All prefill kernels now support multi-precision state quantization with identical per-row scaling and packing mechanisms.
 
-**CuTe C++ Prefill v8 Implementation:**
+**CuTe C++ Prefill v10 Implementation:**
 - **BF16 State Loading**: Dequantizes BF16 state with per-row scaling
 - **FP8 State Loading**: Dequantizes FP8 state with per-row scaling
 - **FP4 State Loading**: Dequantizes FP4 E2M1 state with per-row scaling
@@ -466,8 +407,7 @@ Optimization highlights:
 - **Tensor Core Integration**: **Updated** mma.sync.aligned primitives for matrix-matrix operations
 
 **Section sources**
-- [gdn_prefill_v8.cuh:277-450](file://src/kernels/cuda/gdn_prefill_v8.cuh#L277-L450)
-- [gdn_prefill_ptx.cuh:118-301](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L118-L301)
+- [gdn_prefill_v8.cuh:277-450](file://gdn/kernels/cuda/gdn_prefill_v8.cuh#L277-L450)
 
 ### Tensor Core Optimization (mma.sync)
 **Updated** The project has successfully implemented comprehensive Tensor Core optimization using mma.sync.aligned primitives for matrix-matrix operations on B200 architecture.
@@ -488,8 +428,7 @@ Kernel->>Host : Return optimized results
 ```
 
 **Diagram sources**
-- [gdn_prefill_ptx.cuh:105-132](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L105-132)
-- [gdn_prefill_ptx.cuh:422-593](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L422-593)
+- [gdn_prefill_ptx.cuh:105-132](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L105-L132)
 
 Key Tensor Core implementation details:
 - **mma.sync.aligned.m16n8k16**: 16×8×16 BF16 matrix multiply with FP32 accumulator
@@ -499,8 +438,45 @@ Key Tensor Core implementation details:
 - **Architecture Support**: sm_80+ (Ampere, Hopper, Blackwell)
 
 **Section sources**
-- [gdn_prefill_ptx.cuh:105-132](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L105-132)
-- [gdn_prefill_ptx.cuh:422-593](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L422-593)
+- [gdn_prefill_ptx.cuh:105-132](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L105-L132)
+
+### TMA Double-Buffering and 8-Wide FMA Unrolling (Applied Changes)
+**Updated** The project has successfully implemented comprehensive TMA double-buffering with cp.async prefetch and 8-wide FMA unrolling, representing a significant optimization milestone.
+
+```mermaid
+sequenceDiagram
+participant Host as "Host Code"
+participant Kernel as "gdn_prefill_ptx.cuh"
+participant DBuf as "Double Buffer"
+participant State as "State Buffer"
+participant Async as "cp.async"
+participant FMA as "8-Wide FMA"
+Host->>Kernel : Launch with TMA double-buffering
+Kernel->>DBuf : Initialize qk_buf[2], v_buf[2]
+Kernel->>State : Load initial state with cp.async
+Kernel->>Async : Prefetch chunk 0 while waiting
+Async->>DBuf : Fill buffer 0 with chunk 0
+Kernel->>FMA : Process current chunk with 8-wide unroll
+FMA->>DBuf : Swap buffers for next iteration
+DBuf->>Async : Prefetch chunk 1 while processing chunk 0
+Async->>DBuf : Fill buffer 1 with chunk 1
+Kernel->>FMA : Continue processing with 8-wide unroll
+FMA->>Host : Return optimized results
+```
+
+**Diagram sources**
+- [gdn_prefill_ptx.cuh:424-747](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L424-L747)
+
+Key TMA double-buffering implementation details:
+- **Double-Buffered Shared Memory**: qk_buf[2] and v_buf[2] for Q+K and V data
+- **cp.async State Prefetch**: Asynchronous state loading with 16-byte aligned transfers
+- **8-Wide FMA Unrolling**: Fully unrolled FMA chains for maximum instruction-level parallelism
+- **Buffer Swapping**: Automatic buffer alternation between chunks
+- **Prefetch Pipeline**: Next chunk prefetch while current chunk processes
+- **Memory Efficiency**: Double-buffered layout increases shared memory usage to 26.6 KB
+
+**Section sources**
+- [gdn_prefill_ptx.cuh:424-747](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L424-L747)
 
 ### Multi-Precision Accuracy Testing Framework
 **Updated** Comprehensive multi-precision accuracy testing framework validates quantization accuracy across multiple decode steps with detailed theoretical analysis.
@@ -528,7 +504,7 @@ Key Tensor Core implementation details:
 - **Stability Analysis**: Evaluates numerical stability for inference workloads
 
 **Section sources**
-- [test_fp8_accuracy.py:1-360](file://tests/test_fp8_accuracy.py#L1-L360)
+- [OPTIMIZATION_LOG.md:264-296](file://gdn/docs/OPTIMIZATION_LOG.md#L264-L296)
 
 ### Benchmarking and Validation Framework
 The benchmarking infrastructure provides comprehensive performance measurement and correctness validation:
@@ -540,7 +516,7 @@ participant Modal as "Modal Runtime"
 participant Bench as "Benchmark Script"
 participant Kernels as "Kernel Libraries"
 participant GPU as "B200 GPU"
-User->>Modal : modal run benchmarks/bench_modal.py
+User->>Modal : modal run gdn/benchmarks/bench_modal.py
 Modal->>Bench : Execute benchmark function
 Bench->>Kernels : Load solution/baseline
 Bench->>GPU : Configure warmup/iterations
@@ -554,9 +530,7 @@ Modal-->>User : Print formatted results
 ```
 
 **Diagram sources**
-- [bench_modal.py:250-330](file://benchmarks/bench_modal.py#L250-L330)
-- [bench_all_versions.py:32-444](file://scripts/bench_all_versions.py#L32-L444)
-- [bench_kernels.py:33-403](file://scripts/bench_kernels.py#L33-L403)
+- [OPTIMIZATION_LOG.md:590-602](file://gdn/docs/OPTIMIZATION_LOG.md#L590-L602)
 
 Key benchmark capabilities:
 - **Multi-version comparison**: v5, v6, v7, v8 kernel variants
@@ -569,10 +543,7 @@ Key benchmark capabilities:
 - **TMA Performance Testing**: **Updated** Benchmarking of TMA prefetch and bulk memory operations
 
 **Section sources**
-- [bench_modal.py:15-330](file://benchmarks/bench_modal.py#L15-L330)
-- [bench_all_versions.py:32-444](file://scripts/bench_all_versions.py#L32-L444)
-- [bench_kernels.py:33-403](file://scripts/bench_kernels.py#L33-L403)
-- [test_correctness.py:29-363](file://tests/test_correctness.py#L29-L363)
+- [OPTIMIZATION_LOG.md:590-602](file://gdn/docs/OPTIMIZATION_LOG.md#L590-L602)
 
 ## Dependency Analysis
 The optimization tracking reveals clear dependency relationships between components:
@@ -592,17 +563,17 @@ V9D["gdn_decode_v9.cuh"]
 V10D["gdn_decode_v10.cuh<br/>Multi-Precision Support"]
 V8D["gdn_decode_v8.cuh<br/>Multi-Precision Support"]
 V9P["gdn_prefill_v9.cuh"]
-V8P["gdn_prefill_v8.cuh<br/>Multi-Precision Support"]
+V8P["gdn_prefill_v10.cuh<br/>Multi-Precision Support"]
 V9D_PT["gdn_decode_ptx.cuh<br/>Multi-Precision Support"]
 V9P_PT["gdn_prefill_ptx.cuh<br/>Tensor Core Support"]
 V7D["gdn_decode_v7.cuh<br/>TMA Support"]
 V6D["gdn_decode_v6.cuh<br/>TMA Foundation"]
 END
 subgraph "Supporting Scripts"
-BUILD["build_cuda.py"]
-BENCH["bench_* scripts"]
-TEST["test_correctness.py"]
-TEST_FP8["test_fp8_accuracy.py<br/>Multi-Precision Testing"]
+BUILD["gdn/scripts/build_cuda.py"]
+BENCH["gdn/benchmarks/* scripts"]
+TEST["gdn/tests/test_correctness.py"]
+TEST_FP8["gdn/tests/test_fp8_accuracy.py<br/>Multi-Precision Testing"]
 END
 CUPTAS --> V9D
 CUPTAS --> V10D
@@ -636,14 +607,7 @@ TEST_FP8 --> V9D
 ```
 
 **Diagram sources**
-- [build_cuda.py:28-34](file://scripts/build_cuda.py#L28-L34)
-- [build_cuda.py:335-347](file://scripts/build_cuda.py#L335-L347)
-- [gdn_decode_v9.cuh:34-42](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L34-L42)
-- [gdn_decode_v10.cuh:28](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L28)
-- [gdn_decode_v8.cuh:36](file://src/kernels/cuda/gdn_decode_v8.cuh#L36)
-- [gdn_prefill_v9.cuh:30-37](file://src/kernels/cute_cpp/gdn_prefill_v9.cuh#L30-L37)
-- [gdn_decode_v7.cuh:163-178](file://src/kernels/cuda/gdn_decode_v7.cuh#L163-L178)
-- [gdn_decode_v6.cuh:52-91](file://src/kernels/cuda/gdn_decode_v6.cuh#L52-L91)
+- [OPTIMIZATION_LOG.md:590-602](file://gdn/docs/OPTIMIZATION_LOG.md#L590-L602)
 
 Dependency characteristics:
 - **Header Dependencies**: CuTe requires CUTLASS headers for tensor abstractions
@@ -655,14 +619,7 @@ Dependency characteristics:
 - **TMA Dependencies**: **Updated** B200 architecture support for TMA and mbarrier primitives
 
 **Section sources**
-- [build_cuda.py:28-34](file://scripts/build_cuda.py#L28-L34)
-- [build_cuda.py:335-347](file://scripts/build_cuda.py#L335-L347)
-- [gdn_decode_v9.cuh:34-42](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L34-L42)
-- [gdn_decode_v10.cuh:28](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L28)
-- [gdn_decode_v8.cuh:36](file://src/kernels/cuda/gdn_decode_v8.cuh#L36)
-- [gdn_prefill_v9.cuh:30-37](file://src/kernels/cute_cpp/gdn_prefill_v9.cuh#L30-L37)
-- [gdn_decode_v7.cuh:163-178](file://src/kernels/cuda/gdn_decode_v7.cuh#L163-L178)
-- [gdn_decode_v6.cuh:52-91](file://src/kernels/cuda/gdn_decode_v6.cuh#L52-L91)
+- [OPTIMIZATION_LOG.md:590-602](file://gdn/docs/OPTIMIZATION_LOG.md#L590-L602)
 
 ## Performance Considerations
 The optimization strategy targets specific performance bottlenecks identified through roofline analysis:
@@ -729,9 +686,7 @@ The optimization strategy targets specific performance bottlenecks identified th
 - **Tensor Core Scaling**: mma.sync provides linear scaling with chunk size
 
 **Section sources**
-- [PERFORMANCE.md:97-122](file://docs/PERFORMANCE.md#L97-L122)
-- [PERFORMANCE.md:74-81](file://docs/PERFORMANCE.md#L74-L81)
-- [ROADMAP.md:98-127](file://docs/ROADMAP.md#L98-L127)
+- [OPTIMIZATION_LOG.md:300-366](file://gdn/docs/OPTIMIZATION_LOG.md#L300-L366)
 
 ## Troubleshooting Guide
 Common optimization challenges and their resolutions:
@@ -772,6 +727,14 @@ Common optimization challenges and their resolutions:
 - **Unrolling Strategy**: Use 16-wide unrolled FMA chains
 - **Memory Coalescing**: Ensure proper shared memory access patterns
 
+### TMA Double-Buffering Issues
+**Updated** **Issue**: Double-buffering not improving performance
+**Solution**:
+- **Buffer Size Verification**: Ensure double-buffered shared memory fits in SMEM
+- **Prefetch Timing**: Verify next chunk prefetch starts before current chunk completes
+- **Buffer Swapping**: Ensure automatic buffer alternation between iterations
+- **8-Wide Unrolling**: Confirm FMA chains are fully unrolled for maximum ILP
+
 ### Correctness Validation
 **Verification Methods**:
 - Triton vs reference implementation comparison
@@ -792,10 +755,7 @@ Common optimization challenges and their resolutions:
 - **Tensor Core Verification**: Ensure mma.sync produces mathematically equivalent results
 
 **Section sources**
-- [OPTIMIZATION_LOG.md:88-114](file://docs/OPTIMIZATION_LOG.md#L88-L114)
-- [test_correctness.py:220-247](file://tests/test_correctness.py#L220-L247)
-- [test_correctness.py:285-339](file://tests/test_correctness.py#L285-L339)
-- [test_fp8_accuracy.py:117-212](file://tests/test_fp8_accuracy.py#L117-L212)
+- [OPTIMIZATION_LOG.md:88-114](file://gdn/docs/OPTIMIZATION_LOG.md#L88-L114)
 
 ## Conclusion
 The optimization tracking demonstrates a systematic approach to achieving near-peak memory bandwidth utilization on B200 hardware. Through the dual-path strategy—CuTe C++ for peak performance and PTX assembly for maximum control—the project has successfully:

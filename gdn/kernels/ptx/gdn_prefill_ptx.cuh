@@ -10,6 +10,7 @@
  *   - Predicated execution (selp)
  *   - Warp shuffle for reductions
  *   - mma.sync.aligned Tensor Core operations (sm_80+, sm_100)
+ *   - Warp-cooperative parallel reduction for mat-vec
  *
  * Key Optimizations:
  *   1. Chunk-based processing (CHUNK_SIZE tokens at once)
@@ -17,11 +18,17 @@
  *   3. FMA chains for dot products
  *   4. Prefetch hints for state access
  *   5. mma.sync.aligned.m16n8k16 for mat-mat operations
+ *   6. Warp-cooperative reduction for S @ k and S @ q
  *
  * Tensor Core Usage:
  *   - State[V,D] @ Q_chunk[D,C] = Out[V,C]  → mma.sync
  *   - State[V,D] @ K_chunk[D,C] = OldV[V,C] → mma.sync
  *   - Requires: V=16, C=8, D=128 (tiled as 8×16x8k16)
+ *
+ * Parallel Scan Analysis:
+ *   - GDN delta rule has sequential dependency: old_v = S @ k
+ *   - Cannot use parallel scan without approximation
+ *   - Use warp-cooperative reduction instead (4x threads per row)
  *
  * Grid: (N=num_seqs, H=8, V_BLOCKS)
  * Block: 128 threads (4 warps)
@@ -85,6 +92,40 @@ __device__ __forceinline__ float ptx_selp_pf(float a, float b, bool pred) {
     float result;
     asm volatile("selp.f32 %0, %1, %2, %3;" : "=f"(result) : "f"(a), "f"(b), "r"((int)pred));
     return result;
+}
+
+// ============================================================
+// Warp Shuffle Primitives for Parallel Reduction
+// ============================================================
+
+// Warp shuffle down (for reduction)
+__device__ __forceinline__ float ptx_shfl_down_f32(float val, int offset) {
+    float result;
+    asm volatile(
+        "shfl.sync.down.b32 %0, %1, %2, 0x1f, 0xffffffff;"
+        : "=f"(result) : "f"(val), "r"(offset)
+    );
+    return result;
+}
+
+// Warp shuffle (arbitrary lane)
+__device__ __forceinline__ float ptx_shfl_idx_f32(float val, int lane) {
+    float result;
+    asm volatile(
+        "shfl.sync.idx.b32 %0, %1, %2, 0x1f, 0xffffffff;"
+        : "=f"(result) : "f"(val), "r"(lane)
+    );
+    return result;
+}
+
+// Warp-level reduction sum (within 32 threads)
+__device__ __forceinline__ float warp_reduce_sum(float val) {
+    val += ptx_shfl_down_f32(val, 16);
+    val += ptx_shfl_down_f32(val, 8);
+    val += ptx_shfl_down_f32(val, 4);
+    val += ptx_shfl_down_f32(val, 2);
+    val += ptx_shfl_down_f32(val, 1);
+    return val;
 }
 
 // ============================================================
@@ -747,6 +788,203 @@ gdn_prefill_kernel_ptx_mma(
 }
 
 // ============================================================
+// Warp-Cooperative Prefill Kernel
+// Uses parallel reduction for mat-vec: 8 threads per row
+// 128 threads / 16 rows = 8 threads per row
+// Each group of 8 threads computes one row's dot product
+// ============================================================
+
+template<int CHUNK_SIZE>
+__global__ void __launch_bounds__(128)
+gdn_prefill_kernel_ptx_warp_coop(
+    const __nv_bfloat16* __restrict__ Q,       // [T, 4, D]
+    const __nv_bfloat16* __restrict__ K,       // [T, 4, D]
+    const __nv_bfloat16* __restrict__ V,       // [T, 8, D]
+    const float* __restrict__ State,            // [N, 8, D, D]
+    const float* __restrict__ A_log,            // [8]
+    const __nv_bfloat16* __restrict__ A,       // [T, 8]
+    const float* __restrict__ DtBias,          // [8]
+    const __nv_bfloat16* __restrict__ B_gate,  // [T, 8]
+    const int32_t* __restrict__ CuSeqlens,     // [N+1]
+    __nv_bfloat16* __restrict__ Out,           // [T, 8, D]
+    float* __restrict__ NewState,               // [N, 8, D, D]
+    float scale,
+    int stride_q_t, int stride_q_h,
+    int stride_k_t, int stride_k_h,
+    int stride_v_t, int stride_v_h,
+    int stride_s_n, int stride_s_h, int stride_s_v,
+    int stride_a_t, int stride_b_t,
+    int stride_o_t, int stride_o_h,
+    int stride_ns_n, int stride_ns_h, int stride_ns_v
+) {
+    constexpr int BLOCK_V = 16;
+    constexpr int D = PREFILL_D_PTX;  // 128
+    constexpr int THREADS_PER_ROW = 8;  // 128 threads / 16 rows
+    constexpr int WARP_SIZE = 32;
+    
+    const int n = blockIdx.x;
+    const int h = blockIdx.y;
+    const int v_block = blockIdx.z;
+    const int tid = threadIdx.x;
+    
+    // Thread mapping: which row and which element within row
+    const int row_id = tid / THREADS_PER_ROW;   // 0-15 (which V row)
+    const int lane_in_row = tid % THREADS_PER_ROW;  // 0-7 (position in row reduction)
+    
+    const int v0 = v_block * BLOCK_V;
+    const int num_threads = blockDim.x;  // 128
+    
+    // Sequence bounds
+    const int t_start = CuSeqlens[n];
+    const int t_end = CuSeqlens[n + 1];
+    const int seq_len = t_end - t_start;
+    
+    if (seq_len <= 0) return;
+    
+    // Gate values (constant for head h)
+    const float a_log_val = A_log[h];
+    const float dt_bias = DtBias[h];
+    const int k_head = h >> 1;  // Q/K have 4 heads
+    
+    // Shared memory layout
+    extern __shared__ char smem[];
+    float* state_smem = (float*)smem;                    // [BLOCK_V, D]
+    float* q_smem = state_smem + BLOCK_V * D;            // [D]
+    float* k_smem = q_smem + D;                          // [D]
+    float* v_smem = k_smem + D;                          // [BLOCK_V]
+    float* old_v_smem = v_smem + BLOCK_V;                // [BLOCK_V]
+    float* out_smem = old_v_smem + BLOCK_V;              // [BLOCK_V]
+    float* partial_smem = out_smem + BLOCK_V;            // [BLOCK_V * THREADS_PER_ROW] for reduction
+    
+    // Load initial state
+    const float* state_ptr = State + n * stride_s_n + h * stride_s_h + v0 * stride_s_v;
+    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+        int vi = i / D;
+        int ki = i % D;
+        state_smem[vi * D + ki] = state_ptr[vi * stride_s_v + ki];
+    }
+    __syncthreads();
+    
+    // Process tokens sequentially
+    for (int t = t_start; t < t_end; t++) {
+        // ── Load Q, K, V ──────────────────────────────────────────────
+        for (int i = tid; i < D; i += num_threads) {
+            q_smem[i] = __bfloat162float(Q[t * stride_q_t + k_head * stride_q_h + i]);
+            k_smem[i] = __bfloat162float(K[t * stride_k_t + k_head * stride_k_h + i]);
+        }
+        for (int i = tid; i < BLOCK_V; i += num_threads) {
+            v_smem[i] = __bfloat162float(V[t * stride_v_t + h * stride_v_h + v0 + i]);
+        }
+        __syncthreads();
+        
+        // ── Compute gates ─────────────────────────────────────────────
+        float gate, beta;
+        if (tid == 0) {
+            float a_val = __bfloat162float(A[t * stride_a_t + h]);
+            float b_val = __bfloat162float(B_gate[t * stride_b_t + h]);
+            float sp = ptx_softplus_pf(a_val + dt_bias);
+            float exp_alog = ptx_exp_pf(a_log_val);
+            gate = ptx_exp_pf(-exp_alog * sp);
+            beta = ptx_sigmoid_pf(b_val);
+            // Store for all threads
+            partial_smem[0] = gate;
+            partial_smem[1] = beta;
+        }
+        __syncthreads();
+        gate = partial_smem[0];
+        beta = partial_smem[1];
+        
+        // ── Apply gate decay: S = g * S ───────────────────────────────
+        for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+            state_smem[i] *= gate;
+        }
+        __syncthreads();
+        
+        // ══════════════════════════════════════════════════════════════
+        // WARP-COOPERATIVE PARALLEL REDUCTION
+        // Each group of 8 threads computes one row's dot product
+        // Thread i (row r, lane l) computes partial sum for row r
+        // ══════════════════════════════════════════════════════════════
+        
+        if (row_id < BLOCK_V) {
+            float* state_row = state_smem + row_id * D;
+            
+            // Compute partial sum: each thread handles D/8 = 16 elements
+            float sum_k = 0.0f;
+            float sum_q = 0.0f;
+            
+            int start_k = lane_in_row * (D / THREADS_PER_ROW);  // 0, 16, 32, ...
+            int end_k = start_k + (D / THREADS_PER_ROW);
+            
+            #pragma unroll
+            for (int ki = start_k; ki < end_k; ki += 4) {
+                float s0 = state_row[ki + 0];
+                float s1 = state_row[ki + 1];
+                float s2 = state_row[ki + 2];
+                float s3 = state_row[ki + 3];
+                
+                sum_k = ptx_fma_pf(s0, k_smem[ki + 0], sum_k);
+                sum_k = ptx_fma_pf(s1, k_smem[ki + 1], sum_k);
+                sum_k = ptx_fma_pf(s2, k_smem[ki + 2], sum_k);
+                sum_k = ptx_fma_pf(s3, k_smem[ki + 3], sum_k);
+                
+                sum_q = ptx_fma_pf(s0, q_smem[ki + 0], sum_q);
+                sum_q = ptx_fma_pf(s1, q_smem[ki + 1], sum_q);
+                sum_q = ptx_fma_pf(s2, q_smem[ki + 2], sum_q);
+                sum_q = ptx_fma_pf(s3, q_smem[ki + 3], sum_q);
+            }
+            
+            // Store partial results to shared memory for cross-thread reduction
+            partial_smem[row_id * THREADS_PER_ROW * 2 + lane_in_row] = sum_k;
+            partial_smem[row_id * THREADS_PER_ROW * 2 + THREADS_PER_ROW + lane_in_row] = sum_q;
+        }
+        __syncthreads();
+        
+        // ── Reduce across threads in each row (lane 0 does final sum) ─
+        if (row_id < BLOCK_V && lane_in_row == 0) {
+            float old_v = 0.0f;
+            float out_val = 0.0f;
+            
+            #pragma unroll
+            for (int l = 0; l < THREADS_PER_ROW; l++) {
+                old_v += partial_smem[row_id * THREADS_PER_ROW * 2 + l];
+                out_val += partial_smem[row_id * THREADS_PER_ROW * 2 + THREADS_PER_ROW + l];
+            }
+            
+            old_v_smem[row_id] = old_v;
+            out_smem[row_id] = scale * out_val;
+        }
+        __syncthreads();
+        
+        // ── Compute delta and rank-1 update ───────────────────────────
+        // delta = beta * (v - old_v)
+        // S[v,:] += delta * K
+        for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+            int vi = i / D;
+            int ki = i % D;
+            float delta = beta * (v_smem[vi] - old_v_smem[vi]);
+            state_smem[i] = ptx_fma_pf(delta, k_smem[ki], state_smem[i]);
+        }
+        __syncthreads();
+        
+        // ── Store output ──────────────────────────────────────────────
+        for (int i = tid; i < BLOCK_V; i += num_threads) {
+            Out[t * stride_o_t + h * stride_o_h + v0 + i] = 
+                __float2bfloat16(out_smem[i]);
+        }
+        __syncthreads();
+    }
+    
+    // Store final state
+    float* new_state_ptr = NewState + n * stride_ns_n + h * stride_ns_h + v0 * stride_ns_v;
+    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+        int vi = i / D;
+        int ki = i % D;
+        ptx_st_wb_pf(&new_state_ptr[vi * stride_ns_v + ki], state_smem[i]);
+    }
+}
+
+// ============================================================
 // Launcher Function
 // ============================================================
 
@@ -865,6 +1103,62 @@ inline void gdn_prefill_ptx_mma_launch(
             stride_a_t, stride_b_t, stride_o_t, stride_o_h,
             stride_ns_n, stride_ns_h, stride_ns_v);
     }
+}
+
+// ============================================================
+// Warp-Cooperative Launcher (parallel reduction)
+// ============================================================
+
+inline void gdn_prefill_ptx_warp_coop_launch(
+    const void* Q, const void* K, const void* V, const void* State,
+    const void* A_log, const void* A, const void* DtBias, const void* B_gate,
+    const void* CuSeqlens,
+    void* Out, void* NewState,
+    float scale,
+    int N, int num_v_heads, int D,
+    int stride_q_t, int stride_q_h,
+    int stride_k_t, int stride_k_h,
+    int stride_v_t, int stride_v_h,
+    int stride_s_n, int stride_s_h, int stride_s_v,
+    int stride_a_t, int stride_b_t,
+    int stride_o_t, int stride_o_h,
+    int stride_ns_n, int stride_ns_h, int stride_ns_v,
+    int CHUNK_SIZE,
+    cudaStream_t stream
+) {
+    constexpr int BLOCK_V = 16;
+    constexpr int THREADS_PER_ROW = 8;
+    int V_BLOCKS = D / BLOCK_V;
+    dim3 grid(N, num_v_heads, V_BLOCKS);
+    dim3 block(128);
+    
+    // Shared memory layout:
+    // - state_smem: [BLOCK_V, D]
+    // - q_smem: [D]
+    // - k_smem: [D]
+    // - v_smem: [BLOCK_V]
+    // - old_v_smem: [BLOCK_V]
+    // - out_smem: [BLOCK_V]
+    // - partial_smem: [BLOCK_V * THREADS_PER_ROW * 2] for reduction
+    size_t smem_size = (BLOCK_V * D +              // state_smem
+                        D +                         // q_smem
+                        D +                         // k_smem
+                        BLOCK_V +                   // v_smem
+                        BLOCK_V +                   // old_v_smem
+                        BLOCK_V +                   // out_smem
+                        BLOCK_V * THREADS_PER_ROW * 2  // partial_smem
+                       ) * sizeof(float);
+    
+    // Use CHUNK_SIZE=1 for warp-coop (processes one token at a time)
+    gdn_prefill_kernel_ptx_warp_coop<1><<<grid, block, smem_size, stream>>>(
+        (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+        (const float*)State, (const float*)A_log, (const __nv_bfloat16*)A,
+        (const float*)DtBias, (const __nv_bfloat16*)B_gate, (const int32_t*)CuSeqlens,
+        (__nv_bfloat16*)Out, (float*)NewState, scale,
+        stride_q_t, stride_q_h, stride_k_t, stride_k_h,
+        stride_v_t, stride_v_h, stride_s_n, stride_s_h, stride_s_v,
+        stride_a_t, stride_b_t, stride_o_t, stride_o_h,
+        stride_ns_n, stride_ns_h, stride_ns_v);
 }
 
 }  // namespace gdn_ptx
