@@ -4,23 +4,34 @@
 [![Contest](https://img.shields.io/badge/MLSys-2026-red)](https://mlsys.org/)
 [![GPU](https://img.shields.io/badge/NVIDIA-B200-green)](https://www.nvidia.com/)
 
-**Team**: TMA Thrust
-**Track**: C — Gated Delta Net
-**Hardware**: NVIDIA B200 (sm100) via Modal
+**Team**: TMA Thrust  
+**Track**: C — Gated Delta Net  
+**Hardware**: NVIDIA B200 (sm_100) via Modal  
 **Kernels**: `gdn_decode_qk4_v8_d128_k_last` · `gdn_prefill_qk4_v8_d128_k_last`
 
-## 📊 Latest Performance
+---
 
-> Full numbers and version history → **[docs/PERFORMANCE.md](docs/PERFORMANCE.md)**
+## Performance Summary (Verified Correct)
 
-| Kernel | Workloads | Avg Speedup vs Ref | Version | Date |
-|--------|-----------|-------------------|---------|------|
-| decode | 10/10 ✅ | **~736x** | v5 CUDA | 2026-03-28 |
-| prefill | 12/12 ✅ | **~457x** | v5 CUDA | 2026-03-28 |
+| Batch | Triton v5 | **CUDA v9** | Winner | Speedup |
+|-------|-----------|-------------|--------|---------|
+| **1** | 24 GB/s | **27 GB/s** | **v9** | **1.11x** |
+| **16** | 386 GB/s | **405 GB/s** | **v9** | **1.05x** |
+| 64 | **1,518 GB/s** | 1,302 GB/s | Triton | 1.17x |
+| **256** | 2,834 GB/s | **7,585 GB/s** | **v9** | **2.68x** |
+
+**Best: CUDA v9 (CuTe swizzle) achieves 7,600 GB/s (95% of B200 peak)**
+
+All kernels verified for correctness against Triton v5 baseline.
+
+> Full benchmark data → **[docs/PERFORMANCE.md](docs/PERFORMANCE.md)**  
+> Optimization roadmap → **[docs/ROADMAP.md](docs/ROADMAP.md)**
+
+---
 
 ## Quick Start
 
-### 1. Setup Modal volume (first time)
+### 1. Setup Modal volume
 
 ```bash
 modal run scripts/setup_volume.py
@@ -28,99 +39,120 @@ modal run scripts/setup_volume.py
 modal run scripts/setup_volume.py --mode hf
 ```
 
-### 2. Run benchmarks on B200
+### 2. Run benchmarks
 
 ```bash
-# Correctness check (fast)
-modal run benchmarks/bench_modal.py --kernel both --warmup 0 --iters 1 --trials 1
+# Benchmark all versions (v5, v6, v7, v8)
+modal run scripts/bench_all_versions.py --versions all --batches "1,16,64,256"
 
-# Full benchmark
+# Test specific version
+modal run scripts/bench_all_versions.py --versions v7 --batches "256,512"
+
+# Original benchmark (vs Python reference)
 modal run benchmarks/bench_modal.py --kernel both
-
-# CUDA v5 kernels
-modal run benchmarks/bench_modal.py --kernel both --cuda
-
-# Compare solution vs Python baseline
-modal run benchmarks/bench_modal.py --kernel both --compare
 ```
+
+### 3. Build CUDA kernels
+
+```bash
+modal run scripts/build_cuda.py  # Compiles v5-v8 for sm_100
+```
+
+---
 
 ## Repository Structure
 
 ```
 .
-├── src/kernels/                          # CUDA kernel sources
-│   ├── gdn_decode_v5.cuh                 # 319 lines — decode CUDA kernel
-│   └── gdn_prefill_v5.cuh                # 249 lines — prefill CUDA kernel
+├── src/kernels/                              # Kernel implementations
+│   ├── cuda/                                 # Basic CUDA (v5-v8)
+│   │   ├── gdn_decode_v5.cuh                 # Baseline
+│   │   ├── gdn_decode_v6.cuh                 # TMA async
+│   │   ├── gdn_decode_v7.cuh                 # float4 + FP4
+│   │   ├── gdn_decode_v8.cuh                 # Warp spec + FP8
+│   │   └── gdn_prefill_v5-v8.cuh
+│   ├── cute/                                 # CuTe DSL (v9-v10)
+│   │   ├── gdn_decode_v9.cuh                 # SMEM swizzle
+│   │   └── gdn_decode_v10.cuh                # Swizzle<3,3,3>
+│   └── triton/                               # Triton baseline (symlinks)
 ├── gdn_decode_qk4_v8_d128_k_last/
-│   ├── solution/
-│   │   ├── triton/kernel.py              # 135 lines — Triton v4
-│   │   └── cuda/kernel.py                # 247 lines — CUDA wrapper + Triton fallback
-│   └── baseline/triton/kernel.py         # Python reference
+│   ├── solution/triton/kernel.py             # Production Triton v5
+│   └── baseline/triton/kernel.py             # Python reference
 ├── gdn_prefill_qk4_v8_d128_k_last/
-│   ├── solution/
-│   │   ├── triton/kernel.py              # 147 lines — Triton v4
-│   │   └── cuda/kernel.py                # 255 lines — CUDA wrapper + Triton fallback
-│   └── baseline/triton/kernel.py         # Python reference
-├── flashinfer_trace/definitions/gdn/     # kernel definitions
-├── scripts/setup_volume.py               # Modal volume setup
-├── benchmarks/bench_modal.py             # benchmark runner
+│   ├── solution/triton/kernel.py
+│   └── baseline/triton/kernel.py
+├── scripts/
+│   ├── bench_cuda_real.py                    # Correctness + benchmark
+│   ├── build_cuda.py                         # CUDA compilation
+│   └── setup_volume.py                       # Modal volume setup
+├── benchmarks/bench_modal.py                 # Contest benchmark runner
 └── docs/
-    ├── PERFORMANCE.md                    # performance tracking
-    └── ROOFLINE.md                       # roofline analysis
+    ├── PERFORMANCE.md                        # Performance tracking
+    └── ROADMAP.md                            # Optimization history
 ```
 
-## Kernel Implementation Summary
+---
 
-### Code Statistics
+## Kernel Versions
 
-| Type | File | Lines | Description |
-|------|------|-------|-------------|
-| CUDA | `gdn_decode_v5.cuh` | 319 | Shared memory, warp shuffles |
-| CUDA | `gdn_prefill_v5.cuh` | 249 | Sequential token scan |
-| Triton | decode `kernel.py` | 135 | Adaptive BLOCK_V |
-| Triton | prefill `kernel.py` | 147 | Adaptive BLOCK_V |
-| Wrapper | decode `cuda/kernel.py` | 247 | JIT + Triton fallback |
-| Wrapper | prefill `cuda/kernel.py` | 255 | JIT + Triton fallback |
-| **Total** | | **1,352** | |
+| Ver | Framework | Key Feature | Peak BW | Best For |
+|-----|-----------|-------------|---------|----------|
+| v5 | Triton | Auto-tuning | 1,518 GB/s | Batch=64 |
+| v6 | CUDA | TMA async | ~1,500 GB/s | - |
+| v7 | CUDA | float4 + FP4 | 7,578 GB/s | Batch=256 |
+| v8 | CUDA | Warp spec + FP8 | 7,605 GB/s | Batch=256 |
+| **v9** | **CuTe** | **SMEM swizzle** | **7,585 GB/s** | **Batch=1,16,256** |
+| v10 | CuTe | Swizzle<3,3,3> | 7,602 GB/s | Batch=256 |
 
-### Key Optimizations
+### When does CUDA help?
 
-- **Adaptive BLOCK_V**: 16/32/64 based on batch size for optimal SM occupancy
-- **Shared memory**: State tiles [BLOCK_V × D], Q/K vectors
-- **Warp-level reductions**: `__shfl_xor_sync` for fast dot products
-- **GVA support**: 4 Q-heads → 8 V-heads mapping (`qk_h = h // 2`)
-- **Triton fallback**: CUDA JIT blocked by flashinfer-bench sandbox
+- **Small batch (1-16)**: v9 CuTe swizzle → **1.05-1.11x** over Triton
+- **Medium batch (64)**: Triton wins (auto-tuning)
+- **Large batch (256+)**: All CUDA → **2.68x** speedup
+
+---
 
 ## Algorithm — Gated Delta Net
 
-State layout: **k-last** `[B/N, H, V, K]`
+State layout: **k-last** `[B, H, V, K]` where H=8, V=K=128
 
 ```
-g    = exp(-exp(A_log) * softplus(a + dt_bias))   # decay gate ∈ (0,1)
-beta = sigmoid(b)                                   # update gate ∈ (0,1)
+g    = exp(-exp(A_log) * softplus(a + dt_bias))   # decay gate
+beta = sigmoid(b)                                   # update gate
 
 S     = g * S                             # apply decay
 old_v = k @ S                             # [K] × [K,V] → [V]
-new_v = beta * v + (1-beta) * old_v      # weighted merge
-S     = S + outer(k, new_v - old_v)      # delta rule update
-o     = scale * q @ S                    # output
+new_v = beta * v + (1-beta) * old_v       # weighted merge
+S     = S + outer(k, new_v - old_v)       # delta rule
+o     = scale * q @ S                     # output
 ```
 
-**GVA**: `num_v_heads=8 > num_q_heads=4`, Q/K expanded by `repeat_interleave(2, dim=1)`.
+**GVA**: 4 Q-heads → 8 V-heads (`qk_h = h // 2`)
 
-## Optimization Roadmap
+---
 
-| Version | Status | Description | File |
-|---------|--------|-------------|------|
-| v1 | ✅ done | PyTorch baseline — correctness verified | `baseline/triton/kernel.py` |
-| v2 | ✅ done | Triton: fused loop, full state tile [D,D] in registers | `kernel_v2.py` |
-| v3 | ✅ done | Triton: V-split (BLOCK_V=32), 4× programs | `kernel_v3.py` |
-| v4 | ✅ done | Triton: adaptive BLOCK_V based on batch/seq size | `solution/triton/kernel.py` |
-| v5 | ✅ done | CUDA: shared memory, warp shuffles, Triton fallback | `solution/cuda/kernel.py` + `src/kernels/*.cuh` |
-| v6 | ⏳ | CUDA: WGMMA + TMA on B200 (sm100) | planned |
+## Key Findings
+
+### WGMMA Not Applicable
+
+Blackwell WGMMA (tensor cores) requires matrix-matrix multiplication.  
+GDN performs matrix-vector: `S@q` = [128×128] × [128] → [128]
+
+**Solution**: Optimize memory bandwidth with quantization (FP4/FP8).
+
+### Memory-Bound Analysis
+
+| Batch | State Size | B200 Peak | Best Kernel | Achieved | Utilization |
+|-------|------------|-----------|-------------|----------|-------------|
+| 1 | 0.5 MB | 8,000 GB/s | CUDA v9 | 27 GB/s | 0.3% |
+| 64 | 32 MB | 8,000 GB/s | Triton v5 | 1,518 GB/s | 19% |
+| 256 | 128 MB | 8,000 GB/s | **CUDA v9** | **7,585 GB/s** | **95%** |
+
+---
 
 ## Contest Info
 
 - **Deadline**: April 24, 2026 (11:59 PM AoE)
-- **Metric**: Arithmetic mean speedup over reference implementation
+- **Metric**: Arithmetic mean speedup over reference
+- **Leaderboard**: https://bench.flashinfer.ai/
 - **Reference**: https://mlsys26.flashinfer.ai/

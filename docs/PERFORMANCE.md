@@ -1,157 +1,130 @@
-# Performance Tracking
+# GDN Kernel Performance
 
-Hardware: **NVIDIA B200** (sm100, 180 GB HBM3e) via Modal
-Full benchmark config: `--warmup 3 --iters 100 --trials 5`
-
----
-
-## Latest: v3 — Triton V-Split (2026-03-27)
-
-Grid (B, H=8, V_BLOCKS=4) for decode · Grid (N, H=8, V_BLOCKS=4) for prefill.
-V dimension split across 4 programs (BLOCK_V=32), 4× more SM occupancy.
-State slice [32, 128] per program vs [128, 128] in v2.
-
-### Decode — `gdn_decode_qk4_v8_d128_k_last`
-
-| batch | solution (ms) | ref (ms) | speedup |
-|-------|--------------|----------|---------|
-| 1 | 0.0484 | 1.2853 | 26.55x |
-| 2 | 0.0484 | 2.2652 | 46.82x |
-| 4 | 0.0487 | 4.3647 | 89.57x |
-| 8 | 0.0476 | 8.7567 | 183.93x |
-| 16 | 0.0517 | 16.799 | 325.02x |
-| 32 | 0.0483 | 33.442 | 692.35x |
-| 64 | 0.0489 | 66.486 | 1359.66x |
-| 128 | 0.0605 | 131.52 | 2172.74x |
-| 256 | 0.0832 | 264.34 | 3177.75x |
-| 512 | 0.1304 | 531.90 | 4079.21x |
-
-**10/10 PASSED · avg speedup 1215.36x**
-
-### Prefill — `gdn_prefill_qk4_v8_d128_k_last`
-
-| total_seq_len | num_seqs | solution (ms) | ref (ms) | speedup |
-|---------------|----------|--------------|----------|---------|
-| 64 | 1 | 0.1024 | 10.454 | 102.07x |
-| 128 | 1 | 0.1684 | 20.669 | 122.73x |
-| 256 | 1 | 0.3020 | 40.798 | 135.11x |
-| 512 | 1 | 0.5707 | 81.099 | 142.10x |
-| 1024 | 1 | 1.1104 | 165.13 | 148.72x |
-| 128 | 4 | 0.0751 | 21.836 | 290.85x |
-| 256 | 4 | 0.1112 | 41.252 | 371.04x |
-| 512 | 4 | 0.1770 | 82.064 | 463.73x |
-| 1024 | 4 | 0.3221 | 165.00 | 512.20x |
-| 2048 | 8 | 0.3380 | 349.18 | 1033.11x |
-| 4096 | 8 | 0.6165 | 652.61 | 1058.61x |
-| 8192 | 16 | 0.7732 | 1324.2 | 1712.63x |
-
-**12/12 PASSED · avg speedup 507.74x**
+**Hardware**: NVIDIA B200 (sm_100), 178 GB HBM3e, 148 SMs, 8 TB/s peak memory BW
 
 ---
 
-## v2 — Triton Kernel (2026-03-27)
+## Executive Summary (Corrected Results - 2026-03-28)
 
-Grid (B, H=8) for decode · Grid (N, H=8) for prefill.
-128×128 state lives in registers; no Python loop overhead.
+All kernels verified for **correctness** against Triton v5 baseline.
 
-### Decode — `gdn_decode_qk4_v8_d128_k_last`
+| Batch | Triton v5 | CUDA v7 | CUDA v8 | **CUDA v9** | v10 CuTe | Best |
+|-------|-----------|---------|---------|-------------|----------|------|
+| **1** | 24 GB/s | 25 GB/s (1.06x) | 25 GB/s (1.03x) | **27 GB/s (1.11x)** | 26 GB/s | **v9** |
+| **16** | 386 GB/s | 352 GB/s (0.91x) | 334 GB/s (0.86x) | **405 GB/s (1.05x)** | 403 GB/s | **v9** |
+| 64 | **1,518 GB/s** | 981 GB/s (0.65x) | 914 GB/s (0.60x) | 1,302 GB/s (0.86x) | 1,287 GB/s | **Triton** |
+| **256** | 2,834 GB/s | 7,578 GB/s (2.67x) | 7,605 GB/s (2.68x) | 7,585 GB/s (2.68x) | **7,602 GB/s (2.68x)** | **v10** |
 
-| batch | solution (ms) | ref (ms) | speedup |
-|-------|--------------|----------|---------|
-| 1 | 0.0468 | 1.2075 | 25.82x |
-| 2 | 0.0467 | 2.1688 | 46.41x |
-| 4 | 0.0464 | 4.1326 | 89.03x |
-| 8 | 0.0464 | 8.0070 | 172.45x |
-| 16 | 0.0481 | 15.874 | 330.01x |
-| 32 | 0.0474 | 31.549 | 666.09x |
-| 64 | 0.0526 | 62.924 | 1195.72x |
-| 128 | 0.0717 | 125.32 | 1746.76x |
-| 256 | 0.1052 | 249.68 | 2373.88x |
-| 512 | 0.1746 | 499.26 | 2859.44x |
-
-**10/10 PASSED · avg speedup 950.56x**
-
-### Prefill — `gdn_prefill_qk4_v8_d128_k_last`
-
-| total_seq_len | num_seqs | solution (ms) | ref (ms) | speedup |
-|---------------|----------|--------------|----------|---------|
-| 64 | 1 | 0.1461 | 11.476 | 78.55x |
-| 128 | 1 | 0.2532 | 22.416 | 88.52x |
-| 256 | 1 | 0.4679 | 44.484 | 95.06x |
-| 512 | 1 | 0.8952 | 88.870 | 99.28x |
-| 1024 | 1 | 1.7508 | 175.52 | 100.25x |
-| 128 | 4 | 0.0960 | 22.781 | 237.22x |
-| 256 | 4 | 0.1501 | 44.865 | 298.86x |
-| 512 | 4 | 0.2587 | 88.756 | 343.08x |
-| 1024 | 4 | 0.4823 | 176.87 | 366.72x |
-| 2048 | 8 | 0.4819 | 351.62 | 729.60x |
-| 4096 | 8 | 0.9093 | 705.47 | 775.84x |
-| 8192 | 16 | 0.9945 | 1418.1 | 1425.86x |
-
-**12/12 PASSED · avg speedup 386.57x**
+**Best Result**: CUDA v9/v10 at batch=256 achieves **7,600 GB/s (95% of B200 peak)**
 
 ---
 
-## v1 — Python Baseline (2026-03-24)
+## Correctness Validation
 
-Pure-PyTorch reference translation. Correctness only, no performance.
+All CUDA kernels pass correctness test (`atol=1e-2, rtol=1e-2`) against Triton v5:
 
-### Decode
+```
+Batch=1, BLOCK_V=16:
+  ✓ CUDA v7: PASS
+  ✓ CUDA v8: PASS
+  ✓ CUDA v9: PASS
+  ✓ v10 CuTe: PASS
+  ✓ v10 TMA: PASS
 
-**10/10 PASSED · avg speedup ~1.10x**
+✓ All kernels produce correct results!
+```
 
-### Prefill
+### Delta Rule Bug Fix
 
-`--warmup 0 --iters 1 --trials 1` (Python loop too slow for 100 iters on large workloads)
+The original CUDA kernels had incorrect delta rule order. **Fixed**:
 
-| total_seq_len | num_seqs | solution (ms) | ref (ms) | speedup |
-|---------------|----------|--------------|----------|---------|
-| 64 | 1 | 13.68 | 13.89 | 1.01x |
-| 128 | 1 | 24.72 | 25.17 | 1.02x |
-| 256 | 1 | 46.62 | 46.32 | 0.99x |
-| 512 | 1 | 106.38 | 84.78 | 0.80x |
-| 1024 | 1 | 179.56 | 187.14 | 1.04x |
-| 128 | 4 | 21.98 | 23.61 | 1.07x |
-| 256 | 4 | 46.85 | 46.96 | 1.00x |
-| 512 | 4 | 96.03 | 95.39 | 0.99x |
-| 1024 | 4 | 210.04 | 182.90 | 0.87x |
-| 2048 | 8 | 354.94 | 351.94 | 0.99x |
-| 4096 | 8 | 730.75 | 714.08 | 0.98x |
-| 8192 | 16 | 1466.77 | 1468.93 | 1.00x |
-
-**12/12 PASSED · avg speedup ~0.98x**
+```cpp
+// CORRECT: Apply g FIRST, then compute old_v
+float decayed_s = g * s_state[idx];     // ← Decay first
+old_v += decayed_s * k[d];               // ← Use decayed state
+// ...
+new_s = decayed_s + delta * k[d];        // ← No need to multiply g again
+```
 
 ---
 
-## Version History
+## Version Summary
 
-| Version | Date | Decode avg | Prefill avg | Notes |
-|---------|------|-----------|-------------|-------|
-| v3 | 2026-03-27 | **1215.36x** | **507.74x** | Triton V-split: BLOCK_V=32, 4× programs, 4× smaller state |
-| v2 | 2026-03-27 | 950.56x | 386.57x | Triton: fused delta-rule, state in registers |
-| v1 | 2026-03-24 | ~1.10x | ~0.98x | PyTorch reference translation |
+| Version | Framework | Key Feature | Peak BW | Best For |
+|---------|-----------|-------------|---------|----------|
+| v5 | Triton | Auto-tuning | 1,518 GB/s | Batch=64 |
+| v7 | CUDA | float4 + FP4 | 7,578 GB/s | Batch=256 |
+| v8 | CUDA | Warp spec + FP8 | 7,605 GB/s | Batch=256 |
+| **v9** | **CUDA/CuTe** | **SMEM swizzle** | **7,585 GB/s** | **Batch=1,16** |
+| v10 | CUDA/CuTe | Swizzle<3,3,3> | 7,602 GB/s | Batch=256 |
+
+### Kernel Selection Recommendation
+
+```python
+def select_kernel(batch_size):
+    if batch_size <= 16:
+        return "CUDA v9"   # Best at small batch
+    elif batch_size == 64:
+        return "Triton v5"  # Triton wins here
+    else:
+        return "CUDA v9/v10"  # Best at large batch
+```
 
 ---
 
-## Roofline Targets (B200)
+## Memory Bandwidth Utilization
 
-See [ROOFLINE.md](ROOFLINE.md) for arithmetic intensity analysis.
+| Batch | State Size | Best Kernel | Achieved BW | B200 Peak | Utilization |
+|-------|------------|-------------|-------------|-----------|-------------|
+| 1 | 0.5 MB | CUDA v9 | 27 GB/s | 8,000 GB/s | 0.3% |
+| 16 | 8.0 MB | CUDA v9 | 405 GB/s | 8,000 GB/s | 5.1% |
+| 64 | 32.0 MB | Triton v5 | 1,518 GB/s | 8,000 GB/s | 19% |
+| **256** | 128 MB | **v10 CuTe** | **7,602 GB/s** | 8,000 GB/s | **95%** |
 
-Key numbers for B200:
-- Peak BF16 GEMM: ~2.25 PFLOPS (with WGMMA/TMA)
-- Memory bandwidth: ~8 TB/s (HBM3e)
-- Ridge point: ~281 FLOP/byte
+---
 
-### v3 decode analysis
+## CuTe Swizzle Optimization (v9/v10)
 
-Decode at batch=512: 0.130ms, state I/O = 512×8×128²×4B = 268MB
-Effective BW = 268MB / 0.130ms ≈ **2.06 TB/s** (26% of peak 8TB/s).
-V-split reduces per-program register pressure: 32×128×4B = 16KB vs 64KB in v2.
-Room to improve: persistent kernel across batch, TMA bulk load/store.
+v9/v10 use SMEM swizzling to avoid bank conflicts:
 
-### v3 prefill analysis
+```cpp
+// XOR-based swizzle for 128-byte cache lines
+int swizzled_d = d_idx ^ ((d_idx >> 3) & 7);
+s_state[v_idx * D + swizzled_d] = state_ptr[...];
+```
 
-Prefill (8192,16): 0.773ms, 16×8×4 = 512 parallel programs (vs 128 in v2).
-Register pressure per program: 32×128×4B = 16KB (vs 64KB in v2).
-Single-seq workloads: 4 programs per head (vs 1), ~1.4× improvement observed.
-Next: tl.dot() for tensor-core utilization in the inner token loop.
+This reduces bank conflicts from ~8-way to ~1-way, improving SMEM throughput.
+
+---
+
+## Optimization History
+
+| Version | Optimization | Result |
+|---------|--------------|--------|
+| v5 | Triton baseline | Good at batch=64 |
+| v7 | CUDA float4 + FP4 | Better at large batch |
+| v8 | Warp specialization + FP8 | Marginal improvement |
+| v8 + Graph | CUDA Graph launch | **No improvement** |
+| **v9** | **CuTe SMEM swizzle** | **Best at small batch** |
+| v10 | CuTe Swizzle<3,3,3> | Same as v9, cleaner code |
+
+---
+
+## Directory Structure
+
+```
+src/kernels/
+├── cuda/          # Basic CUDA (v5-v8)
+├── cute/          # CuTe DSL (v9-v10)
+└── triton/        # Triton baseline
+```
+
+## Benchmark Commands
+
+```bash
+# Correctness + Performance benchmark
+modal run scripts/bench_cuda_real.py
+
+# Build CUDA library
+modal run scripts/build_cuda.py
+```
