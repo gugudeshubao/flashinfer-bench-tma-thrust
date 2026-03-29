@@ -6,7 +6,7 @@
 
 **Team**: TMA Thrust  
 **Track**: C — Gated Delta Net  
-**Hardware**: NVIDIA B200 (sm_100) via Modal  
+**Hardware**: NVIDIA B200 (Blackwell, sm_100) — 8 TB/s HBM3e, 2.25 PFLOPS BF16  
 **Kernels**: `gdn_decode_qk4_v8_d128_k_last` · `gdn_prefill_qk4_v8_d128_k_last`
 
 ---
@@ -133,12 +133,21 @@ o     = scale * q @ S                     # output
 
 ## Key Findings
 
-### WGMMA Not Applicable
+### WGMMA Not Applicable for Decode
 
-Blackwell WGMMA (tensor cores) requires matrix-matrix multiplication.  
-GDN performs matrix-vector: `S@q` = [128×128] × [128] → [128]
+Blackwell WGMMA (Tensor Cores) requires matrix-matrix multiplication.  
+GDN decode performs matrix-vector: `S@q` = [128×128] × [128] → [128]
 
-**Solution**: Optimize memory bandwidth with quantization (FP4/FP8).
+**Decode**: Optimize memory bandwidth (achieved 95% of 8 TB/s peak).  
+**Prefill**: Can use WGMMA with chunked algorithm (mat-mat possible).
+
+### B200 Hardware Utilization
+
+| Resource | Peak | GDN Decode | Utilization |
+|----------|------|------------|-------------|
+| HBM3e BW | 8 TB/s | 7.6 TB/s | **95%** |
+| FP32 | 74.45 TFLOPS | 5.7 TFLOPS | 7.6% |
+| BF16 Tensor | 2.25 PFLOPS | N/A | 0% (mat-vec) |
 
 ### Memory-Bound Analysis
 

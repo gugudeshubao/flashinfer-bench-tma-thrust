@@ -1,6 +1,19 @@
 # GDN Kernel Performance
 
-**Hardware**: NVIDIA B200 (sm_100), 178 GB HBM3e, 148 SMs, 8 TB/s peak memory BW
+## Hardware: NVIDIA B200 (Blackwell, sm_100)
+
+| Specification | Value |
+|---------------|-------|
+| CUDA Cores | 16,896 |
+| Tensor Cores | 528 (5th Gen) |
+| Boost Clock | 1.98 GHz |
+| SMs | 148 |
+| HBM3e | 180 GB |
+| **Memory BW** | **8 TB/s** |
+| FP32 (CUDA) | 74.45 TFLOPS |
+| BF16 Tensor | 2.25 PFLOPS |
+| FP8 Tensor | 4.5 PFLOPS |
+| TDP | 1,000 W |
 
 ---
 
