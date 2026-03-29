@@ -9,6 +9,7 @@
  *   - Async copy (cp.async) for prefetch (Iteration 1)
  *   - Predicated execution
  *   - FP8 state quantization (Iteration 2 - 4x memory compression)
+ *   - FP4 state quantization (8x memory compression - experimental)
  *
  * Grid: (B, H=8, V_BLOCKS)
  * Block: 128 threads (4 warps)
@@ -239,6 +240,74 @@ __device__ __forceinline__ uint32_t ptx_ld_nc_u32(const uint32_t* ptr) {
         : "l"(ptr)
     );
     return result;
+}
+
+// ============================================================
+// FP4 E2M1 Quantization PTX Primitives (8x memory compression)
+// FP4 E2M1: 1 sign + 2 exponent + 1 mantissa
+// Values: 0, 0.5, 1, 1.5, 2, 3, 4, 6 (and negatives)
+// WARNING: ~55-65% relative error - use only for extreme compression
+// ============================================================
+
+// FP4 lookup table for dequantization (positive values only)
+__device__ __constant__ float PTX_FP4_LUT[8] = {
+    0.0f, 0.5f, 1.0f, 1.5f, 2.0f, 3.0f, 4.0f, 6.0f
+};
+
+// Convert FP32 to FP4 E2M1 (returns 4-bit index)
+__device__ __forceinline__ uint8_t ptx_fp32_to_fp4(float val) {
+    uint8_t sign = (val < 0.0f) ? 0x8 : 0x0;
+    float abs_val = fabsf(val);
+    
+    uint8_t mant;
+    if (abs_val < 0.25f) mant = 0;
+    else if (abs_val < 0.75f) mant = 1;
+    else if (abs_val < 1.25f) mant = 2;
+    else if (abs_val < 1.75f) mant = 3;
+    else if (abs_val < 2.5f) mant = 4;
+    else if (abs_val < 3.5f) mant = 5;
+    else if (abs_val < 5.0f) mant = 6;
+    else mant = 7;
+    
+    return sign | mant;
+}
+
+// Convert FP4 E2M1 to FP32
+__device__ __forceinline__ float ptx_fp4_to_fp32(uint8_t fp4) {
+    uint8_t mant = fp4 & 0x7;
+    float val = PTX_FP4_LUT[mant];
+    return (fp4 & 0x8) ? -val : val;
+}
+
+// Pack 8 FP4 values into uint32_t
+__device__ __forceinline__ uint32_t ptx_pack_fp4x8(
+    uint8_t a, uint8_t b, uint8_t c, uint8_t d,
+    uint8_t e, uint8_t f, uint8_t g, uint8_t h
+) {
+    return ((uint32_t)(a & 0xF)) |
+           ((uint32_t)(b & 0xF) << 4) |
+           ((uint32_t)(c & 0xF) << 8) |
+           ((uint32_t)(d & 0xF) << 12) |
+           ((uint32_t)(e & 0xF) << 16) |
+           ((uint32_t)(f & 0xF) << 20) |
+           ((uint32_t)(g & 0xF) << 24) |
+           ((uint32_t)(h & 0xF) << 28);
+}
+
+// Unpack uint32_t to 8 FP4 values
+__device__ __forceinline__ void ptx_unpack_fp4x8(
+    uint32_t packed,
+    uint8_t& a, uint8_t& b, uint8_t& c, uint8_t& d,
+    uint8_t& e, uint8_t& f, uint8_t& g, uint8_t& h
+) {
+    a = (packed >> 0) & 0xF;
+    b = (packed >> 4) & 0xF;
+    c = (packed >> 8) & 0xF;
+    d = (packed >> 12) & 0xF;
+    e = (packed >> 16) & 0xF;
+    f = (packed >> 20) & 0xF;
+    g = (packed >> 24) & 0xF;
+    h = (packed >> 28) & 0xF;
 }
 
 // ============================================================
@@ -669,6 +738,208 @@ __global__ void gdn_decode_kernel_ptx_fp8(
 }
 
 // ============================================================
+// FP4 Quantized State Kernel (8x memory compression - experimental)
+// WARNING: ~55-65% relative error - use only for extreme compression
+// ============================================================
+
+template<int BLOCK_V>
+__global__ void gdn_decode_kernel_ptx_fp4(
+    const __nv_bfloat16* __restrict__ Q,
+    const __nv_bfloat16* __restrict__ K,
+    const __nv_bfloat16* __restrict__ V,
+    const uint32_t* __restrict__ State_FP4,   // [B, 8, D, D/8] packed FP4x8
+    const float* __restrict__ State_Scale,
+    const float* __restrict__ A_log,
+    const __nv_bfloat16* __restrict__ A,
+    const __nv_bfloat16* __restrict__ DtBias,
+    const __nv_bfloat16* __restrict__ B_gate,
+    __nv_bfloat16* __restrict__ Out,
+    uint32_t* __restrict__ NewState_FP4,
+    float* __restrict__ NewState_Scale,
+    float scale,
+    int stride_q_b, int stride_q_h,
+    int stride_k_b, int stride_k_h,
+    int stride_v_b, int stride_v_h,
+    int stride_s_b, int stride_s_h, int stride_s_v,
+    int stride_a_b, int stride_b_b,
+    int stride_o_b, int stride_o_h,
+    int stride_ns_b, int stride_ns_h, int stride_ns_v
+) {
+    constexpr int D = 128;
+    constexpr int WARP_SIZE = 32;
+    
+    const int b = blockIdx.x;
+    const int h = blockIdx.y;
+    const int v_block = blockIdx.z;
+    const int v0 = v_block * BLOCK_V;
+    const int qk_h = h / 2;
+    
+    const int tid = threadIdx.x;
+    const int num_threads = blockDim.x;
+    const int warp_id = tid / WARP_SIZE;
+    const int lane_id = tid % WARP_SIZE;
+    
+    extern __shared__ char smem[];
+    float* q_smem = reinterpret_cast<float*>(smem);
+    float* k_smem = q_smem + D;
+    float* v_smem = k_smem + D;
+    float* state_smem = v_smem + BLOCK_V;
+    float* out_smem = state_smem + BLOCK_V * D;
+    float* gate_smem = out_smem + BLOCK_V;
+    float* scale_smem = gate_smem + 4;
+    
+    // Load Q, K
+    const __nv_bfloat16* q_ptr = Q + b * stride_q_b + qk_h * stride_q_h;
+    const __nv_bfloat16* k_ptr = K + b * stride_k_b + qk_h * stride_k_h;
+    
+    for (int d = tid; d < D; d += num_threads) {
+        q_smem[d] = __bfloat162float(q_ptr[d]);
+        k_smem[d] = __bfloat162float(k_ptr[d]);
+    }
+    
+    // Load V
+    const __nv_bfloat16* v_ptr = V + b * stride_v_b + h * stride_v_h + v0;
+    if (tid < BLOCK_V) {
+        v_smem[tid] = __bfloat162float(v_ptr[tid]);
+    }
+    
+    // Load per-row scales
+    const float* state_scale_ptr = State_Scale + b * stride_s_b + h * stride_s_h + v0;
+    if (tid < BLOCK_V) {
+        scale_smem[tid] = state_scale_ptr[tid];
+    }
+    
+    // Load gates
+    if (tid < 4) {
+        if (tid == 0) gate_smem[0] = __bfloat162float(A[b * stride_a_b + h]);
+        else if (tid == 1) gate_smem[1] = __bfloat162float(DtBias[h]);
+        else if (tid == 2) gate_smem[2] = A_log[h];
+        else gate_smem[3] = __bfloat162float(B_gate[b * stride_b_b + h]);
+    }
+    
+    __syncthreads();
+    
+    // Compute gates
+    float g, beta;
+    {
+        float a_val = gate_smem[0];
+        float dt_val = gate_smem[1];
+        float alog = gate_smem[2];
+        float b_val = gate_smem[3];
+        float x = a_val + dt_val;
+        float sp = (x > 20.0f) ? x : ptx_log1pexp(x);
+        float neg_exp_term = -ptx_exp(alog) * sp;
+        g = ptx_exp(neg_exp_term);
+        beta = ptx_sigmoid(b_val);
+    }
+    
+    // Load FP4 state and dequantize (8 values per uint32_t)
+    const uint32_t* state_fp4_ptr = State_FP4 + b * stride_s_b + h * stride_s_h + v0 * stride_s_v;
+    
+    for (int i = tid; i < BLOCK_V * (D / 8); i += num_threads) {
+        int vi = i / (D / 8);
+        int d8_idx = i % (D / 8);
+        int d_base = d8_idx * 8;
+        
+        uint32_t packed = ptx_ld_nc_u32(&state_fp4_ptr[vi * stride_s_v + d8_idx]);
+        
+        uint8_t fp4_0, fp4_1, fp4_2, fp4_3, fp4_4, fp4_5, fp4_6, fp4_7;
+        ptx_unpack_fp4x8(packed, fp4_0, fp4_1, fp4_2, fp4_3, fp4_4, fp4_5, fp4_6, fp4_7);
+        
+        float row_scale = scale_smem[vi];
+        state_smem[vi * D + d_base + 0] = ptx_fp4_to_fp32(fp4_0) * row_scale;
+        state_smem[vi * D + d_base + 1] = ptx_fp4_to_fp32(fp4_1) * row_scale;
+        state_smem[vi * D + d_base + 2] = ptx_fp4_to_fp32(fp4_2) * row_scale;
+        state_smem[vi * D + d_base + 3] = ptx_fp4_to_fp32(fp4_3) * row_scale;
+        state_smem[vi * D + d_base + 4] = ptx_fp4_to_fp32(fp4_4) * row_scale;
+        state_smem[vi * D + d_base + 5] = ptx_fp4_to_fp32(fp4_5) * row_scale;
+        state_smem[vi * D + d_base + 6] = ptx_fp4_to_fp32(fp4_6) * row_scale;
+        state_smem[vi * D + d_base + 7] = ptx_fp4_to_fp32(fp4_7) * row_scale;
+    }
+    
+    __syncthreads();
+    
+    // Delta rule (same as FP32/FP8)
+    constexpr int NUM_WARPS = 4;
+    for (int vi = warp_id; vi < BLOCK_V; vi += NUM_WARPS) {
+        float old_v = 0.0f;
+        for (int d = lane_id; d < D; d += WARP_SIZE) {
+            float decayed = g * state_smem[vi * D + d];
+            old_v = ptx_fma(decayed, k_smem[d], old_v);
+        }
+        
+        for (int mask = 16; mask > 0; mask >>= 1) {
+            old_v += ptx_shfl_xor(old_v, mask);
+        }
+        
+        float delta = beta * (v_smem[vi] - old_v);
+        
+        for (int d = lane_id; d < D; d += WARP_SIZE) {
+            float decayed = g * state_smem[vi * D + d];
+            state_smem[vi * D + d] = ptx_fma(delta, k_smem[d], decayed);
+        }
+        
+        float out_val = 0.0f;
+        for (int d = lane_id; d < D; d += WARP_SIZE) {
+            out_val = ptx_fma(state_smem[vi * D + d], q_smem[d], out_val);
+        }
+        
+        for (int mask = 16; mask > 0; mask >>= 1) {
+            out_val += ptx_shfl_xor(out_val, mask);
+        }
+        
+        if (lane_id == 0) {
+            out_smem[vi] = scale * out_val;
+        }
+    }
+    
+    __syncthreads();
+    
+    // Write output
+    __nv_bfloat16* out_ptr = Out + b * stride_o_b + h * stride_o_h + v0;
+    if (tid < BLOCK_V) {
+        out_ptr[tid] = __float2bfloat16(out_smem[tid]);
+    }
+    
+    // Compute new per-row scale
+    uint32_t* new_state_fp4_ptr = NewState_FP4 + b * stride_ns_b + h * stride_ns_h + v0 * stride_ns_v;
+    float* new_scale_ptr = NewState_Scale + b * stride_ns_b + h * stride_ns_h + v0;
+    
+    if (tid < BLOCK_V) {
+        float max_abs = 0.0f;
+        for (int d = 0; d < D; d++) {
+            max_abs = fmaxf(max_abs, fabsf(state_smem[tid * D + d]));
+        }
+        float new_scale = (max_abs > 1e-6f) ? (max_abs / 5.0f) : 1.0f;
+        scale_smem[tid] = new_scale;
+        new_scale_ptr[tid] = new_scale;
+    }
+    
+    __syncthreads();
+    
+    // Quantize and pack to FP4x8
+    for (int i = tid; i < BLOCK_V * (D / 8); i += num_threads) {
+        int vi = i / (D / 8);
+        int d8_idx = i % (D / 8);
+        int d_base = d8_idx * 8;
+        
+        float inv_scale = ptx_rcp(scale_smem[vi]);
+        
+        uint8_t fp4_0 = ptx_fp32_to_fp4(state_smem[vi * D + d_base + 0] * inv_scale);
+        uint8_t fp4_1 = ptx_fp32_to_fp4(state_smem[vi * D + d_base + 1] * inv_scale);
+        uint8_t fp4_2 = ptx_fp32_to_fp4(state_smem[vi * D + d_base + 2] * inv_scale);
+        uint8_t fp4_3 = ptx_fp32_to_fp4(state_smem[vi * D + d_base + 3] * inv_scale);
+        uint8_t fp4_4 = ptx_fp32_to_fp4(state_smem[vi * D + d_base + 4] * inv_scale);
+        uint8_t fp4_5 = ptx_fp32_to_fp4(state_smem[vi * D + d_base + 5] * inv_scale);
+        uint8_t fp4_6 = ptx_fp32_to_fp4(state_smem[vi * D + d_base + 6] * inv_scale);
+        uint8_t fp4_7 = ptx_fp32_to_fp4(state_smem[vi * D + d_base + 7] * inv_scale);
+        
+        uint32_t packed = ptx_pack_fp4x8(fp4_0, fp4_1, fp4_2, fp4_3, fp4_4, fp4_5, fp4_6, fp4_7);
+        new_state_fp4_ptr[vi * stride_ns_v + d8_idx] = packed;
+    }
+}
+
+// ============================================================
 // Launcher Function
 // ============================================================
 
@@ -808,6 +1079,84 @@ inline void gdn_decode_ptx_fp8_launch(
             (const float*)A_log, (const __nv_bfloat16*)A, (const __nv_bfloat16*)DtBias,
             (const __nv_bfloat16*)B_gate,
             (__nv_bfloat16*)Out, (uint32_t*)NewState_FP8, (float*)NewState_Scale,
+            scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h,
+            stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b,
+            stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v
+        );
+    }
+}
+
+// ============================================================
+// FP4 Launcher Function (8x memory compression - experimental)
+// ============================================================
+
+inline void gdn_decode_ptx_fp4_launch(
+    const void* Q, const void* K, const void* V,
+    const void* State_FP4, const void* State_Scale,
+    const void* A_log, const void* A, const void* DtBias, const void* B_gate,
+    void* Out, void* NewState_FP4, void* NewState_Scale,
+    float scale,
+    int B, int num_v_heads, int D_val,
+    int stride_q_b, int stride_q_h,
+    int stride_k_b, int stride_k_h,
+    int stride_v_b, int stride_v_h,
+    int stride_s_b, int stride_s_h, int stride_s_v,
+    int stride_a_b, int stride_b_b,
+    int stride_o_b, int stride_o_h,
+    int stride_ns_b, int stride_ns_h, int stride_ns_v,
+    int BLOCK_V,
+    cudaStream_t stream
+) {
+    int V_BLOCKS = D_val / BLOCK_V;
+    dim3 grid(B, num_v_heads, V_BLOCKS);
+    dim3 block(128);  // 4 warps
+    
+    constexpr int D = 128;
+    
+    // Extra space for per-row scales
+    size_t smem_size = (D + D + BLOCK_V + BLOCK_V * D + BLOCK_V + 4 + BLOCK_V + BLOCK_V) * sizeof(float);
+    
+    if (BLOCK_V == 16) {
+        gdn_decode_kernel_ptx_fp4<16><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const uint32_t*)State_FP4, (const float*)State_Scale,
+            (const float*)A_log, (const __nv_bfloat16*)A, (const __nv_bfloat16*)DtBias,
+            (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (uint32_t*)NewState_FP4, (float*)NewState_Scale,
+            scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h,
+            stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b,
+            stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v
+        );
+    } else if (BLOCK_V == 32) {
+        gdn_decode_kernel_ptx_fp4<32><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const uint32_t*)State_FP4, (const float*)State_Scale,
+            (const float*)A_log, (const __nv_bfloat16*)A, (const __nv_bfloat16*)DtBias,
+            (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (uint32_t*)NewState_FP4, (float*)NewState_Scale,
+            scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h,
+            stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b,
+            stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v
+        );
+    } else {  // BLOCK_V == 64
+        gdn_decode_kernel_ptx_fp4<64><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const uint32_t*)State_FP4, (const float*)State_Scale,
+            (const float*)A_log, (const __nv_bfloat16*)A, (const __nv_bfloat16*)DtBias,
+            (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (uint32_t*)NewState_FP4, (float*)NewState_Scale,
             scale,
             stride_q_b, stride_q_h, stride_k_b, stride_k_h,
             stride_v_b, stride_v_h,
