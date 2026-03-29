@@ -8,6 +8,7 @@
  *   - Memory operations with cache hints (ld.global.nc, st.global.wb)
  *   - Async copy (cp.async) for prefetch (Iteration 1)
  *   - Predicated execution
+ *   - BF16 state (2x memory compression, ~0.6% error - recommended)
  *   - FP8 state quantization (Iteration 2 - 4x memory compression)
  *   - FP4 state quantization (8x memory compression - experimental)
  *
@@ -240,6 +241,28 @@ __device__ __forceinline__ uint32_t ptx_ld_nc_u32(const uint32_t* ptr) {
         : "l"(ptr)
     );
     return result;
+}
+
+// ============================================================
+// BF16 State PTX Primitives (2x memory compression, ~0.6% error)
+// BF16: 1 sign + 8 exponent + 7 mantissa (same range as FP32)
+// No scaling needed - direct conversion
+// ============================================================
+
+// Pack 2 BF16 values into uint32_t for vectorized memory access
+__device__ __forceinline__ uint32_t ptx_pack_bf16x2(__nv_bfloat16 a, __nv_bfloat16 b) {
+    uint32_t result;
+    __nv_bfloat16* ptr = reinterpret_cast<__nv_bfloat16*>(&result);
+    ptr[0] = a;
+    ptr[1] = b;
+    return result;
+}
+
+// Unpack uint32_t to 2 BF16 values
+__device__ __forceinline__ void ptx_unpack_bf16x2(uint32_t packed, __nv_bfloat16& a, __nv_bfloat16& b) {
+    const __nv_bfloat16* ptr = reinterpret_cast<const __nv_bfloat16*>(&packed);
+    a = ptr[0];
+    b = ptr[1];
 }
 
 // ============================================================
@@ -530,6 +553,158 @@ __global__ void gdn_decode_kernel_ptx(
         int vi = i / D;
         int ki = i % D;
         ptx_st_wb(&new_state_ptr[vi * stride_ns_v + ki], state_smem[i]);
+    }
+}
+
+// ============================================================
+// BF16 State Kernel (2x memory compression, ~0.6% error)
+// Recommended for high-precision inference
+// ============================================================
+
+template<int BLOCK_V>
+__global__ void gdn_decode_kernel_ptx_bf16(
+    const __nv_bfloat16* __restrict__ Q,
+    const __nv_bfloat16* __restrict__ K,
+    const __nv_bfloat16* __restrict__ V,
+    const __nv_bfloat16* __restrict__ State_BF16,  // BF16 state: [B, H, V, D]
+    const float* __restrict__ A_log,
+    const __nv_bfloat16* __restrict__ A,
+    const __nv_bfloat16* __restrict__ DtBias,
+    const __nv_bfloat16* __restrict__ B_gate,
+    __nv_bfloat16* __restrict__ Out,
+    __nv_bfloat16* __restrict__ NewState_BF16,
+    float scale,
+    int stride_q_b, int stride_q_h,
+    int stride_k_b, int stride_k_h,
+    int stride_v_b, int stride_v_h,
+    int stride_s_b, int stride_s_h, int stride_s_v,
+    int stride_a_b, int stride_b_b,
+    int stride_o_b, int stride_o_h,
+    int stride_ns_b, int stride_ns_h, int stride_ns_v
+) {
+    const int b = blockIdx.x;
+    const int h = blockIdx.y;
+    const int vb = blockIdx.z;
+    const int v0 = vb * BLOCK_V;
+    const int qk_h = h / 2;
+    
+    const int tid = threadIdx.x;
+    const int lane_id = tid % WARP_SIZE;
+    const int warp_id = tid / WARP_SIZE;
+    const int num_threads = blockDim.x;
+    
+    // Shared memory - FP32 for computation
+    extern __shared__ float smem[];
+    float* q_smem = smem;
+    float* k_smem = q_smem + D;
+    float* v_smem = k_smem + D;
+    float* state_smem = v_smem + BLOCK_V;
+    float* reduce_smem = state_smem + BLOCK_V * D;
+    
+    // Load gates
+    __shared__ float g_shared, beta_shared;
+    if (tid == 0) {
+        float a_val = __bfloat162float(A[b * stride_a_b + h]);
+        float dt_val = __bfloat162float(DtBias[h]);
+        float alog = ptx_ld_nc(&A_log[h]);
+        float b_val = __bfloat162float(B_gate[b * stride_b_b + h]);
+        
+        float sp = ptx_softplus(a_val + dt_val);
+        float exp_alog = ptx_exp(alog);
+        g_shared = ptx_exp(-exp_alog * sp);
+        beta_shared = ptx_sigmoid(b_val);
+    }
+    __syncthreads();
+    
+    float g = g_shared;
+    float beta = beta_shared;
+    
+    // Load Q, K (BF16 -> FP32)
+    const __nv_bfloat16* q_ptr = Q + b * stride_q_b + qk_h * stride_q_h;
+    const __nv_bfloat16* k_ptr = K + b * stride_k_b + qk_h * stride_k_h;
+    
+    for (int d = tid; d < D; d += num_threads) {
+        q_smem[d] = __bfloat162float(q_ptr[d]);
+        k_smem[d] = __bfloat162float(k_ptr[d]);
+    }
+    
+    // Load V (BF16 -> FP32)
+    for (int i = tid; i < BLOCK_V; i += num_threads) {
+        v_smem[i] = __bfloat162float(V[b * stride_v_b + h * stride_v_h + v0 + i]);
+    }
+    
+    // Load BF16 state and convert to FP32 (no scaling needed)
+    const __nv_bfloat16* state_bf16_ptr = State_BF16 + b * stride_s_b + h * stride_s_h + v0 * stride_s_v;
+    
+    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+        int vi = i / D;
+        int di = i % D;
+        state_smem[i] = __bfloat162float(state_bf16_ptr[vi * stride_s_v + di]);
+    }
+    
+    __syncthreads();
+    
+    // Apply gate decay: S = g * S
+    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+        state_smem[i] = ptx_fma(g, state_smem[i], 0.0f);
+    }
+    __syncthreads();
+    
+    // Compute old_v = S @ k
+    __shared__ float old_v_smem[64];
+    
+    if (tid < BLOCK_V) {
+        float sum = 0.0f;
+        
+        #pragma unroll 8
+        for (int ki = 0; ki < D; ki += 4) {
+            sum = ptx_fma(state_smem[tid * D + ki + 0], k_smem[ki + 0], sum);
+            sum = ptx_fma(state_smem[tid * D + ki + 1], k_smem[ki + 1], sum);
+            sum = ptx_fma(state_smem[tid * D + ki + 2], k_smem[ki + 2], sum);
+            sum = ptx_fma(state_smem[tid * D + ki + 3], k_smem[ki + 3], sum);
+        }
+        old_v_smem[tid] = sum;
+    }
+    __syncthreads();
+    
+    // Delta rule: S += delta * k
+    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+        int vi = i / D;
+        int ki = i % D;
+        float delta = beta * (v_smem[vi] - old_v_smem[vi]);
+        state_smem[i] = ptx_fma(delta, k_smem[ki], state_smem[i]);
+    }
+    __syncthreads();
+    
+    // Compute out = scale * S @ q
+    __shared__ float out_smem[64];
+    
+    if (tid < BLOCK_V) {
+        float sum = 0.0f;
+        
+        #pragma unroll 8
+        for (int ki = 0; ki < D; ki += 4) {
+            sum = ptx_fma(state_smem[tid * D + ki + 0], q_smem[ki + 0], sum);
+            sum = ptx_fma(state_smem[tid * D + ki + 1], q_smem[ki + 1], sum);
+            sum = ptx_fma(state_smem[tid * D + ki + 2], q_smem[ki + 2], sum);
+            sum = ptx_fma(state_smem[tid * D + ki + 3], q_smem[ki + 3], sum);
+        }
+        out_smem[tid] = scale * sum;
+    }
+    __syncthreads();
+    
+    // Store output
+    for (int i = tid; i < BLOCK_V; i += num_threads) {
+        Out[b * stride_o_b + h * stride_o_h + v0 + i] = __float2bfloat16(out_smem[i]);
+    }
+    
+    // Store new state as BF16 (no scaling needed)
+    __nv_bfloat16* new_state_bf16_ptr = NewState_BF16 + b * stride_ns_b + h * stride_ns_h + v0 * stride_ns_v;
+    
+    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+        int vi = i / D;
+        int di = i % D;
+        new_state_bf16_ptr[vi * stride_ns_v + di] = __float2bfloat16(state_smem[i]);
     }
 }
 
@@ -827,7 +1002,7 @@ __global__ void gdn_decode_kernel_ptx_fp4(
         float alog = gate_smem[2];
         float b_val = gate_smem[3];
         float x = a_val + dt_val;
-        float sp = (x > 20.0f) ? x : ptx_log1pexp(x);
+        float sp = (x > 20.0f) ? x : ptx_log(1.0f + ptx_exp(x));
         float neg_exp_term = -ptx_exp(alog) * sp;
         g = ptx_exp(neg_exp_term);
         beta = ptx_sigmoid(b_val);
@@ -1003,6 +1178,82 @@ inline void gdn_decode_ptx_launch(
             (const float*)A_log, (const __nv_bfloat16*)A, (const __nv_bfloat16*)DtBias,
             (const __nv_bfloat16*)B_gate,
             (__nv_bfloat16*)Out, (float*)NewState,
+            scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h,
+            stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b,
+            stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v
+        );
+    }
+}
+
+// ============================================================
+// BF16 Launcher Function (2x memory compression, ~0.6% error)
+// ============================================================
+
+inline void gdn_decode_ptx_bf16_launch(
+    const void* Q, const void* K, const void* V,
+    const void* State_BF16,
+    const void* A_log, const void* A, const void* DtBias, const void* B_gate,
+    void* Out, void* NewState_BF16,
+    float scale,
+    int B, int num_v_heads, int D_val,
+    int stride_q_b, int stride_q_h,
+    int stride_k_b, int stride_k_h,
+    int stride_v_b, int stride_v_h,
+    int stride_s_b, int stride_s_h, int stride_s_v,
+    int stride_a_b, int stride_b_b,
+    int stride_o_b, int stride_o_h,
+    int stride_ns_b, int stride_ns_h, int stride_ns_v,
+    int BLOCK_V,
+    cudaStream_t stream
+) {
+    int V_BLOCKS = D_val / BLOCK_V;
+    dim3 grid(B, num_v_heads, V_BLOCKS);
+    dim3 block(128);
+    
+    // Same shared memory as FP32 version
+    size_t smem_size = (D + D + BLOCK_V + BLOCK_V * D + 4 + 64 + 64) * sizeof(float);
+    
+    if (BLOCK_V == 16) {
+        gdn_decode_kernel_ptx_bf16<16><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const __nv_bfloat16*)State_BF16,
+            (const float*)A_log, (const __nv_bfloat16*)A, (const __nv_bfloat16*)DtBias,
+            (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (__nv_bfloat16*)NewState_BF16,
+            scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h,
+            stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b,
+            stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v
+        );
+    } else if (BLOCK_V == 32) {
+        gdn_decode_kernel_ptx_bf16<32><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const __nv_bfloat16*)State_BF16,
+            (const float*)A_log, (const __nv_bfloat16*)A, (const __nv_bfloat16*)DtBias,
+            (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (__nv_bfloat16*)NewState_BF16,
+            scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h,
+            stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b,
+            stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v
+        );
+    } else {  // BLOCK_V == 64
+        gdn_decode_kernel_ptx_bf16<64><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const __nv_bfloat16*)State_BF16,
+            (const float*)A_log, (const __nv_bfloat16*)A, (const __nv_bfloat16*)DtBias,
+            (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (__nv_bfloat16*)NewState_BF16,
             scale,
             stride_q_b, stride_q_h, stride_k_b, stride_k_h,
             stride_v_b, stride_v_h,

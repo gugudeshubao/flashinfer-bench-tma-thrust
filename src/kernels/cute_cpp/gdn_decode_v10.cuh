@@ -14,6 +14,7 @@
  *
  *   Precision Modes (Iteration 2):
  *   - FP32: Full precision state (default)
+ *   - BF16: 2x memory compression, ~0.6% error (recommended)
  *   - FP8 E4M3: 4x memory compression for state
  *   - FP4 E2M1: 8x memory compression for state (experimental)
  *
@@ -47,6 +48,28 @@ constexpr int V10_D = 128;
 constexpr int V10_WARP_SIZE = 32;
 constexpr int V10_NUM_WARPS = 4;
 constexpr int V10_THREADS = V10_NUM_WARPS * V10_WARP_SIZE;
+
+// ============================================================
+// BF16 State (2x memory compression, ~0.6% error)
+// BF16: 1 sign + 8 exponent + 7 mantissa (same range as FP32)
+// No scaling needed - direct conversion
+// ============================================================
+
+// Pack 2 BF16 values into uint32_t for vectorized memory access
+__device__ __forceinline__ uint32_t v10_pack_bf16x2(__nv_bfloat16 a, __nv_bfloat16 b) {
+    uint32_t result;
+    __nv_bfloat16* ptr = reinterpret_cast<__nv_bfloat16*>(&result);
+    ptr[0] = a;
+    ptr[1] = b;
+    return result;
+}
+
+// Unpack uint32_t to 2 BF16 values
+__device__ __forceinline__ void v10_unpack_bf16x2(uint32_t packed, __nv_bfloat16& a, __nv_bfloat16& b) {
+    const __nv_bfloat16* ptr = reinterpret_cast<const __nv_bfloat16*>(&packed);
+    a = ptr[0];
+    b = ptr[1];
+}
 
 // ============================================================
 // FP8 E4M3 Quantization (Iteration 2 - 4x memory compression)
@@ -477,6 +500,155 @@ gdn_decode_kernel_v10_tma(
         int v_idx = i / V10_D;
         int d_idx = i % V10_D;
         new_state_ptr[v_idx * stride_ns_v + d_idx] = smem_new_state[v_idx * V10_D + d_idx];
+    }
+}
+
+// ============================================================
+// v10 Kernel: BF16 State (2x compression, ~0.6% error)
+// Recommended for high-precision inference
+// ============================================================
+
+template<int BLOCK_V>
+__global__ void __launch_bounds__(V10_THREADS)
+gdn_decode_kernel_v10_bf16(
+    const __nv_bfloat16* __restrict__ Q,
+    const __nv_bfloat16* __restrict__ K,
+    const __nv_bfloat16* __restrict__ V,
+    const __nv_bfloat16* __restrict__ State_BF16,  // BF16 state: [B, H, V, D]
+    const float* __restrict__ A_log,
+    const __nv_bfloat16* __restrict__ A,
+    const float* __restrict__ DtBias,
+    const __nv_bfloat16* __restrict__ B_gate,
+    __nv_bfloat16* __restrict__ Out,
+    __nv_bfloat16* __restrict__ NewState_BF16,
+    float scale,
+    int stride_q_b, int stride_q_h,
+    int stride_k_b, int stride_k_h,
+    int stride_v_b, int stride_v_h,
+    int stride_s_b, int stride_s_h, int stride_s_v,
+    int stride_a_b, int stride_b_b,
+    int stride_o_b, int stride_o_h,
+    int stride_ns_b, int stride_ns_h, int stride_ns_v
+) {
+    const int b = blockIdx.x;
+    const int h = blockIdx.y;
+    const int v_block = blockIdx.z;
+    const int v0 = v_block * BLOCK_V;
+    const int qk_h = h / 2;
+    
+    const int tid = threadIdx.x;
+    const int warp_id = tid / V10_WARP_SIZE;
+    const int lane_id = tid % V10_WARP_SIZE;
+    
+    // Shared memory - FP32 for computation
+    extern __shared__ char smem_raw[];
+    float* smem_q = reinterpret_cast<float*>(smem_raw);
+    float* smem_k = smem_q + V10_D;
+    float* smem_v = smem_k + V10_D;
+    float* smem_state = smem_v + BLOCK_V;
+    float* smem_new_state = smem_state + BLOCK_V * V10_D;
+    float* smem_out = smem_new_state + BLOCK_V * V10_D;
+    
+    // Load Q, K (BF16 -> FP32)
+    const __nv_bfloat16* q_ptr = Q + b * stride_q_b + qk_h * stride_q_h;
+    const __nv_bfloat16* k_ptr = K + b * stride_k_b + qk_h * stride_k_h;
+    
+    #pragma unroll 4
+    for (int d = tid; d < V10_D; d += V10_THREADS) {
+        smem_q[d] = __bfloat162float(q_ptr[d]);
+        smem_k[d] = __bfloat162float(k_ptr[d]);
+    }
+    
+    // Load V (BF16 -> FP32)
+    const __nv_bfloat16* v_ptr = V + b * stride_v_b + h * stride_v_h + v0;
+    if (tid < BLOCK_V) {
+        smem_v[tid] = __bfloat162float(v_ptr[tid]);
+    }
+    
+    // Compute gates
+    float g, beta;
+    {
+        float a_val = __bfloat162float(A[b * stride_a_b + h]);
+        float dt_val = DtBias[h];
+        float alog = A_log[h];
+        float b_val = __bfloat162float(B_gate[b * stride_b_b + h]);
+        float x = a_val + dt_val;
+        float sp = (x > 20.0f) ? x : __logf(1.0f + __expf(x));
+        g = __expf(-__expf(alog) * sp);
+        beta = 1.0f / (1.0f + __expf(-b_val));
+    }
+    
+    // Load BF16 state and convert to FP32 (no scaling needed)
+    const __nv_bfloat16* state_bf16_ptr = State_BF16 + b * stride_s_b + h * stride_s_h + v0 * stride_s_v;
+    
+    #pragma unroll
+    for (int i = tid; i < BLOCK_V * V10_D; i += V10_THREADS) {
+        int v_idx = i / V10_D;
+        int d_idx = i % V10_D;
+        int swizzled_d = d_idx ^ ((d_idx >> 3) & 7);
+        smem_state[v_idx * V10_D + swizzled_d] = __bfloat162float(state_bf16_ptr[v_idx * stride_s_v + d_idx]);
+    }
+    
+    __syncthreads();
+    
+    // Delta rule with swizzled reads
+    #pragma unroll
+    for (int v_idx = warp_id; v_idx < BLOCK_V; v_idx += V10_NUM_WARPS) {
+        float old_v = 0.0f;
+        
+        #pragma unroll 4
+        for (int d = lane_id; d < V10_D; d += V10_WARP_SIZE) {
+            int smem_idx = v_idx * V10_D + (d ^ ((d >> 3) & 7));
+            float decayed_s = g * smem_state[smem_idx];
+            old_v += decayed_s * smem_k[d];
+        }
+        
+        #pragma unroll
+        for (int mask = 16; mask > 0; mask >>= 1) {
+            old_v += __shfl_xor_sync(0xffffffff, old_v, mask);
+        }
+        
+        float delta = beta * (smem_v[v_idx] - old_v);
+        
+        #pragma unroll 4
+        for (int d = lane_id; d < V10_D; d += V10_WARP_SIZE) {
+            int smem_idx = v_idx * V10_D + (d ^ ((d >> 3) & 7));
+            float decayed_s = g * smem_state[smem_idx];
+            smem_new_state[v_idx * V10_D + d] = decayed_s + delta * smem_k[d];
+        }
+        
+        float out_val = 0.0f;
+        #pragma unroll 4
+        for (int d = lane_id; d < V10_D; d += V10_WARP_SIZE) {
+            out_val += smem_new_state[v_idx * V10_D + d] * smem_q[d];
+        }
+        
+        #pragma unroll
+        for (int mask = 16; mask > 0; mask >>= 1) {
+            out_val += __shfl_xor_sync(0xffffffff, out_val, mask);
+        }
+        
+        if (lane_id == 0) {
+            smem_out[v_idx] = scale * out_val;
+        }
+    }
+    
+    __syncthreads();
+    
+    // Write output
+    __nv_bfloat16* out_ptr = Out + b * stride_o_b + h * stride_o_h + v0;
+    if (tid < BLOCK_V) {
+        out_ptr[tid] = __float2bfloat16(smem_out[tid]);
+    }
+    
+    // Write new state as BF16 (no scaling needed)
+    __nv_bfloat16* new_state_bf16_ptr = NewState_BF16 + b * stride_ns_b + h * stride_ns_h + v0 * stride_ns_v;
+    
+    #pragma unroll
+    for (int i = tid; i < BLOCK_V * V10_D; i += V10_THREADS) {
+        int v_idx = i / V10_D;
+        int d_idx = i % V10_D;
+        new_state_bf16_ptr[v_idx * stride_ns_v + d_idx] = __float2bfloat16(smem_new_state[v_idx * V10_D + d_idx]);
     }
 }
 
@@ -989,6 +1161,63 @@ void gdn_decode_v10_launch_tma(
     }
 }
 
+// BF16 launcher (2x memory compression, ~0.6% error - recommended)
+void gdn_decode_v10_launch_bf16(
+    const void* Q, const void* K, const void* V,
+    const void* State_BF16,
+    const void* A_log, const void* A,
+    const void* DtBias, const void* B_gate,
+    void* Out, void* NewState_BF16,
+    float scale, int B, int num_v_heads, int D,
+    int stride_q_b, int stride_q_h, int stride_k_b, int stride_k_h,
+    int stride_v_b, int stride_v_h, int stride_s_b, int stride_s_h, int stride_s_v,
+    int stride_a_b, int stride_b_b, int stride_o_b, int stride_o_h,
+    int stride_ns_b, int stride_ns_h, int stride_ns_v,
+    int BLOCK_V, cudaStream_t stream
+) {
+    int V_BLOCKS = D / BLOCK_V;
+    dim3 grid(B, num_v_heads, V_BLOCKS);
+    dim3 block(V10_THREADS);
+    
+    size_t smem_size = (D + D + BLOCK_V + 2 * BLOCK_V * D + BLOCK_V) * sizeof(float);
+    smem_size = ((smem_size + 127) / 128) * 128;
+    
+    if (BLOCK_V == 16) {
+        gdn_decode_kernel_v10_bf16<16><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const __nv_bfloat16*)State_BF16,
+            (const float*)A_log, (const __nv_bfloat16*)A,
+            (const float*)DtBias, (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (__nv_bfloat16*)NewState_BF16, scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h, stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b, stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v);
+    } else if (BLOCK_V == 32) {
+        gdn_decode_kernel_v10_bf16<32><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const __nv_bfloat16*)State_BF16,
+            (const float*)A_log, (const __nv_bfloat16*)A,
+            (const float*)DtBias, (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (__nv_bfloat16*)NewState_BF16, scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h, stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b, stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v);
+    } else {
+        gdn_decode_kernel_v10_bf16<64><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const __nv_bfloat16*)State_BF16,
+            (const float*)A_log, (const __nv_bfloat16*)A,
+            (const float*)DtBias, (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (__nv_bfloat16*)NewState_BF16, scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h, stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b, stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v);
+    }
+}
+
 // FP8 launcher (Iteration 2 - 4x memory compression)
 void gdn_decode_v10_launch_fp8(
     const void* Q, const void* K, const void* V,
@@ -1112,6 +1341,7 @@ void gdn_decode_v10_launch_fp4(
 namespace gdn {
 void gdn_decode_v10_launch_cute(...) {}
 void gdn_decode_v10_launch_tma(...) {}
+void gdn_decode_v10_launch_bf16(...) {}
 void gdn_decode_v10_launch_fp8(...) {}
 void gdn_decode_v10_launch_fp4(...) {}
 }
