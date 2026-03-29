@@ -86,14 +86,16 @@ Prefill: N=16 → 1,000+ GB/s (12.5% B200) — TODO
 
 ## Active Optimization Files
 
-> **File Freeze Policy**: All future optimizations modify only these 4 files.
+> **File Freeze Policy**: All future optimizations modify only these 6 files.
 
 | Path | Type | Current Features |
 |------|------|------------------|
-| `src/kernels/cute_cpp/gdn_decode_v9.cuh` | CuTe C++ | SMEM swizzle, Swizzle<3,3,3> |
+| `src/kernels/cute_cpp/gdn_decode_v9.cuh` | CuTe C++ | SMEM swizzle, cp.async |
+| `src/kernels/cute_cpp/gdn_decode_v10.cuh` | CuTe C++ | BF16/FP8/FP4 state quantization |
 | `src/kernels/cute_cpp/gdn_prefill_v9.cuh` | CuTe C++ | Chunking, SMEM |
-| `src/kernels/ptx/gdn_decode_ptx.cuh` | PTX | ex2.approx, shfl.sync |
-| `src/kernels/ptx/gdn_prefill_ptx.cuh` | PTX | Fast math assembly |
+| `src/kernels/cute_cpp/gdn_prefill_v10.cuh` | CuTe C++ | TiledMMA structure |
+| `src/kernels/ptx/gdn_decode_ptx.cuh` | PTX | ex2.approx, BF16/FP8/FP4 |
+| `src/kernels/ptx/gdn_prefill_ptx.cuh` | PTX | **mma.sync.aligned, TMA** |
 
 ---
 
@@ -128,13 +130,30 @@ Optimization: Use WGMMA/TiledMMA when AI > 9.3
 ## Benchmark Commands
 
 ```bash
-# Decode benchmark (Triton baseline)
-modal run scripts/bench_all_versions.py --versions v5 --batches 1,4,16,64,256
+# Full benchmark (decode + prefill)
+modal run benchmarks/bench_modal.py
 
-# Prefill benchmark
-modal run scripts/bench_prefill_all.py
+# Decode only
+modal run benchmarks/bench_modal.py --kernel decode
 
-# Build and benchmark CUDA kernels (requires volume setup)
-modal run scripts/build_cuda.py
-modal run scripts/bench_cuda_real.py
+# Prefill only  
+modal run benchmarks/bench_modal.py --kernel prefill
+
+# Compare with Python baseline
+modal run benchmarks/bench_modal.py --compare
+
+# Correctness tests
+modal run tests/test_correctness.py
+
+# Quantization accuracy benchmark
+modal run benchmarks/bench_quantization_perf.py
 ```
+
+---
+
+## Latest Results (2026-03-29)
+
+| Kernel | Workloads | All Pass | Avg Speedup | Best Speedup |
+|--------|-----------|----------|-------------|--------------|
+| **Decode** | 10 | ✅ | 1127x | 3465x |
+| **Prefill** | 12 | ✅ | 598x | 1886x |
