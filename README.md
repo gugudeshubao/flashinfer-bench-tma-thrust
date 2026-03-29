@@ -69,14 +69,14 @@ modal run gdn/tests/test_correctness.py
 │   │   ├── cuda/                     # Raw CUDA v5-v8
 │   │   ├── cute_cpp/                 # CuTe C++ v9-v10
 │   │   └── ptx/                      # PTX assembly
+│   ├── scripts/                      # GDN-specific scripts
 │   ├── benchmarks/                   # GDN benchmarks
 │   ├── tests/                        # Correctness tests
 │   ├── docs/                         # Documentation
 │   └── README.md                     # GDN documentation
 ├── moe/                              # Mixture of Experts (coming soon)
 ├── scripts/                          # Shared utility scripts
-│   ├── setup_volume.py               # Modal volume setup
-│   └── ...
+│   └── setup_volume.py               # Modal volume setup
 ├── CMakeLists.txt                    # CUDA build configuration
 └── README.md                         # This file
 ```

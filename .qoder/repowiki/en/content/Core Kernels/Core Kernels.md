@@ -7,6 +7,7 @@
 - [src/kernels/cute_cpp/gdn_decode_v9.cuh](file://src/kernels/cute_cpp/gdn_decode_v9.cuh)
 - [src/kernels/cute_cpp/gdn_decode_v10.cuh](file://src/kernels/cute_cpp/gdn_decode_v10.cuh)
 - [src/kernels/cute_cpp/gdn_prefill_v9.cuh](file://src/kernels/cute_cpp/gdn_prefill_v9.cuh)
+- [src/kernels/cute_cpp/gdn_prefill_v10.cuh](file://src/kernels/cute_cpp/gdn_prefill_v10.cuh)
 - [src/kernels/cute_dsl/gdn_decode_dsl.py](file://src/kernels/cute_dsl/gdn_decode_dsl.py)
 - [src/kernels/cute_dsl/gdn_decode_dsl_optimized.py](file://src/kernels/cute_dsl/gdn_decode_dsl_optimized.py)
 - [src/kernels/cute_dsl/gdn_prefill_dsl.py](file://src/kernels/cute_dsl/gdn_prefill_dsl.py)
@@ -15,8 +16,14 @@
 - [src/kernels/ptx/README.md](file://src/kernels/ptx/README.md)
 - [src/kernels/ptx/gdn_decode_ptx.cuh](file://src/kernels/ptx/gdn_decode_ptx.cuh)
 - [src/kernels/ptx/gdn_prefill_ptx.cuh](file://src/kernels/ptx/gdn_prefill_ptx.cuh)
+- [src/kernels/cuda/gdn_decode_v5.cuh](file://src/kernels/cuda/gdn_decode_v5.cuh)
 - [src/kernels/cuda/gdn_decode_v6.cuh](file://src/kernels/cuda/gdn_decode_v6.cuh)
 - [src/kernels/cuda/gdn_decode_v7.cuh](file://src/kernels/cuda/gdn_decode_v7.cuh)
+- [src/kernels/cuda/gdn_decode_v8.cuh](file://src/kernels/cuda/gdn_decode_v8.cuh)
+- [src/kernels/cuda/gdn_prefill_v5.cuh](file://src/kernels/cuda/gdn_prefill_v5.cuh)
+- [src/kernels/cuda/gdn_prefill_v6.cuh](file://src/kernels/cuda/gdn_prefill_v6.cuh)
+- [src/kernels/cuda/gdn_prefill_v7.cuh](file://src/kernels/cuda/gdn_prefill_v7.cuh)
+- [src/kernels/cuda/gdn_prefill_v8.cuh](file://src/kernels/cuda/gdn_prefill_v8.cuh)
 - [scripts/test_cute_dsl.py](file://scripts/test_cute_dsl.py)
 - [scripts/bench_cute_vs_triton.py](file://scripts/bench_cute_vs_triton.py)
 - [scripts/bench_cute_dsl_vs_cpp.py](file://scripts/bench_cute_dsl_vs_cpp.py)
@@ -27,11 +34,12 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced PTX kernel framework documentation with new TMA (Tensor Memory Accelerator) and Tensor Core optimization techniques
-- Updated chunked processing strategy documentation to include advanced memory bandwidth utilization through TMA bulk operations
-- Added comprehensive coverage of PTX inline assembly primitives including mma.sync.aligned Tensor Core operations
-- Expanded documentation of TMA bulk async memory operations for Blackwell architecture (sm_100)
-- Updated performance analysis to reflect the new PTX kernel optimizations
+- Enhanced documentation to reflect new kernel implementations including v9 and v10 CuTe C++ kernels with SMEM swizzling and state quantization
+- Added comprehensive coverage of PTX inline assembly kernels with Tensor Core support and TMA operations
+- Updated directory structure documentation to show expanded organization under src/kernels/ with dedicated subdirectories
+- Enhanced coverage of state quantization techniques including FP8 and FP4 implementations
+- Added detailed analysis of Tensor Core integration and performance optimizations
+- Updated performance comparisons to include the latest kernel versions and optimizations
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -52,7 +60,7 @@
 16. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the core Gated Delta Net (GDN) kernels implemented across multiple generations and framework approaches, reflecting the comprehensive kernel framework expansion with updated organization from `src/kernels/cute/` to `src/kernels/cute_cpp/`. The implementation now encompasses five distinct kernel development frameworks: Raw CUDA (v5-v8), CuTe C++ (v9-v10), CuTe DSL (MLIR), cuTile Python, and PTX inline assembly, providing developers with multiple optimization approaches and deployment strategies.
+This document explains the core Gated Delta Net (GDN) kernels implemented across multiple generations and framework approaches, reflecting the comprehensive kernel framework expansion with updated organization from `src/kernels/cute/` to `src/kernels/cute_cpp/`. The implementation now encompasses six distinct kernel development frameworks: Raw CUDA (v5-v8), CuTe C++ (v9-v10), CuTe DSL (MLIR), cuTile Python, PTX inline assembly, and Triton baseline, providing developers with multiple optimization approaches and deployment strategies.
 
 The kernel organization has been restructured to clearly separate the traditional CuTe C++ implementations from the newer CuTe DSL framework, with each framework maintaining its unique compilation approach and optimization characteristics. This expansion enables comprehensive performance comparisons across different kernel development paradigms while preserving the mathematical rigor of the GDN attention mechanism.
 
@@ -61,7 +69,7 @@ The kernel organization has been restructured to clearly separate the traditiona
 The document covers the mathematical formulation of the GDN attention mechanism, the k-last state layout, and the delta rule update process, while detailing the progression from basic CUDA implementations to highly optimized variants with specialized hardware features, PTX assembly optimizations, and the new Python-based development frameworks.
 
 ## Kernel Framework Organization
-The repository now organizes GDN kernels by both version and framework approach, showcasing the evolution from simple CUDA kernels to advanced optimized implementations across five distinct frameworks:
+The repository now organizes GDN kernels by both version and framework approach, showcasing the evolution from simple CUDA kernels to advanced optimized implementations across six distinct frameworks:
 
 **Raw CUDA Framework (v5-v8):**
 - Traditional CUDA C++ implementations with manual optimization
@@ -73,7 +81,7 @@ The repository now organizes GDN kernels by both version and framework approach,
 - CUTLASS 3.x C++ template implementations with layout algebra
 - NVCC compilation with manual memory operations and CuTe abstractions
 - Separated from CuTe DSL to maintain pure C++ template approach
-- **Enhanced**: v9-v10 include advanced TMA integration and optimized memory layouts
+- **Enhanced**: v9-v10 include advanced TMA integration, optimized memory layouts, and state quantization support
 
 **CuTe DSL Framework (v11+):**
 - CUTLASS 4.x Python native interface with MLIR compilation
@@ -88,8 +96,12 @@ The repository now organizes GDN kernels by both version and framework approach,
 **PTX Inline Assembly Framework:**
 - CUDA C++ with embedded PTX assembly for maximum performance
 - Direct hardware control through inline assembly instructions
-- **Enhanced**: Now includes TMA bulk operations and Tensor Core optimizations
+- **Enhanced**: Now includes TMA bulk operations, Tensor Core optimizations, and state quantization
 - Fast math approximations and warp-level optimizations
+
+**Triton Framework:**
+- High-level Python DSL with auto-tuning capabilities
+- Baseline implementation for performance comparison
 
 ```mermaid
 graph TB
@@ -112,7 +124,10 @@ CuTile_Decode["cuTile Decode<br/>Tile-based Indexing"]
 end
 subgraph "PTX Inline Assembly"
 PTX_Decode["PTX Decode<br/>Embedded Assembly<br/>TMA + Tensor Core"]
-PTX_Prefill["PTX Prefill<br/>Chunked Processing<br/>TMA Bulk Ops"]
+PTX_Prefill["PTX Prefill<br/>Chunked Processing<br/>TMA Bulk Ops<br/>Tensor Quantization"]
+end
+subgraph "Triton Framework"
+Triton_Base["Triton Baseline<br/>Auto-tuning"]
 end
 CUDA_v5 --> CUDA_v6 --> CUDA_v7 --> CUDA_v8
 CUDA_v8 --> CuTe_v9 --> CuTe_v10
@@ -121,6 +136,7 @@ CuTe_v9 --> PTX_Decode
 CuTe_v10 --> PTX_Decode
 DSL_Optimized --> PTX_Decode
 CuTile_Decode --> PTX_Decode
+Triton_Base --> PTX_Decode
 ```
 
 **Diagram sources**
@@ -134,7 +150,7 @@ CuTile_Decode --> PTX_Decode
 - [src/kernels/README.md:17-66](file://src/kernels/README.md#L17-L66)
 
 ## Core Components
-This section outlines the GDN attention formulation and the comprehensive kernel framework expansion across five distinct implementation approaches, including the newly organized CuTe C++ framework and enhanced PTX inline assembly capabilities.
+This section outlines the GDN attention formulation and the comprehensive kernel framework expansion across six distinct implementation approaches, including the newly organized CuTe C++ framework and enhanced PTX inline assembly capabilities.
 
 ### Mathematical Formulation
 The GDN attention mechanism follows the standard delta rule formulation:
@@ -167,6 +183,7 @@ The GDN attention mechanism follows the standard delta rule formulation:
 - Swizzled shared memory layouts for bank conflict avoidance
 - Cooperative thread arrays with cluster-level sync
 - **Enhanced**: Tensor Core support for compute-intensive operations
+- **Enhanced**: State quantization support (FP8, FP4) for memory compression
 
 **CuTe DSL Framework:**
 - Python native interface with JIT compilation
@@ -184,11 +201,17 @@ The GDN attention mechanism follows the standard delta rule formulation:
 - Embedded PTX assembly for maximum performance control
 - **Enhanced**: TMA bulk operations for advanced memory bandwidth utilization
 - **Enhanced**: Tensor Core operations (mma.sync.aligned) for compute-intensive tasks
+- **Enhanced**: State quantization (FP8, FP4) with custom packing/unpacking routines
 - Fast math approximations (ex2, lg2, rcp)
 - Warp shuffle reductions without shared memory
 - Fused multiply-add operations
 - Memory operations with cache hints
 - Predicated execution for branchless code
+
+**Triton Framework:**
+- High-level Python DSL with auto-tuning capabilities
+- Baseline implementation for performance comparison
+- Automatic tile size selection and memory optimization
 
 **Section sources**
 - [src/kernels/README.md:53-101](file://src/kernels/README.md#L53-L101)
@@ -198,7 +221,7 @@ The GDN attention mechanism follows the standard delta rule formulation:
 - [src/kernels/ptx/README.md:52-179](file://src/kernels/ptx/README.md#L52-L179)
 
 ## Architecture Overview
-The comprehensive kernel architecture evolution demonstrates the progression from basic CUDA implementations to highly specialized hardware-accelerated designs across five distinct frameworks, each with unique compilation approaches and optimization characteristics.
+The comprehensive kernel architecture evolution demonstrates the progression from basic CUDA implementations to highly specialized hardware-accelerated designs across six distinct frameworks, each with unique compilation approaches and optimization characteristics.
 
 **Enhanced PTX Architecture**: The PTX framework now includes sophisticated optimizations leveraging both TMA (Tensor Memory Accelerator) and Tensor Core operations, particularly beneficial for the prefill kernel's compute-intensive operations.
 
@@ -237,6 +260,7 @@ Copy_Ops["cute::copy<br/>TMA Operations"]
 Swizzle_SMEM["Swizzled SMEM<br/>Bank Conflict Free"]
 Cluster_Sync["Cluster-level Sync<br/>Cooperative Arrays"]
 Tensor_Core["Tensor Core Support<br/>Compute Optimization"]
+Quantization["State Quantization<br/>FP8/FP4 Compression"]
 end
 end
 subgraph "CuTe DSL Architecture"
@@ -266,16 +290,17 @@ Cache_Hints["Cache Hints<br/>ld.global.nc"]
 Pred_Exec["Predicated Execution<br/>selp"]
 TMA_Ops["TMA Bulk Ops<br/>cp.async.bulk.tensor"]
 Tensor_Core_PT["Tensor Core<br/>mma.sync.aligned"]
+Quantization_PT["Quantization<br/>FP8/FP4 Packing"]
 end
 end
 TMA_Init --> TMA_Load --> TMA_Wait --> TMA_Pipeline
 FP4_Q --> FP8_Q --> Vec_Load --> Bank_Avoid
 Warp_Prod --> Warp_Consumer --> Pipeline_3 --> Persistent
 Manual_Mem --> Swizzle_Index --> Float4_Opt --> Cute_Struct
-Layout_Algebra --> Copy_Ops --> Swizzle_SMEM --> Cluster_Sync --> Tensor_Core
+Layout_Algebra --> Copy_Ops --> Swizzle_SMEM --> Cluster_Sync --> Tensor_Core --> Quantization
 DSL_Simple --> DSL_Opt --> DSL_Complete --> DSL_JIT
 Tile_Load --> Tile_Store --> Grid_Launch --> Limitations
-Fast_Math --> Warp_Shuffle --> FMA_Ops --> Cache_Hints --> Pred_Exec --> TMA_Ops --> Tensor_Core_PT
+Fast_Math --> Warp_Shuffle --> FMA_Ops --> Cache_Hints --> Pred_Exec --> TMA_Ops --> Tensor_Core_PT --> Quantization_PT
 ```
 
 **Diagram sources**
@@ -348,6 +373,7 @@ The v10 decode kernel focuses purely on layout algebra without full CuTe tensor 
 - **Manual Memory Control:** Precise cp.async usage for optimal memory operations
 - **Float4 Vectorization:** Vectorized memory operations for improved bandwidth
 - **Tensor Core Support:** Integration with Tensor Core operations for compute optimization
+- **State Quantization:** Support for FP8 and FP4 quantization formats
 
 **Section sources**
 - [src/kernels/cute_cpp/gdn_decode_v10.cuh:1-200](file://src/kernels/cute_cpp/gdn_decode_v10.cuh#L1-L200)
@@ -374,6 +400,25 @@ The v9 prefill kernel extends the CuTe C++ approach to batched sequence processi
 **Section sources**
 - [src/kernels/cute_cpp/gdn_prefill_v9.cuh:1-200](file://src/kernels/cute_cpp/gdn_prefill_v9.cuh#L1-L200)
 
+#### v10: CuTe C++ Prefill with TiledMMA Implementation
+The v10 prefill kernel introduces Tensor Core support for compute-intensive operations:
+
+**Algorithm Steps:**
+1. **Chunked Processing:** Process C tokens per chunk for compute density
+2. **Matrix Operations:** old_v = State @ K^T and out = State @ Q using mat-mat ops
+3. **Tensor Core Integration:** Structured for tcgen05.mma on Blackwell architecture
+4. **State Quantization:** Support for FP8/FP4 quantization with custom packing
+5. **Memory Optimization:** Coalesced access patterns for compute-bound performance
+
+**Key Optimizations:**
+- **Tensor Core Applicability:** Chunked processing enables mat-mat ops for Blackwell tcgen05.mma
+- **Arithmetic Intensity:** C FLOP/byte for compute-bound performance (C=8,16)
+- **Quantization Support:** FP8 E4M3 and FP4 E2M1 formats with custom packing routines
+- **Structured Layout:** Designed for TiledMMA integration with proper memory alignment
+
+**Section sources**
+- [src/kernels/cute_cpp/gdn_prefill_v10.cuh:1-200](file://src/kernels/cute_cpp/gdn_prefill_v10.cuh#L1-L200)
+
 #### PTX Prefill Kernel with Enhanced TMA and Tensor Core
 **Enhanced PTX Prefill Kernel**: The PTX prefill kernel now includes sophisticated TMA bulk operations and Tensor Core optimizations for maximum performance on Blackwell architecture.
 
@@ -384,6 +429,7 @@ The v9 prefill kernel extends the CuTe C++ approach to batched sequence processi
 4. **Fast Math Gates:** PTX approximations for exp, log, sigmoid computations
 5. **FMA Chain Processing:** Unrolled FMA operations for maximum throughput
 6. **Memory Bandwidth Optimization:** ld.global.nc and st.global.wb for cache hints
+7. **State Quantization:** FP8 and FP4 quantization with custom packing/unpacking
 
 **Key Optimizations:**
 - **TMA Bulk Operations:** cp.async.bulk.tensor.2d for coalesced 2D transfers
@@ -391,13 +437,14 @@ The v9 prefill kernel extends the CuTe C++ approach to batched sequence processi
 - **Advanced Memory Hints:** ld.global.nc bypasses L1 cache for streaming workloads
 - **FMA Chain Optimization:** Unrolled FMA operations eliminate branch divergence
 - **Chunked Compute Density:** C × 2D² FLOPs / 2D² bytes = C FLOP/byte
+- **Quantization Support:** Custom packing routines for FP8 (packed FP8x4) and FP4 (packed FP4x8)
 
 **Section sources**
 - [src/kernels/ptx/gdn_prefill_ptx.cuh:135-197](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L135-L197)
 - [src/kernels/ptx/gdn_prefill_ptx.cuh:105-132](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L105-L132)
 
 ### Mathematical Formulation and Layout
-The mathematical formulation remains consistent across all frameworks, with consistent state layout and delta rule application:
+The mathematical formulation remains consistent across all six frameworks, with consistent state layout and delta rule application:
 
 **State Layout Consistency:**
 - Decode: [B, H, V, K] with k-last format
@@ -435,7 +482,7 @@ Store --> End(["End"])
 ## Advanced Kernel Implementations
 
 ### Shared Memory Architecture Evolution
-The shared memory architecture has evolved significantly across the CuTe C++ framework:
+The shared memory architecture has evolved significantly across the six kernel frameworks:
 
 **v9: Manual Layout with TMA**
 - **CuTe Layout Definition:** StateLayout and StateSmemLayout with Swizzle<3,3,3>
@@ -449,6 +496,7 @@ The shared memory architecture has evolved significantly across the CuTe C++ fra
 - **Float4 Vectorization:** Vectorized memory operations for improved bandwidth
 - **Layout Composition:** Direct coordinate transformation through make_coord/layout()
 - **Tensor Core Integration:** Support for advanced matrix operations
+- **State Quantization:** FP8 and FP4 quantization support
 
 **cuTile Limitations:**
 - **Tile-based Access:** Only 2D tile-based indexing supported
@@ -462,6 +510,7 @@ The shared memory architecture has evolved significantly across the CuTe C++ fra
 - **Warp Shuffle:** shfl.sync.bfly for efficient warp-level reductions
 - **TMA Operations:** cp.async.bulk.tensor.2d for advanced memory bandwidth utilization
 - **Tensor Core:** mma.sync.aligned.m16n8k16 for compute-intensive operations
+- **Quantization Support:** Custom packing/unpacking routines for FP8/FP4
 
 ### Warp-Level Optimization Techniques
 Advanced warp-level coordination patterns have been implemented across frameworks:
@@ -509,6 +558,7 @@ Memory access patterns have been continuously optimized across frameworks:
 - **Bulk Async Transfers:** cp.async.bulk.tensor.2d.shared::cta.global for 2D tile loads
 - **Tensor Core Memory Access:** Optimized patterns for mma.sync operations
 - **Advanced Cache Hints:** ld.global.nc and st.global.wb for specific memory behaviors
+- **Quantization Memory Patterns:** Optimized access patterns for packed FP8/FP4 formats
 
 **Section sources**
 - [src/kernels/cute_cpp/gdn_decode_v9.cuh:103-133](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L103-L133)
@@ -530,6 +580,7 @@ The PTX inline assembly framework provides maximum control over low-level GPU op
 - **Predicated Execution:** selp for branchless conditional operations
 - **TMA Operations:** cp.async.bulk.tensor.2d for advanced memory bandwidth utilization
 - **Tensor Core Integration:** mma.sync.aligned.m16n8k16 for compute-intensive operations
+- **State Quantization:** Custom packing/unpacking for FP8 and FP4 formats
 
 ### PTX Decode Kernel Implementation
 The PTX decode kernel demonstrates the power of inline assembly through embedded PTX instructions:
@@ -586,6 +637,7 @@ __device__ float ptx_ld_nc(const float* ptr) {
 - **Roofline Analysis:** With CHUNK_SIZE=8, achieve 8 FLOP/byte approaching compute-bound
 - **TMA Bulk Operations:** cp.async.bulk.tensor.2d for coalesced 2D memory transfers
 - **Tensor Core Integration:** mma.sync.aligned.m16n8k16 for BF16 matrix operations
+- **State Quantization:** Custom packing routines for FP8 (packed FP8x4) and FP4 (packed FP4x8)
 
 **Enhanced Chunked Algorithm:**
 ```mermaid
@@ -616,6 +668,7 @@ GPU->>GPU : Store Final State<br/>with write-back optimization
 - **Scalability:** Better performance scaling with larger batch sizes
 - **TMA Efficiency:** Leverage Blackwell's advanced memory subsystem
 - **Tensor Core Utilization:** Optimize compute-intensive operations
+- **Quantization Benefits:** 4x memory compression with FP8, 8x with FP4
 
 ### PTX Optimization Techniques and Applications
 The PTX kernels demonstrate several optimization techniques that can be applied across different GPU kernels:
@@ -636,15 +689,21 @@ The PTX kernels demonstrate several optimization techniques that can be applied 
 - **Non-Coherent Loads:** ld.global.nc bypasses L1 cache for streaming workloads
 - **Write-Back Stores:** st.global.wb for efficient memory writes
 - **Vectorized Access:** float4 loads/stores for improved bandwidth
-- **Cache-Aware Patterns:** Optimize memory access patterns for specific workloads
+- **Cache-Aware Patterns:** Optimize memory access patterns for streaming workloads
 - **TMA Bulk Operations:** cp.async.bulk.tensor.2d for coalesced 2D transfers
-- **Tensor Core Memory Patterns:** Optimized access patterns for BF16 operations
+- **Tensor Core Memory:** Optimized patterns for BF16 operations
 
 **Tensor Core Integration:**
 - **mma.sync.aligned.m16n8k16:** BF16 matrix multiplication with FP32 accumulation
 - **Thread Mapping:** 32 threads per warp with specific element distribution
 - **Memory Alignment:** 16x8x16 tile size with proper alignment requirements
 - **Compute Optimization:** Specialized for GDN's matrix operations
+
+**State Quantization:**
+- **FP8 E4M3:** 4x memory compression with custom packing (FP8x4)
+- **FP4 E2M1:** 8x memory compression with lookup table dequantization
+- **Packing Routines:** Custom assembly for efficient quantized memory access
+- **Dequantization:** Fast conversion from quantized to FP32 values
 
 **Section sources**
 - [src/kernels/ptx/README.md:52-179](file://src/kernels/ptx/README.md#L52-L179)
@@ -851,6 +910,7 @@ The CuTe C++ framework represents NVIDIA's CUTLASS 3.x template-based approach t
 - **Manual Memory Control:** Precise cp.async operations for memory optimization
 - **TMA Integration:** Advanced memory operations for Blackwell architecture
 - **Tensor Core Support:** Integration with advanced compute units
+- **State Quantization:** Support for FP8 and FP4 quantization formats
 - **NVCC Compilation:** Standard C++ compilation with CUDA support
 - **Bank Conflict Avoidance:** Automatic swizzle patterns for shared memory
 
@@ -868,6 +928,7 @@ The v9 implementation focuses on manual memory operations with CuTe layout abstr
 - Leverages cute::copy for optimized memory transfer operations
 - **Enhanced:** Integrates TMA operations for advanced memory bandwidth utilization
 - **Enhanced:** Supports Tensor Core operations for compute optimization
+- **Enhanced:** Includes state quantization support for memory compression
 - Maintains compatibility with existing CUDA kernel interfaces
 - Provides true async TMA operations with cp.async.bulk.tensor
 
@@ -884,6 +945,7 @@ The v10 implementation focuses on pure layout algebra without full CuTe tensor o
 - **Layout definitions:** Using cute::Swizzle structure
 - **Coordinate transformation:** Through make_coord/layout()
 - **Tensor Core Integration:** Support for advanced compute operations
+- **State Quantization:** FP8 and FP4 quantization support
 
 **Enhanced Implementation Details:**
 - **SwizzledStateLayout:** Custom swizzle implementation for bank conflict avoidance
@@ -891,6 +953,7 @@ The v10 implementation focuses on pure layout algebra without full CuTe tensor o
 - **Manual cp.async operations:** For state loading
 - **Float4 vectorization:** For memory optimization
 - **Tensor Core Support:** Integration with advanced matrix operations
+- **Quantization Support:** Custom packing/unpacking routines for FP8/FP4
 
 **Advantages:**
 - **Reduced dependency:** On full CuTe tensor operations
@@ -898,6 +961,7 @@ The v10 implementation focuses on pure layout algebra without full CuTe tensor o
 - **Lower compilation overhead:** Faster build times
 - **Maintains CuTe layout optimization:** Benefits without complexity
 - **Enhanced Tensor Core Integration:** Support for compute-intensive operations
+- **Enhanced Quantization Support:** Memory compression capabilities
 
 **Section sources**
 - [src/kernels/cute_cpp/README.md:69-91](file://src/kernels/cute_cpp/README.md#L69-L91)
@@ -914,7 +978,7 @@ The framework provides a clear distinction between the two approaches:
 - **Performance:** 100%
 - **Development efficiency:** Medium
 - **Typical use:** General CUDA kernels
-- **Enhanced:** TMA and Tensor Core support
+- **Enhanced:** TMA and Tensor Core support, state quantization
 
 **CuTe DSL (cute_dsl/):**
 - **Language:** Python
@@ -1026,7 +1090,7 @@ def _gdn_matvec_kernel(
 ## Enhanced Benchmarking Capabilities
 
 ### Multi-Framework Performance Comparison
-The expanded kernel framework provides comprehensive benchmarking across all five implementation approaches:
+The expanded kernel framework provides comprehensive benchmarking across all six implementation approaches:
 
 **Framework Comparison:**
 - **Raw CUDA:** Traditional C++ kernel development (v5-v8)
@@ -1042,7 +1106,7 @@ The expanded kernel framework provides comprehensive benchmarking across all fiv
 - **bench_all_versions.py:** Unified benchmark for v5-v8 kernel versions
 - **bench_cutile_vs_triton.py:** cuTile vs Triton performance comparison
 - **Modal Deployment:** GPU environment setup for consistent testing
-- **Enhanced PTX Benchmarks:** Performance analysis of TMA and Tensor Core optimizations
+- **Enhanced PTX Benchmarks:** Performance analysis of TMA, Tensor Core, and quantization optimizations
 
 ### Benchmark Methodology and Metrics
 The benchmarking framework provides standardized evaluation across different kernel implementations:
@@ -1052,14 +1116,14 @@ The benchmarking framework provides standardized evaluation across different ker
 - **Memory Bandwidth:** Calculated from state access patterns and timing
 - **Speedup Analysis:** Performance improvement relative to baseline
 - **Throughput Analysis:** Operations per second for different batch sizes
-- **Enhanced Metrics:** TMA efficiency, Tensor Core utilization, memory bandwidth analysis
+- **Enhanced Metrics:** TMA efficiency, Tensor Core utilization, memory bandwidth analysis, quantization compression ratios
 
 **Benchmark Configuration:**
 - **Batch Sizes:** 1, 4, 16, 64 for scalability analysis
 - **Warmup Iterations:** 20 iterations to stabilize GPU clocks
 - **Measurement Iterations:** 200 iterations for statistical significance
 - **GPU Environment:** Modal B200 with consistent hardware configuration
-- **Enhanced Configurations:** TMA and Tensor Core specific testing
+- **Enhanced Configurations:** TMA and Tensor Core specific testing, quantization performance analysis
 
 **Statistical Analysis:**
 - **Median Timing:** Reduces outlier effects from GPU variability
@@ -1075,12 +1139,12 @@ The enhanced benchmarking capabilities reveal important insights about kernel op
 - **Flexibility vs Control:** PTX assembly provides maximum control but reduced portability
 - **Auto-tuning vs Manual Optimization:** Triton's auto-tuning works well for moderate batch sizes
 - **Memory Efficiency vs Compute Efficiency:** Different optimization strategies for different workloads
-- **Enhanced Trade-offs:** TMA efficiency vs Tensor Core utilization, memory bandwidth vs compute intensity
+- **Enhanced Trade-offs:** TMA efficiency vs Tensor Core utilization, memory bandwidth vs compute intensity, quantization compression vs accuracy
 
 **Framework-Specific Findings:**
 - **cuTile Limitations:** ~30-600x slower than Triton due to tile-based constraints
 - **PTX Performance:** ~0.03ms per iteration (B=64) - 150x+ improvement over simple CuTe DSL
-- **Enhanced PTX Optimizations:** TMA bulk operations and Tensor Core integration provide significant gains
+- **Enhanced PTX Optimizations:** TMA bulk operations, Tensor Core integration, and state quantization provide significant gains
 - **CuTe DSL Parity:** Optimized implementation achieves ~0.05ms per iteration (B=64)
 - **Raw CUDA Evolution:** v8 achieves 700-4500 GB/s performance (18-70x improvement)
 
@@ -1089,7 +1153,7 @@ The enhanced benchmarking capabilities reveal important insights about kernel op
 - **Compute Density:** Chunked processing increases arithmetic intensity
 - **Memory Bandwidth:** Critical bottleneck for small batch sizes
 - **Cache Optimization:** L1/L2 cache behavior affects different kernel types
-- **Enhanced Platform Optimizations:** TMA efficiency and Tensor Core utilization analysis
+- **Enhanced Platform Optimizations:** TMA efficiency, Tensor Core utilization, quantization compression analysis
 
 **Section sources**
 - [scripts/bench_cute_dsl_vs_cpp.py:1-333](file://scripts/bench_cute_dsl_vs_cpp.py#L1-L333)
@@ -1098,7 +1162,7 @@ The enhanced benchmarking capabilities reveal important insights about kernel op
 - [scripts/bench_cutile_vs_triton.py:1-122](file://scripts/bench_cutile_vs_triton.py#L1-L122)
 
 ## Mathematical Formulation and Layout
-The mathematical formulation remains consistent across all five kernel frameworks, with consistent state layout and delta rule application:
+The mathematical formulation remains consistent across all six kernel frameworks, with consistent state layout and delta rule application:
 
 **State Layout Consistency:**
 - **Decode:** [B, H, V, K] with k-last format
@@ -1136,12 +1200,13 @@ Store --> End(["End"])
 ## Performance Considerations
 
 ### Framework-to-Framework Performance Improvements
-The kernel evolution across five distinct frameworks demonstrates significant performance gains:
+The kernel evolution across six distinct frameworks demonstrates significant performance gains:
 
 **Raw CUDA to CuTe C++ (v9-v10):**
 - **v9:** Manual layout with swizzle provides 10-15% performance boost
 - **v10:** Pure layout algebra provides 5-10% additional optimization
 - **Enhanced:** TMA integration provides 15-25% additional performance
+- **Enhanced:** State quantization (FP8/FP4) provides 2-8x memory compression
 - **Total Improvement:** 25-40% over raw CUDA baseline
 
 **CuTe C++ to CuTe DSL:**
@@ -1158,10 +1223,11 @@ The kernel evolution across five distinct frameworks demonstrates significant pe
 **Enhanced PTX Inline Assembly Advantages:**
 - **Decode Kernel:** ~0.03ms per iteration (B=64) - 150x+ improvement over simple CuTe DSL
 - **Prefill Kernel:** ~0.04ms per iteration (B=64) - 100x+ improvement over simple CuTe DSL
-- **Enhanced Prefill:** TMA bulk operations and Tensor Core integration provide significant gains
+- **Enhanced Prefill:** TMA bulk operations, Tensor Core integration, and state quantization provide significant gains
 - **Fast Math:** 2-3x speedup for exp/log/reciprocal operations
 - **Warp Shuffle:** Eliminates shared memory dependencies for reductions
 - **Memory Optimization:** ld.global.nc and st.global.wb for memory optimization
+- **Quantization:** 4x memory compression with FP8, 8x with FP4
 
 **Enhanced CuTe DSL Achievements:**
 - **Optimized Implementation:** ~0.05ms per iteration (B=64) - Achieving Triton parity
@@ -1183,6 +1249,7 @@ Each framework targets specific hardware capabilities and constraints:
 - **v9:** True async TMA with cp.async.bulk.tensor
 - **v10:** Manual memory operations with precise control
 - **Enhanced:** Tensor Core support for advanced compute operations
+- **Enhanced:** State quantization support for memory compression
 - **Bank Conflict Avoidance:** Swizzle patterns for shared memory optimization
 
 **cuTile Hardware Limitations:**
@@ -1198,6 +1265,7 @@ Each framework targets specific hardware capabilities and constraints:
 - **FMA Operations:** Single rounding with better precision
 - **Enhanced TMA Operations:** cp.async.bulk.tensor.2d for advanced memory bandwidth
 - **Tensor Core Operations:** mma.sync.aligned.m16n8k16 for compute-intensive tasks
+- **Quantization Support:** Custom packing/unpacking for FP8/FP4 formats
 
 **Enhanced CuTe DSL:**
 - **JIT Compilation:** Instant kernel deployment with seconds-level build times
@@ -1206,7 +1274,7 @@ Each framework targets specific hardware capabilities and constraints:
 - **Reference Implementations:** Built-in correctness validation
 
 ### Multi-Framework Performance Comparison
-The evolution across five frameworks reveals substantial performance improvements and trade-offs:
+The evolution across six frameworks reveals substantial performance improvements and trade-offs:
 
 **Baseline Performance:**
 - **Raw CUDA v8:** 700-4500 GB/s (18-70x improvement over v5)
@@ -1221,7 +1289,7 @@ The performance comparison reveals interesting patterns:
 - **Medium batch (64):** All frameworks achieve similar performance (~0.05ms)
 - **Large batches (256+):** PTX inline assembly maintains advantage
 - **Development Speed:** CuTe DSL provides 10x+ development speed with near-par performance
-- **Enhanced Performance:** PTX with TMA and Tensor Core provides 25-40% additional gains
+- **Enhanced Performance:** PTX with TMA, Tensor Core, and quantization provides 25-40% additional gains
 
 **cuTile Performance Analysis:**
 - **Current Status:** ~30-600x slower than Triton baseline
@@ -1237,6 +1305,7 @@ The performance comparison reveals interesting patterns:
 5. **FMA Operations:** Single rounding with better precision
 6. **Enhanced TMA Operations:** cp.async.bulk.tensor.2d for advanced memory bandwidth
 7. **Tensor Core Integration:** mma.sync.aligned.m16n8k16 for compute-intensive tasks
+8. **Quantization Support:** Memory compression with FP8/FP4 formats
 
 **Why Enhanced CuTe DSL Achieves Parity:**
 1. **Shared Memory Optimization:** SMEM staging for Q, K, V, State
@@ -1257,6 +1326,7 @@ The performance comparison reveals interesting patterns:
 - **Memory Bandwidth:** Critical bottleneck for small batch sizes
 - **Compute Intensity:** Chunked processing increases arithmetic intensity
 - **Roofline Analysis:** Enhanced PTX achieves 8-16 FLOP/byte with TMA and Tensor Core
+- **Quantization Benefits:** 2-8x memory compression with FP8/FP4 formats
 
 **Section sources**
 - [src/kernels/README.md:68-101](file://src/kernels/README.md#L68-L101)
@@ -1317,7 +1387,7 @@ def test_cute_dsl_kernel():
 - **Multi-framework Comparison:** Consistent testing across different paradigms
 - **Modal Deployment:** GPU environment setup for reproducible testing
 - **Statistical Analysis:** Median timing and bandwidth calculations
-- **Enhanced PTX Testing:** TMA and Tensor Core specific performance analysis
+- **Enhanced PTX Testing:** TMA, Tensor Core, and quantization specific performance analysis
 
 **cuTile Testing Infrastructure:**
 - **test_cutile.py:** End-to-end testing with cuTile availability checks
@@ -1344,6 +1414,7 @@ def test_cute_dsl_kernel():
 - Check shared memory size calculations for BLOCK_V parameter selection
 - Validate state layout preservation in k-last format
 - **Enhanced:** Verify TMA descriptor setup for Blackwell architecture
+- **Enhanced:** Check quantization format compatibility (FP8/FP4) for different frameworks
 
 **Framework-Specific Checks:**
 - **Raw CUDA (v5-v8):** Verify template instantiation and BLOCK_V parameter
@@ -1351,7 +1422,8 @@ def test_cute_dsl_kernel():
 - **CuTe DSL:** Confirm Python package installation and CUTLASS version compatibility
 - **cuTile:** Verify CUDA 13.1+ installation and tile-based indexing constraints
 - **PTX:** Verify inline assembly syntax and PTX instruction support
-- **Enhanced PTX:** Check TMA descriptor validity and Tensor Core compatibility
+- **Enhanced PTX:** Check TMA descriptor validity, Tensor Core compatibility, and quantization support
+- **Triton:** Verify auto-tuning configuration and memory layout
 
 ### CUDA-Specific Issues
 **Hardware Requirements:**
@@ -1362,6 +1434,7 @@ def test_cute_dsl_kernel():
 - **cuTile:** Confirm CUDA 13.1+ installation for tile-based programming
 - **PTX:** Confirm PTX instruction support and inline assembly compilation
 - **Enhanced PTX:** Verify Blackwell architecture (sm_100) for TMA and Tensor Core
+- **Enhanced:** Check quantization support for FP8/FP4 formats
 
 **Memory Management:**
 - Verify shared memory limits for selected BLOCK_V sizes
@@ -1370,7 +1443,7 @@ def test_cute_dsl_kernel():
 - Monitor warp-level reduction assumptions (128 threads per block)
 - **cuTile:** Ensure proper tile size configuration for 2D access patterns
 - **PTX:** Ensure proper register usage and occupancy optimization
-- **Enhanced PTX:** Verify TMA descriptor alignment and memory bandwidth optimization
+- **Enhanced PTX:** Verify TMA descriptor alignment, memory bandwidth optimization, and quantization packing
 
 ### Quantization and Memory Issues
 **Raw CUDA Quantization:**
@@ -1384,6 +1457,7 @@ def test_cute_dsl_kernel():
 - **Manual Quantization:** Use appropriate quantization scales and formats
 - **Memory Layout:** Ensure proper alignment for quantized data types
 - **Enhanced:** Tensor Core quantization support for BF16 operations
+- **Enhanced:** State quantization support with custom packing routines
 
 **cuTile Quantization Limitations:**
 - **No Native Quantization:** cuTile operates on float32/fp32 types
@@ -1395,6 +1469,7 @@ def test_cute_dsl_kernel():
 - **Lookup Tables:** Use constant memory for quantization tables
 - **Vectorized Operations:** Utilize float4 operations for packed quantization
 - **Tensor Core Quantization:** BF16 quantization support for compute operations
+- **Custom Packing:** Implement efficient packing/unpacking for FP8 (FP8x4) and FP4 (FP4x8)
 
 ### Gate Computation and Numerical Stability
 **Softplus and Sigmoid:**
@@ -1434,7 +1509,8 @@ def test_cute_dsl_kernel():
 - Verify token prefetching and buffer management
 - Validate chunked processing for long sequences
 - Ensure proper state persistence across sequence boundaries
-- **Enhanced PTX:** Verify TMA bulk operations and Tensor Core utilization
+- **Enhanced PTX:** Verify TMA bulk operations, Tensor Core utilization, and quantization
+- **Enhanced CuTe C++:** Check TiledMMA integration and quantization support
 
 **cuTile Prefill Limitations:**
 - **Multiple Launches:** 32 kernel launches for B×H combinations
@@ -1447,7 +1523,7 @@ def test_cute_dsl_kernel():
 - Check state reuse patterns for memory efficiency
 - Validate cache hint usage for streaming workloads
 - Ensure proper synchronization between chunks
-- **Enhanced:** TMA descriptor management and Tensor Core integration
+- **Enhanced:** TMA descriptor management, Tensor Core integration, and quantization packing
 
 ### Framework-Specific Issues
 **CuTe C++ Issues:**
@@ -1455,7 +1531,7 @@ def test_cute_dsl_kernel():
 - **Layout Definitions:** Ensure proper CuTe namespace usage and includes
 - **Memory Operations:** Check cp.async usage and synchronization
 - **Swizzle Patterns:** Validate XOR patterns for bank conflict avoidance
-- **Enhanced:** Verify TMA descriptor setup and Tensor Core support
+- **Enhanced:** Verify TMA descriptor setup, Tensor Core support, and quantization
 
 **CuTe DSL Issues:**
 - **Package Installation:** Verify nvidia-cutlass-dsl>=4.3 installation
@@ -1474,7 +1550,7 @@ def test_cute_dsl_kernel():
 - **GPU Architecture:** Ensure sm_100 architecture support
 - **Register Usage:** Monitor register pressure and occupancy constraints
 - **Synchronization:** Ensure proper cp.async synchronization
-- **Enhanced:** Verify TMA descriptor validity and Tensor Core compatibility
+- **Enhanced:** Verify TMA descriptor validity, Tensor Core compatibility, and quantization support
 
 **Section sources**
 - [src/kernels/cute_cpp/README.md:16-45](file://src/kernels/cute_cpp/README.md#L16-L45)
@@ -1483,52 +1559,55 @@ def test_cute_dsl_kernel():
 - [src/kernels/ptx/README.md:151-163](file://src/kernels/ptx/README.md#L151-L163)
 
 ## Conclusion
-The evolution of GDN kernels across five distinct frameworks represents a remarkable journey in CUDA optimization and GPU kernel development methodology. The comprehensive framework expansion, including the updated kernel organization from `src/kernels/cute/` to `src/kernels/cute_cpp/`, provides developers with unprecedented flexibility in choosing optimization approaches.
+The evolution of GDN kernels across six distinct frameworks represents a remarkable journey in CUDA optimization and GPU kernel development methodology. The comprehensive framework expansion, including the updated kernel organization from `src/kernels/cute/` to `src/kernels/cute_cpp/`, provides developers with unprecedented flexibility in choosing optimization approaches.
 
-**Enhanced PTX Framework**: The most significant enhancement is the addition of sophisticated TMA (Tensor Memory Accelerator) and Tensor Core optimization techniques to the PTX inline assembly framework. These optimizations leverage the Blackwell architecture's advanced memory subsystem and compute capabilities to achieve near-optimal performance.
+**Enhanced PTX Framework**: The most significant enhancement is the addition of sophisticated TMA (Tensor Memory Accelerator), Tensor Core optimization techniques, and state quantization support to the PTX inline assembly framework. These optimizations leverage the Blackwell architecture's advanced memory subsystem and compute capabilities to achieve near-optimal performance.
 
-The five framework categories offer distinct advantages:
+The six framework categories offer distinct advantages:
 - **Raw CUDA (v5-v8):** Maximum control with manual optimization
-- **CuTe C++ (v9-v10):** Balanced approach with layout algebra and manual control
+- **CuTe C++ (v9-v10):** Balanced approach with layout algebra, manual control, and state quantization
 - **CuTe DSL (v11+):** Rapid development with near-native performance
 - **cuTile (CUDA 13.1+):** High-level Python programming with constraints
-- **PTX Inline Assembly:** Ultimate performance through direct hardware control
+- **PTX Inline Assembly:** Ultimate performance through direct hardware control with TMA, Tensor Core, and quantization
+- **Triton:** High-level Python DSL with auto-tuning capabilities
 
 The kernel organization restructuring separates CuTe C++ implementations (v9-v10) from CuTe DSL framework, allowing developers to choose between pure C++ template development and Python-based rapid prototyping. This separation maintains the mathematical rigor of the GDN attention mechanism while providing multiple optimization pathways.
 
 **Enhanced Performance Achievements:**
 - From 24-2834 GB/s baseline Triton performance to 7585-7602 GB/s for the latest CuTe C++ v10 implementation
 - **PTX Inline Assembly:** ~0.03ms per iteration (B=64) - 150x+ improvement over simple CuTe DSL
-- **Enhanced PTX:** TMA bulk operations and Tensor Core integration provide 25-40% additional performance gains
+- **Enhanced PTX:** TMA bulk operations, Tensor Core integration, and state quantization provide 25-40% additional performance gains
 - The optimized CuTe DSL implementation achieves near-Triton performance levels while maintaining development advantages
 
 The cuTile framework, while limited by its tile-based indexing constraints, provides valuable insights into high-level GPU programming approaches. Its current performance limitations (~30-600x slower than Triton) highlight the trade-offs between development simplicity and raw performance.
 
-**Enhanced Hardware Integration**: The most significant advancement is the integration of TMA bulk operations and Tensor Core optimizations in the PTX framework. These optimizations enable:
+**Enhanced Hardware Integration**: The most significant advancement is the integration of TMA bulk operations, Tensor Core optimizations, and state quantization in the PTX framework. These optimizations enable:
 - **Advanced Memory Bandwidth:** cp.async.bulk.tensor.2d for coalesced 2D transfers
 - **Compute Optimization:** mma.sync.aligned.m16n8k16 for BF16 matrix operations
 - **Memory Hints:** ld.global.nc and st.global.wb for specific cache behaviors
 - **Fast Math:** ex2.approx, lg2.approx, rcp.approx for mathematical operations
+- **State Quantization:** FP8 (4x compression) and FP4 (8x compression) with custom packing
 
-The mathematical formulation remains consistent across all frameworks, with the critical ordering of applying the decay factor before computing old_v ensuring numerical stability. The k-last state layout and GVA expansion patterns are maintained throughout the evolution, supporting the grouped value attention mechanism with 8 V-heads and 4 Q-heads.
+The mathematical formulation remains consistent across all six frameworks, with the critical ordering of applying the decay factor before computing old_v ensuring numerical stability. The k-last state layout and GVA expansion patterns are maintained throughout the evolution, supporting the grouped value attention mechanism with 8 V-heads and 4 Q-heads.
 
 **Current Performance Status:**
 The most significant achievement is the closure of the performance gap between CuTe DSL implementations and Triton kernels. The optimized CuTe DSL implementation now achieves ~0.05ms per iteration (B=64), matching Triton performance levels while maintaining the development advantages that make CuTe DSL so compelling for research and prototyping scenarios.
 
 **Enhanced Framework Selection Guidance:**
-- **Maximum Performance:** PTX inline assembly with TMA and Tensor Core optimizations
+- **Maximum Performance:** PTX inline assembly with TMA, Tensor Core, and quantization optimizations
 - **Development Speed:** CuTe DSL for rapid prototyping and research
-- **Production CUDA:** CuTe C++ for general-purpose CUDA kernels
+- **Production CUDA:** CuTe C++ for general-purpose CUDA kernels with quantization support
 - **High-level Programming:** cuTile for educational purposes and simple kernels
 - **Legacy Support:** Raw CUDA for compatibility and learning
+- **Auto-tuning:** Triton for baseline comparison and performance analysis
 
-The dual implementation strategy with five distinct frameworks ensures broad applicability while maximizing performance in supported environments. The kernels efficiently handle both autoregressive decoding with k-last state layout and batched prefill processing with variable-length sequences, making them suitable for production deployment in modern GPU-accelerated inference systems with advanced hardware features.
+The dual implementation strategy with six distinct frameworks ensures broad applicability while maximizing performance in supported environments. The kernels efficiently handle both autoregressive decoding with k-last state layout and batched prefill processing with variable-length sequences, making them suitable for production deployment in modern GPU-accelerated inference systems with advanced hardware features.
 
-The progression from basic CUDA kernels to PTX inline assembly and enhanced CuTe DSL demonstrates the evolution toward more sophisticated optimization techniques and development methodologies. The comprehensive performance analysis reveals that optimal kernel selection depends on specific requirements, with PTX inline assembly with TMA and Tensor Core optimizations excelling at all batch sizes, Triton v5 demonstrating competitive performance at moderate batch sizes due to its auto-tuning capabilities, and the enhanced CuTe DSL framework providing a compelling balance of development speed and performance.
+The progression from basic CUDA kernels to PTX inline assembly and enhanced CuTe DSL demonstrates the evolution toward more sophisticated optimization techniques and development methodologies. The comprehensive performance analysis reveals that optimal kernel selection depends on specific requirements, with PTX inline assembly with TMA, Tensor Core, and quantization optimizations excelling at all batch sizes, Triton v5 demonstrating competitive performance at moderate batch sizes due to its auto-tuning capabilities, and the enhanced CuTe DSL framework providing a compelling balance of development speed and performance.
 
-The addition of the CuTe C++ framework and cuTile implementation positions this project at the forefront of GPU kernel development innovation, bridging the gap between high-level Python development and low-level C++ performance optimization. The comprehensive ecosystem supports researchers and practitioners in developing, testing, and deploying high-performance GDN kernels across diverse hardware platforms and use cases.
+The addition of the CuTe C++ framework, cuTile implementation, and enhanced PTX framework positions this project at the forefront of GPU kernel development innovation, bridging the gap between high-level Python development and low-level C++ performance optimization. The comprehensive ecosystem supports researchers and practitioners in developing, testing, and deploying high-performance GDN kernels across diverse hardware platforms and use cases.
 
 **Enhanced Optimization Target:**
 The ultimate goal is to achieve PTX-level performance through systematic optimization of the CuTe DSL implementation, enabling Python-native kernels to achieve near-PTX performance levels while maintaining the development advantages that make CuTe DSL so compelling for research and prototyping scenarios. The current optimized CuTe DSL implementation represents a significant step toward this goal, achieving near-Triton performance levels with continued development effort.
 
-The enhanced PTX framework with TMA and Tensor Core optimizations represents the cutting edge of GPU kernel development, providing developers with the tools to achieve near-optimal performance on modern GPU architectures while maintaining the flexibility to adapt to future hardware generations.
+The enhanced PTX framework with TMA, Tensor Core, and quantization optimizations represents the cutting edge of GPU kernel development, providing developers with the tools to achieve near-optimal performance on modern GPU architectures while maintaining the flexibility to adapt to future hardware generations.

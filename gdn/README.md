@@ -16,7 +16,11 @@ gdn/
 │   ├── cuda/            # Raw CUDA v5-v8
 │   ├── cute_cpp/        # CuTe C++ v9-v10
 │   └── ptx/             # PTX assembly
-├── benchmarks/          # Benchmark scripts
+├── scripts/             # GDN-specific scripts
+│   ├── build_cuda.py    # CUDA compilation
+│   ├── bench_*.py       # Various benchmarks
+│   └── test_*.py        # Various tests
+├── benchmarks/          # Modal benchmark runners
 ├── tests/               # Correctness tests
 ├── docs/                # Documentation
 ├── trace_definitions/   # FlashInfer trace definitions
@@ -34,6 +38,9 @@ modal run gdn/benchmarks/bench_modal.py --kernel prefill
 
 # Run correctness tests
 modal run gdn/tests/test_correctness.py
+
+# Build CUDA kernels
+modal run gdn/scripts/build_cuda.py
 ```
 
 ## Performance (B200)
