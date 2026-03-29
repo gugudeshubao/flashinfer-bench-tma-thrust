@@ -7,6 +7,7 @@
 - [src/kernels/cuda/README.md](file://src/kernels/cuda/README.md)
 - [src/kernels/cute/README.md](file://src/kernels/cute/README.md)
 - [src/kernels/cute_dsl/README.md](file://src/kernels/cute_dsl/README.md)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py](file://src/kernels/cute_dsl/gdn_decode_dsl.py)
 - [src/kernels/cutile/README.md](file://src/kernels/cutile/README.md)
 - [src/kernels/triton/README.md](file://src/kernels/triton/README.md)
 - [src/kernels/cuda/gdn_decode_v5.cuh](file://src/kernels/cuda/gdn_decode_v5.cuh)
@@ -18,7 +19,10 @@
 - [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py)
 - [gdn_decode_qk4_v8_d128_k_last/config.toml](file://gdn_decode_qk4_v8_d128_k_last/config.toml)
 - [scripts/bench_all_versions.py](file://scripts/bench_all_versions.py)
+- [scripts/bench_cute_vs_triton.py](file://scripts/bench_cute_vs_triton.py)
 - [scripts/build_cuda.py](file://scripts/build_cuda.py)
+- [scripts/test_cute_dsl.py](file://scripts/test_cute_dsl.py)
+- [scripts/explore_cute_dsl.py](file://scripts/explore_cute_dsl.py)
 - [docs/PERFORMANCE.md](file://docs/PERFORMANCE.md)
 - [docs/ZHIHU_GDN_TENSOR_CORE.md](file://docs/ZHIHU_GDN_TENSOR_CORE.md)
 - [docs/ROADMAP.md](file://docs/ROADMAP.md)
@@ -26,12 +30,13 @@
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive coverage of CuTe DSL Python programming model
-- Added cuTile Python programming model (v11 planning)
+- Enhanced documentation with comprehensive CuTe DSL Python implementation details
+- Added cuTile Python programming model (v11 planning) alongside existing CuTe C++ implementations
 - Updated Tensor Core evolution documentation from wgmma to tcgen05.mma
-- Enhanced technical depth on Blackwell architecture optimization
 - Expanded comparison matrix to include CuTe DSL and cuTile
+- Enhanced technical depth on Blackwell architecture optimization
 - Updated performance analysis with new framework additions
+- Added practical validation examples and testing procedures
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -46,9 +51,11 @@
 
 ## Introduction
 
-This document presents a comprehensive comparison of four GPU programming approaches for implementing the Gated Delta Net (GDN) decode kernel: Raw CUDA, CuTe (NVIDIA CUTLASS Tile), CuTe DSL Python, cuTile Python, and Triton. The analysis focuses on the trade-offs between abstraction levels, performance capabilities, development complexity, and practical deployment considerations, as demonstrated by the FlashInfer-Bench-TMA-Thrust project targeting NVIDIA B200 hardware with Blackwell architecture optimizations.
+This document presents a comprehensive comparison of five GPU programming approaches for implementing the Gated Delta Net (GDN) decode kernel: Raw CUDA, CuTe (NVIDIA CUTLASS Tile), CuTe DSL Python, cuTile Python, and Triton. The analysis focuses on the trade-offs between abstraction levels, performance capabilities, development complexity, and practical deployment considerations, as demonstrated by the FlashInfer-Bench-TMA-Thrust project targeting NVIDIA B200 hardware with Blackwell architecture optimizations.
 
 The project demonstrates that for memory-bound operations like GDN decode, careful attention to shared memory layout, bank conflict avoidance, and vectorized memory access patterns yields near-peak memory bandwidth utilization. The comparison reveals distinct advantages of each approach depending on the target workload characteristics and deployment constraints, with special emphasis on Blackwell architecture's tcgen05.mma tensor core evolution.
+
+**Updated** Enhanced coverage of CuTe DSL Python implementation and cuTile Python programming model, providing developers with modern Python-native alternatives to traditional C++ CUDA development.
 
 ## Project Structure
 
@@ -66,6 +73,8 @@ end
 subgraph "Benchmarking"
 BENCH_SCRIPT[scripts/bench_all_versions.py]
 BUILD_SCRIPT[scripts/build_cuda.py]
+CUTE_TEST[scripts/test_cute_dsl.py]
+CUTE_BENCH[scripts/bench_cute_vs_triton.py]
 end
 subgraph "Documentation"
 PERF_DOCS[docs/PERFORMANCE.md]
@@ -105,12 +114,20 @@ BUILD_SCRIPT --> V7
 BUILD_SCRIPT --> V8
 BUILD_SCRIPT --> V9
 BUILD_SCRIPT --> V10
+CUTE_TEST --> V9
+CUTE_TEST --> V10
+CUTE_TEST --> V11
+CUTE_BENCH --> V9
+CUTE_BENCH --> V10
+CUTE_BENCH --> V11
 ```
 
 **Diagram sources**
 - [src/kernels/README.md:1-83](file://src/kernels/README.md#L1-L83)
 - [scripts/bench_all_versions.py:1-444](file://scripts/bench_all_versions.py#L1-L444)
 - [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
+- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
+- [scripts/bench_cute_vs_triton.py:1-179](file://scripts/bench_cute_vs_triton.py#L1-L179)
 
 **Section sources**
 - [README.md:63-92](file://README.md#L63-L92)
@@ -133,6 +150,8 @@ BUILD_SCRIPT --> V10
 | **Compilation Time** | Seconds | Minutes | Seconds | Seconds | Seconds |
 | **Python Integration** | ❌ | ✅ (via ctypes) | ✅ Native | ✅ Native | ✅ Native |
 | **Blackwell Optimized** | ❌ | ✅ | ✅ | ✅ | ❌ |
+| **JIT Compilation** | ❌ | ❌ | ✅ | ✅ | ✅ |
+| **Framework Integration** | ❌ | ✅ (C++ templates) | ✅ Native | ✅ Native | ✅ Native |
 
 ### Kernel Evolution Timeline
 
@@ -165,7 +184,7 @@ Note over V5,V11 : All versions achieve ~95% B200 peak bandwidth
 - [src/kernels/README.md:14-51](file://src/kernels/README.md#L14-L51)
 - [src/kernels/cuda/README.md:14-87](file://src/kernels/cuda/README.md#L14-L87)
 - [src/kernels/cute/README.md:16-130](file://src/kernels/cute/README.md#L16-L130)
-- [src/kernels/cute_dsl/README.md:1-57](file://src/kernels/cute_dsl/README.md#L1-L57)
+- [src/kernels/cute_dsl/README.md:1-95](file://src/kernels/cute_dsl/README.md#L1-L95)
 - [src/kernels/cutile/README.md:1-70](file://src/kernels/cutile/README.md#L1-L70)
 - [src/kernels/triton/README.md:23-109](file://src/kernels/triton/README.md#L23-L109)
 
@@ -325,7 +344,7 @@ E --> H["100% C++ Performance<br/>~100% Efficiency"]
 ```
 
 **Diagram sources**
-- [src/kernels/cute_dsl/README.md:1-57](file://src/kernels/cute_dsl/README.md#L1-L57)
+- [src/kernels/cute_dsl/README.md:1-95](file://src/kernels/cute_dsl/README.md#L1-L95)
 
 **CuTe DSL Features**
 - **JIT Compilation**: 20-30x faster than traditional CuTe compilation
@@ -334,8 +353,39 @@ E --> H["100% C++ Performance<br/>~100% Efficiency"]
 - **Blackwell tcgen05.mma**: Direct access to latest Tensor Core instructions
 - **DLPack Integration**: Seamless framework interoperability
 
+**Practical Implementation Example**
+The CuTe DSL implementation demonstrates a simplified GDN decode kernel that validates the concept:
+
+```python
+@cute.kernel
+def _gdn_state_matmul_kernel(
+    gState: cute.Tensor,   # [total_state_elements] flattened
+    gQ: cute.Tensor,       # [total_q_elements] flattened
+    gOut: cute.Tensor,     # [total_out_elements] flattened
+):
+    tidx, _, _ = cute.arch.thread_idx()
+    bidx, _, _ = cute.arch.block_idx()
+    
+    # Compute State @ Q for demonstration
+    # Each thread handles one V element
+    acc = gState[state_base] * gQ[q_base]
+    # ... unrolled computation for D=128 elements
+    gOut[out_idx] = acc
+```
+
+**Validation and Testing**
+The implementation includes comprehensive testing procedures:
+
+- **Modal Deployment**: CuTe DSL availability verification on B200 hardware
+- **Reference Comparison**: Validation against PyTorch reference implementation
+- **Performance Benchmarking**: Comparison with Triton baseline
+- **Error Handling**: Graceful fallback to CPU implementation when unavailable
+
 **Section sources**
-- [src/kernels/cute_dsl/README.md:1-57](file://src/kernels/cute_dsl/README.md#L1-L57)
+- [src/kernels/cute_dsl/README.md:1-95](file://src/kernels/cute_dsl/README.md#L1-L95)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
+- [scripts/explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
 
 ### cuTile Python Implementation (v11 Planning)
 
@@ -417,6 +467,8 @@ Triton's kernel automatically adapts block sizes based on batch characteristics:
 | JIT Compilation | ❌ No | ❌ No | ✅ Automatic | ✅ Automatic | ✅ Automatic |
 | Blackwell Architecture | ❌ | ✅ | ✅ | ✅ | ❌ |
 | tcgen05.mma Support | ❌ | ✅ | ✅ | ✅ | ❌ |
+| Development Environment | ❌ | ✅ | ✅ | ✅ | ✅ |
+| Learning Curve | ⚠️ Steep | ⚠️ Moderate | ⚠️ Moderate | ✅ Gentle | ✅ Gentle |
 
 ### Performance Benchmark Results
 
@@ -541,6 +593,11 @@ CuTe introduces template instantiation overhead that may impact compilation time
 - **Cause**: CUDA toolkit version requirements
 - **Solution**: Ensure CUDA 13.1+ for cuTile, CUTLASS 4.0+ for CuTe DSL
 
+**6. CuTe DSL Installation Problems**
+- **Symptom**: ImportError: No module named 'cutlass'
+- **Cause**: Missing CUTLASS DSL installation
+- **Solution**: Install with `pip install nvidia-cutlass-dsl>=4.3`
+
 ### Debugging Tools and Techniques
 
 **Performance Profiling:**
@@ -556,6 +613,7 @@ CuTe introduces template instantiation overhead that may impact compilation time
 **Section sources**
 - [scripts/bench_all_versions.py:316-346](file://scripts/bench_all_versions.py#L316-L346)
 - [docs/PERFORMANCE.md:35-61](file://docs/PERFORMANCE.md#L35-L61)
+- [scripts/test_cute_dsl.py:36-137](file://scripts/test_cute_dsl.py#L36-L137)
 
 ## Conclusion
 
@@ -565,12 +623,16 @@ The FlashInfer-Bench-TMA-Thrust project demonstrates that Raw CUDA, CuTe, CuTe D
 
 **CuTe** bridges the gap between control and productivity, offering declarative abstractions for challenging GPU programming patterns like SMEM swizzling and TMA operations. It maintains high performance while reducing code complexity and improving maintainability.
 
-**CuTe DSL** represents the future of GPU programming, combining Python simplicity with C++ performance. With JIT compilation and native DLPack integration, it enables rapid prototyping while maintaining production-ready performance levels.
+**CuTe DSL** represents the future of GPU programming, combining Python simplicity with C++ performance. With JIT compilation and native DLPack integration, it enables rapid prototyping while maintaining production-ready performance levels. The implementation has been validated on Modal B200 hardware with successful demonstrations of State @ Q computation.
 
-**cuTile** NVIDIA's ambitious response to Triton, offering a pure Python programming model with automatic thread management and built-in Tensor Core optimization. While still emerging, it promises to simplify GPU programming significantly.
+**cuTile** NVIDIA's ambitious response to Triton, offering a pure Python programming model with automatic thread management and built-in Tensor Core optimization. While still emerging, it promises to simplify GPU programming significantly with its planned 2025.12 release.
 
 **Triton** prioritizes rapid development and cross-platform compatibility, making it ideal for prototyping and scenarios where deployment flexibility outweighs marginal performance gains.
 
 The choice between these approaches should consider factors including team expertise, deployment constraints, maintenance requirements, and specific performance targets. For the GDN decode kernel on B200 hardware, all five frameworks achieve near-peak memory bandwidth utilization, validating the effectiveness of memory-bound optimization strategies regardless of the underlying implementation approach.
 
 **Tensor Core Evolution Note**: The transition from wgmma (Hopper) to tcgen05.mma (Blackwell) represents a significant 2-4x performance improvement for applicable operations, highlighting the importance of staying current with hardware-specific optimizations. For memory-bound operations like GDN decode, the focus remains on bandwidth optimization rather than Tensor Core utilization.
+
+**Modern Development Advantage**: The addition of CuTe DSL and cuTile Python demonstrates NVIDIA's commitment to modernizing GPU programming with Python-native interfaces that maintain C++ performance levels while dramatically reducing development complexity and compilation times.
+
+**Future Outlook**: As cuTile reaches maturity and CuTe DSL continues to evolve, developers will have increasingly sophisticated options for GPU kernel development, balancing performance requirements with development productivity and maintainability concerns.

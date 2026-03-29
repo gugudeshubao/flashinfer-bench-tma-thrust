@@ -83,6 +83,21 @@ mOutput = from_dlpack(output_tensor).mark_layout_dynamic()
 launch(mInput, mOutput, num_blocks)
 ```
 
+## 性能对比
+
+| Config | Triton (ms) | CuTe DSL (ms) | 说明 |
+|--------|-------------|---------------|------|
+| B=1 | 0.053 | 40.4 | Triton 760x 更快 |
+| B=64 | 0.051 | 40.8 | Triton 800x 更快 |
+
+**重要**: CuTe DSL kernel 目前是 **naive 实现**，没有使用：
+- TiledCopy / TiledMMA
+- Tensor Core MMA (tcgen05.mma)
+- Shared memory 优化
+- Async copy (TMA)
+
+优化后的 CuTe DSL kernel 应该能达到接近 Triton 的性能。
+
 ## 状态
 
 ✅ **已验证** - CuTe DSL 4.4.2 在 Modal B200 上可用

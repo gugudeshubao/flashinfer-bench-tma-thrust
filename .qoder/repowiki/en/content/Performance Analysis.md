@@ -12,9 +12,13 @@
 - [scripts/bench_all_versions.py](file://scripts/bench_all_versions.py)
 - [scripts/bench_cuda_real.py](file://scripts/bench_cuda_real.py)
 - [scripts/build_cuda.py](file://scripts/build_cuda.py)
+- [scripts/explore_cute_dsl.py](file://scripts/explore_cute_dsl.py)
+- [scripts/test_cute_dsl.py](file://scripts/test_cute_dsl.py)
+- [scripts/test_cute_minimal.py](file://scripts/test_cute_minimal.py)
 - [src/kernels/cute/README.md](file://src/kernels/cute/README.md)
 - [src/kernels/cute/gdn_decode_v9.cuh](file://src/kernels/cute/gdn_decode_v9.cuh)
 - [src/kernels/cute/gdn_decode_v10.cuh](file://src/kernels/cute/gdn_decode_v10.cuh)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py](file://src/kernels/cute_dsl/gdn_decode_dsl.py)
 - [src/gdn_kernels.cu](file://src/gdn_kernels.cu)
 - [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py)
 - [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py)
@@ -30,11 +34,11 @@
 
 ## Update Summary
 **Changes Made**
-- Enhanced roofline analysis documentation with corrected Blackwell architecture tcgen05.mma instruction terminology
-- Updated performance metrics documentation to reflect accurate Tensor Core instruction naming
-- Corrected terminology from wgmma to tcgen05.mma for Blackwell architecture
-- Enhanced roofline analysis with detailed tcgen05.mma instruction set documentation
-- Updated Chinese documentation to reflect proper Blackwell Tensor Core instruction naming
+- Enhanced with comprehensive CuTe DSL testing infrastructure including exploration, validation, and minimal kernel testing scripts
+- Added numerical accuracy verification against PyTorch references using Modal deployment
+- Integrated CUTLASS 4.x CuTe DSL validation with automatic fallback to reference implementations
+- Expanded performance validation framework with automated correctness testing and comparison procedures
+- Updated testing methodology to include Modal GPU deployment for CUTLASS API validation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -51,14 +55,14 @@
 ## Introduction
 This document presents a comprehensive performance analysis and measurement methodology for the GDN kernels benchmark suite. It explains how roofline analysis characterizes kernel performance limits and identifies bottlenecks in terms of compute and memory bandwidth. It documents the performance tracking system, including metrics collection, version history management, and comparative analysis frameworks. It details the arithmetic mean speedup calculation used for contest evaluation, including reference implementation comparisons and statistical validation procedures. Practical examples demonstrate performance profiling, bottleneck identification, and optimization impact measurement. Finally, it covers performance validation ensuring correctness while maximizing speed, including edge case testing and regression prevention, and outlines debugging techniques and systematic approaches to identifying optimization opportunities.
 
-**Updated** Enhanced with comprehensive Blackwell architecture documentation using correct tcgen05.mma terminology, precise Ridge Point calculations, and extensive comparative performance metrics across all kernel versions.
+**Updated** Enhanced with comprehensive CuTe DSL testing infrastructure, Modal deployment integration, and numerical accuracy verification against PyTorch references.
 
 ## Project Structure
 The repository organizes performance-critical components into modular directories and shared documentation:
 - Benchmarks and runners: orchestrate Modal GPU runs, collect latency and correctness metrics, and compute speedups.
 - Kernel implementations: optimized CUDA v5-v10 kernels with CuTe swizzle optimization and vectorized loads.
 - Trace definitions: structured operation definitions and workloads for the benchmark framework.
-- Scripts: setup utilities, comprehensive benchmarking across all kernel versions, and CUDA library building.
+- Scripts: setup utilities, comprehensive benchmarking across all kernel versions, CUDA library building, and CuTe DSL validation testing.
 - Documentation: performance summaries, roofline analyses, and kernel architecture details.
 
 ```mermaid
@@ -89,6 +93,12 @@ CU9["src/kernels/cute/gdn_decode_v9.cuh"]
 CU10["src/kernels/cute/gdn_decode_v10.cuh"]
 GDNK["src/gdn_kernels.cu"]
 end
+subgraph "CuTe DSL Testing"
+EXPLORE["scripts/explore_cute_dsl.py"]
+TESTDSL["scripts/test_cute_dsl.py"]
+MINIMAL["scripts/test_cute_minimal.py"]
+DSLKERNEL["src/kernels/cute_dsl/gdn_decode_dsl.py"]
+end
 subgraph "Docs"
 PERF["docs/PERFORMANCE.md"]
 ROOF["docs/ROOFLINE.md"]
@@ -116,6 +126,10 @@ PERF --> ZH
 PERF --> CUDER
 DBG1 --> BM
 DBG2 --> BM
+EXPLORE --> DSLKERNEL
+TESTDSL --> DSLKERNEL
+MINIMAL --> DSLKERNEL
+DSLKERNEL --> PERF
 CUDA_DEC --> SRC_DEC
 CUDA_PRE --> SRC_PRE
 CU9 --> GDNK
@@ -128,10 +142,14 @@ CU10 --> GDNK
 - [scripts/bench_all_versions.py:1-444](file://scripts/bench_all_versions.py#L1-L444)
 - [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
 - [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
+- [scripts/explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
+- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
+- [scripts/test_cute_minimal.py:1-194](file://scripts/test_cute_minimal.py#L1-L194)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
 - [docs/PERFORMANCE.md:1-144](file://docs/PERFORMANCE.md#L1-L144)
 - [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
 - [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
-- [src/kernels/cute/README.md:1-44](file://src/kernels/cute/README.md#L1-L44)
+- [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
 - [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
 - [src/kernels/cute/gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
 - [src/gdn_kernels.cu:1-171](file://src/gdn_kernels.cu#L1-L171)
@@ -142,6 +160,10 @@ CU10 --> GDNK
 - [scripts/bench_all_versions.py:1-444](file://scripts/bench_all_versions.py#L1-L444)
 - [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
 - [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
+- [scripts/explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
+- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
+- [scripts/test_cute_minimal.py:1-194](file://scripts/test_cute_minimal.py#L1-L194)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
 - [docs/PERFORMANCE.md:1-144](file://docs/PERFORMANCE.md#L1-L144)
 - [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
 - [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
@@ -154,26 +176,32 @@ CU10 --> GDNK
 - Trace definitions: structured JSON definitions of operations, axes, inputs/outputs, and reference implementations.
 - Performance documentation: versioned performance summaries, roofline analyses, and kernel architecture details.
 - Debugging utilities: scripts to validate correctness and evaluate framework behavior.
+- **CuTe DSL Testing Infrastructure**: Modal-deployed testing scripts for validating CUTLASS 4.x CuTe DSL API availability and numerical accuracy against PyTorch references.
+
+**Updated** Enhanced with comprehensive CuTe DSL testing infrastructure including exploration, validation, and minimal kernel testing scripts with Modal deployment integration.
 
 Key responsibilities:
 - Metrics collection: latency_ms, reference_latency_ms, speedup_factor, max_absolute_error, max_relative_error.
 - Comparative analysis: side-by-side solution vs baseline latency and average speedup across all kernel versions.
 - Roofline characterization: arithmetic intensity and bandwidth targets for B200 hardware.
 - Delta rule validation: ensures mathematical correctness of state update computations.
-
-**Updated** Enhanced with comprehensive cross-version benchmarking, real CUDA library integration, and CuTe swizzle optimization documentation using correct Blackwell architecture terminology.
+- **CuTe DSL validation**: verifies CUTLASS 4.x API availability and numerical accuracy against reference implementations.
 
 **Section sources**
 - [benchmarks/bench_modal.py:106-330](file://benchmarks/bench_modal.py#L106-L330)
 - [scripts/bench_all_versions.py:1-444](file://scripts/bench_all_versions.py#L1-L444)
 - [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
 - [scripts/build_cuda.py:1-436](file://scripts/build_cuda.py#L1-L436)
+- [scripts/explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
+- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
+- [scripts/test_cute_minimal.py:1-194](file://scripts/test_cute_minimal.py#L1-L194)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
 - [docs/PERFORMANCE.md:1-144](file://docs/PERFORMANCE.md#L1-L144)
 - [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
 - [docs/ZHIHU_GDN_TENSOR_CORE.md:1-837](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L1-L837)
 
 ## Architecture Overview
-The performance measurement pipeline integrates the benchmark runner with kernel implementations and trace definitions. Workloads are generated (synthetic or from HF), uploaded to a Modal volume, and executed on B200 GPUs. The system now supports comprehensive cross-version benchmarking with real CUDA libraries and extensive correctness validation.
+The performance measurement pipeline integrates the benchmark runner with kernel implementations and trace definitions. Workloads are generated (synthetic or from HF), uploaded to a Modal volume, and executed on B200 GPUs. The system now supports comprehensive cross-version benchmarking with real CUDA libraries, extensive correctness validation, and CuTe DSL API testing with Modal deployment.
 
 ```mermaid
 sequenceDiagram
@@ -181,6 +209,7 @@ participant CLI as "CLI"
 participant Runner as "bench_modal.py"
 participant AllVersions as "bench_all_versions.py"
 participant RealCUDA as "bench_cuda_real.py"
+participant CuTeTest as "test_cute_dsl.py"
 participant FS as "Modal Volume"
 participant Bench as "Benchmark"
 participant Eval as "DefaultEvaluator"
@@ -198,8 +227,10 @@ Eval-->>Bench : "metrics (latency, errors)"
 Bench-->>Runner : "results per workload"
 Runner-->>CLI : "summary tables and averages"
 Note over AllVersions,RealCUDA : New : Cross-version benchmarking and real CUDA library testing
-AllVersions->>FS : "compile and test CUDA v7-v10"
-RealCUDA->>FS : "load libgdn_kernels.so and test functions"
+Note over CuTeTest : New : CuTe DSL API validation and numerical accuracy testing
+CuTeTest->>FS : "deploy CUTLASS 4.x environment"
+CuTeTest->>DSL : "test kernel_reference vs kernel"
+CuTeTest->>PyTorch : "verify against reference implementation"
 ```
 
 **Diagram sources**
@@ -208,6 +239,8 @@ RealCUDA->>FS : "load libgdn_kernels.so and test functions"
 - [scripts/bench_cuda_real.py:22-604](file://scripts/bench_cuda_real.py#L22-L604)
 - [scripts/debug_prefill.py:168-302](file://scripts/debug_prefill.py#L168-L302)
 - [scripts/debug_prefill2.py:124-184](file://scripts/debug_prefill2.py#L124-L184)
+- [scripts/test_cute_dsl.py:31-136](file://scripts/test_cute_dsl.py#L31-L136)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:125-183](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L125-L183)
 
 ## Detailed Component Analysis
 
@@ -296,6 +329,36 @@ KernelImplementations --> LibraryValidation : "validated by"
 - [src/gdn_kernels.cu:1-171](file://src/gdn_kernels.cu#L1-L171)
 - [scripts/bench_cuda_real.py:1-604](file://scripts/bench_cuda_real.py#L1-L604)
 
+### CuTe DSL Testing Infrastructure
+The system now includes comprehensive CuTe DSL testing infrastructure with Modal deployment:
+- **API Exploration**: `explore_cute_dsl.py` validates CUTLASS 4.x CuTe DSL availability and explores kernel APIs
+- **Numerical Accuracy Testing**: `test_cute_dsl.py` compares CuTe DSL kernels against PyTorch reference implementations
+- **Minimal Kernel Validation**: `test_cute_minimal.py` tests basic CuTe DSL functionality with simple copy and scale operations
+- **Reference Implementation**: `gdn_decode_dsl.py` provides both CuTe DSL kernels and PyTorch reference implementations for validation
+
+```mermaid
+flowchart TD
+Start(["CuTe DSL Testing Pipeline"]) --> Explore["explore_cute_dsl.py<br/>API exploration and validation"]
+Explore --> TestDSL["test_cute_dsl.py<br/>numerical accuracy vs PyTorch"]
+TestDSL --> Minimal["test_cute_minimal.py<br/>minimal kernel validation"]
+Minimal --> DSLKernel["gdn_decode_dsl.py<br/>CuTe DSL + PyTorch reference"]
+DSLKernel --> Validate["Cross-validation<br/>CuTe DSL vs Reference"]
+Validate --> Report["Generate validation report<br/>accuracy metrics, error bounds"]
+Report --> End(["Testing Complete"])
+```
+
+**Diagram sources**
+- [scripts/explore_cute_dsl.py:31-207](file://scripts/explore_cute_dsl.py#L31-L207)
+- [scripts/test_cute_dsl.py:36-136](file://scripts/test_cute_dsl.py#L36-L136)
+- [scripts/test_cute_minimal.py:29-194](file://scripts/test_cute_minimal.py#L29-L194)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:125-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L125-L283)
+
+**Section sources**
+- [scripts/explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
+- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
+- [scripts/test_cute_minimal.py:1-194](file://scripts/test_cute_minimal.py#L1-L194)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+
 ### Kernel Implementations and Version History
 - Optimized CUDA v5-v10 kernels with CuTe swizzle optimization for memory bandwidth improvement.
 - Python wrapper kernels that attempt CUDA JIT compilation with Triton fallback support.
@@ -339,10 +402,16 @@ class TritonV3 {
 class BaselineDecode {
 +kernel(q,k,v,state,A_log,a,dt_bias,b,scale)
 }
+class CuTeDSL {
++kernel_reference(q,k,v,state,...)
++kernel(q,k,v,state,...)
++HAS_CUTE_DSL flag
+}
 DecodeCUDAv5 --> BaselineDecode : "compared against"
 DecodeCUDAv9 --> BaselineDecode : "compared against"
 DecodeCUDAv10 --> BaselineDecode : "compared against"
 TritonV3 --> BaselineDecode : "compared against"
+CuTeDSL --> BaselineDecode : "validated against"
 ```
 
 **Diagram sources**
@@ -351,6 +420,7 @@ TritonV3 --> BaselineDecode : "compared against"
 - [src/kernels/cute/gdn_decode_v10.cuh:67-218](file://src/kernels/cute/gdn_decode_v10.cuh#L67-L218)
 - [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py:86-130](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py#L86-L130)
 - [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py:27-101](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py#L27-L101)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:125-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L125-L283)
 
 **Section sources**
 - [docs/PERFORMANCE.md:51-144](file://docs/PERFORMANCE.md#L51-L144)
@@ -361,6 +431,7 @@ TritonV3 --> BaselineDecode : "compared against"
 - [gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py:1-256](file://gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py#L1-L256)
 - [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py:1-101](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py#L1-L101)
 - [gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py:1-99](file://gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py#L1-L99)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
 
 ### Trace Definitions and Workload Generation
 Trace definitions specify operation metadata, axes, constraints, inputs/outputs, and reference implementations. Workloads are generated either synthetically or from HuggingFace, with cu_seqlens and normalized k vectors for stability.
@@ -413,15 +484,45 @@ Debug-->>Debug : "print diffs and stats"
 - [scripts/debug_prefill.py:14-306](file://scripts/debug_prefill.py#L14-L306)
 - [scripts/debug_prefill2.py:17-184](file://scripts/debug_prefill2.py#L17-L184)
 
+### CuTe DSL Numerical Accuracy Verification
+The system now includes comprehensive numerical accuracy verification against PyTorch references:
+- **Reference Implementation**: PyTorch-based kernel_reference provides ground truth for validation
+- **CuTe DSL Implementation**: Demonstrates CUTLASS 4.x API usage with proper tensor layout handling
+- **Comparison Testing**: Automated comparison between CuTe DSL outputs and PyTorch reference outputs
+- **Error Threshold Validation**: Configurable tolerance thresholds for numerical accuracy assessment
+
+```mermaid
+flowchart TD
+Start(["Numerical Accuracy Test"]) --> Setup["Setup test data<br/>PyTorch tensors, CUTLASS env"]
+Setup --> PyTorchRef["Run kernel_reference<br/>PyTorch reference"]
+PyTorchRef --> CuTeDSL["Run CuTe DSL kernel<br/>CUTLASS 4.x implementation"]
+CuTeDSL --> Compare["Compare outputs<br/>max difference calculation"]
+Compare --> Validate{"Within tolerance?<br/>diff < threshold"}
+Validate --> |Yes| Pass["PASSED: Numerically accurate"]
+Validate --> |No| Fail["FAILED: Numerical error"]
+Pass --> Report["Generate accuracy report<br/>error metrics, validation status"]
+Fail --> Report
+Report --> End(["Test Complete"])
+```
+
+**Diagram sources**
+- [scripts/test_cute_dsl.py:36-136](file://scripts/test_cute_dsl.py#L36-L136)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:190-275](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L190-L275)
+
+**Section sources**
+- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)
+
 ## Dependency Analysis
-The performance system exhibits clear separation of concerns with enhanced cross-version support:
+The performance system exhibits clear separation of concerns with enhanced cross-version support and CuTe DSL testing infrastructure:
 - Runner depends on trace definitions and kernel implementations.
 - Comprehensive benchmarking framework depends on CUDA compiler and library validation.
 - Kernel implementations depend on CUDA runtime, PyTorch, and CuTe for advanced optimizations.
 - Trace definitions provide metadata for workload generation and evaluation.
 - Debug scripts depend on the benchmark framework to validate correctness.
+- **CuTe DSL testing depends on Modal deployment environment and CUTLASS 4.x installation.**
 
-**Updated** Enhanced dependency graph to include comprehensive CUDA library integration and cross-version benchmarking capabilities using correct Blackwell architecture terminology.
+**Updated** Enhanced dependency graph to include comprehensive CUDA library integration, cross-version benchmarking capabilities, and CuTe DSL testing infrastructure with Modal deployment.
 
 ```mermaid
 graph LR
@@ -437,7 +538,11 @@ AllVersions["scripts/bench_all_versions.py"] --> Kernels
 RealCUDA["scripts/bench_cuda_real.py"] --> Lib["libgdn_kernels.so"]
 BuildCUDA["scripts/build_cuda.py"] --> Lib
 Lib --> Kernels
-CUDA --> CUDA_SRC["CUDA Sources (.cuh)"]
+CuTeTest["scripts/test_cute_dsl.py"] --> CuTeDSL["CuTe DSL Kernel"]
+CuTeDSL --> PyTorchRef["PyTorch Reference"]
+CuTeTest --> ModalEnv["Modal B200 Environment"]
+ModalEnv --> CUTLASS["CUTLASS 4.x Installation"]
+Kernels --> CUDA_SRC["CUDA Sources (.cuh)"]
 ```
 
 **Diagram sources**
@@ -447,6 +552,8 @@ CUDA --> CUDA_SRC["CUDA Sources (.cuh)"]
 - [scripts/build_cuda.py:63-436](file://scripts/build_cuda.py#L63-L436)
 - [scripts/debug_prefill.py:168-302](file://scripts/debug_prefill.py#L168-L302)
 - [scripts/debug_prefill2.py:124-184](file://scripts/debug_prefill2.py#L124-L184)
+- [scripts/test_cute_dsl.py:15-28](file://scripts/test_cute_dsl.py#L15-L28)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:22-31](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L22-L31)
 
 **Section sources**
 - [benchmarks/bench_modal.py:106-168](file://benchmarks/bench_modal.py#L106-L168)
@@ -455,6 +562,8 @@ CUDA --> CUDA_SRC["CUDA Sources (.cuh)"]
 - [scripts/build_cuda.py:63-436](file://scripts/build_cuda.py#L63-L436)
 - [scripts/debug_prefill.py:168-302](file://scripts/debug_prefill.py#L168-L302)
 - [scripts/debug_prefill2.py:124-184](file://scripts/debug_prefill2.py#L124-L184)
+- [scripts/test_cute_dsl.py:15-28](file://scripts/test_cute_dsl.py#L15-L28)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:22-31](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L22-L31)
 
 ## Performance Considerations
 Roofline analysis characterizes kernel performance limits and identifies bottlenecks:
@@ -462,7 +571,7 @@ Roofline analysis characterizes kernel performance limits and identifies bottlen
 - Prefill stage: sequential scan is memory-bound; chunked processing improves arithmetic intensity toward the ridge point (~281 FLOP/byte).
 - Optimization strategies: fuse per-head operations, tile over batch, keep state in registers/SMEM, coalesced HBM access, vectorized loads, and CuTe swizzle optimization.
 
-**Updated** Enhanced with comprehensive CuTe swizzle optimization documentation, corrected Blackwell architecture terminology using tcgen05.mma, and accurate Ridge Point calculations.
+**Updated** Enhanced with comprehensive CuTe swizzle optimization documentation, corrected Blackwell architecture terminology using tcgen05.mma, accurate Ridge Point calculations, and CuTe DSL numerical accuracy validation.
 
 ```mermaid
 flowchart TD
@@ -480,7 +589,8 @@ CuTe --> DeltaRule["Corrected delta rule<br/>g FIRST, then compute old_v"]
 DeltaRule --> PerfBoost["Enhanced performance<br/>v9/v10 achieve 95% peak BW"]
 Chunk --> Opt3["Vectorized loads"]
 Opt3 --> PerfBoost
-PerfBoost --> End(["Optimization Plan"])
+PerfBoost --> CuTeDSL["CuTe DSL numerical accuracy<br/>validated against PyTorch"]
+CuTeDSL --> End(["Optimization Plan"])
 ```
 
 **Diagram sources**
@@ -489,6 +599,7 @@ PerfBoost --> End(["Optimization Plan"])
 - [src/kernels/cute/gdn_decode_v9.cuh:240-278](file://src/kernels/cute/gdn_decode_v9.cuh#L240-L278)
 - [src/kernels/cute/gdn_decode_v10.cuh:159-200](file://src/kernels/cute/gdn_decode_v10.cuh#L159-L200)
 - [docs/ZHIHU_GDN_TENSOR_CORE.md:78-87](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L87)
+- [scripts/test_cute_dsl.py:99-114](file://scripts/test_cute_dsl.py#L99-L114)
 
 **Section sources**
 - [docs/ROOFLINE.md:1-186](file://docs/ROOFLINE.md#L1-L186)
@@ -496,6 +607,7 @@ PerfBoost --> End(["Optimization Plan"])
 - [src/kernels/cute/gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
 - [src/kernels/cute/gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
 - [docs/ZHIHU_GDN_TENSOR_CORE.md:78-87](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L87)
+- [scripts/test_cute_dsl.py:99-114](file://scripts/test_cute_dsl.py#L99-L114)
 
 ## Troubleshooting Guide
 Common issues and systematic approaches:
@@ -506,8 +618,10 @@ Common issues and systematic approaches:
 - CUDA JIT failures: automatic fallback to Triton implementation when sandbox restrictions prevent compilation.
 - CuTe compilation: ensure CUTLASS headers are available for CuTe swizzle optimization.
 - Delta rule validation: verify mathematical correctness of state update computations.
+- **CuTe DSL API validation**: ensure CUTLASS 4.x is properly installed and accessible in Modal environment.
+- **Numerical accuracy testing**: verify CuTe DSL outputs match PyTorch reference implementations within tolerance thresholds.
 
-**Updated** Added CUDA-specific troubleshooting for JIT compilation failures, CuTe swizzle optimization, and delta rule computation validation using proper Blackwell architecture terminology.
+**Updated** Added CUDA-specific troubleshooting for JIT compilation failures, CuTe swizzle optimization, delta rule computation validation, CuTe DSL API availability, and numerical accuracy verification against PyTorch references.
 
 Practical steps:
 - Run correctness comparison via debug scripts to confirm numerical parity.
@@ -516,6 +630,8 @@ Practical steps:
 - Handle CUDA JIT failures gracefully with Triton fallback support.
 - Verify CuTe swizzle optimization compilation with CUTLASS headers.
 - Test delta rule computation with tolerance thresholds for mathematical correctness.
+- **Deploy CuTe DSL tests on Modal B200 to validate CUTLASS 4.x API availability.**
+- **Compare CuTe DSL outputs against PyTorch reference implementations for numerical accuracy.**
 
 **Section sources**
 - [scripts/debug_prefill.py:168-302](file://scripts/debug_prefill.py#L168-L302)
@@ -524,11 +640,13 @@ Practical steps:
 - [scripts/build_cuda.py:28-34](file://scripts/build_cuda.py#L28-L34)
 - [src/kernels/cute/gdn_decode_v9.cuh:240-278](file://src/kernels/cute/gdn_decode_v9.cuh#L240-L278)
 - [src/kernels/cute/gdn_decode_v10.cuh:159-200](file://src/kernels/cute/gdn_decode_v10.cuh#L159-L200)
+- [scripts/test_cute_dsl.py:45-53](file://scripts/test_cute_dsl.py#L45-L53)
+- [scripts/test_cute_dsl.py:99-114](file://scripts/test_cute_dsl.py#L99-L114)
 
 ## Conclusion
 The repository provides a robust performance analysis and measurement framework combining roofline modeling, structured trace definitions, optimized CUDA v5-v10 kernels with CuTe swizzle optimization, and comprehensive benchmarking on Modal B200. The documented comparative analysis and arithmetic mean speedup calculations enable rigorous contest evaluation and optimization validation. Debugging utilities and correctness checks ensure correctness while maximizing speed, with systematic approaches to identifying bottlenecks and measuring optimization impact. The addition of CUDA v9/v10 implementations with CuTe swizzle optimization demonstrates substantial performance improvements with approximately 7,600 GB/s peak bandwidth utilization (95% of B200 peak) and kernel selection recommendations based on batch size characteristics.
 
-**Updated** Enhanced conclusion to highlight the significant performance improvements achieved with CuTe swizzle optimization, comprehensive cross-version benchmarking capabilities, and accurate Blackwell architecture documentation using correct tcgen05.mma terminology.
+**Updated** Enhanced conclusion to highlight the significant performance improvements achieved with CuTe swizzle optimization, comprehensive cross-version benchmarking capabilities, accurate Blackwell architecture documentation using correct tcgen05.mma terminology, and comprehensive CuTe DSL testing infrastructure with Modal deployment and numerical accuracy validation.
 
 ## Appendices
 
@@ -566,7 +684,8 @@ V5 --> V7["v7: CUDA v7 optimizations"]
 V7 --> V8["v8: CUDA v8 enhancements"]
 V8 --> V9["v9: CuTe swizzle optimization"]
 V9 --> V10["v10: CuTe DSL + TMA"]
-V10 --> Metrics["Comprehensive benchmarking<br/>across all versions"]
+V10 --> CuTeDSL["CuTe DSL Testing<br/>Numerical Accuracy Validation"]
+CuTeDSL --> Metrics["Comprehensive benchmarking<br/>across all versions"]
 Metrics --> Recommendations["Kernel selection<br/>recommendations"]
 Recommendations --> Docs["docs/PERFORMANCE.md"]
 ```
@@ -673,7 +792,7 @@ CuTe swizzle optimization provides significant memory bandwidth improvements thr
 - Enables kernel selection based on batch size characteristics
 
 **Section sources**
-- [src/kernels/cute/README.md:1-44](file://src/kernels/cute/README.md#L1-L44)
+- [src/kernels/cute/README.md:1-130](file://src/kernels/cute/README.md#L1-L130)
 - [src/kernels/cute/gdn_decode_v9.cuh:88-90](file://src/kernels/cute/gdn_decode_v9.cuh#L88-L90)
 - [src/kernels/cute/gdn_decode_v10.cuh:48-61](file://src/kernels/cute/gdn_decode_v10.cuh#L48-L61)
 - [src/kernels/cute/gdn_decode_v9.cuh:240-278](file://src/kernels/cute/gdn_decode_v9.cuh#L240-L278)
@@ -787,3 +906,24 @@ The system provides comprehensive documentation of Blackwell architecture Tensor
 - [docs/ROOFLINE.md:157-165](file://docs/ROOFLINE.md#L157-L165)
 - [docs/ZHIHU_GDN_TENSOR_CORE.md:78-96](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L78-L96)
 - [docs/ZHIHU_GDN_TENSOR_CORE.md:143-153](file://docs/ZHIHU_GDN_TENSOR_CORE.md#L143-L153)
+
+### CuTe DSL Testing Infrastructure and Validation
+The system provides comprehensive testing infrastructure for validating CuTe DSL kernels:
+
+**Testing Components:**
+- **API Exploration**: Validates CUTLASS 4.x installation and exposes available APIs
+- **Numerical Accuracy Testing**: Compares CuTe DSL outputs against PyTorch reference implementations
+- **Minimal Kernel Validation**: Tests basic CuTe DSL functionality with simple operations
+- **Modal Deployment**: All tests run on Modal B200 GPUs with proper environment setup
+
+**Validation Procedures:**
+- **Environment Setup**: Automatic installation of CUTLASS 4.x and dependencies
+- **API Availability**: Verifies CuTe DSL imports and kernel decorators
+- **Numerical Comparison**: Computes maximum differences between CuTe DSL and PyTorch outputs
+- **Error Threshold Validation**: Ensures differences remain within configurable tolerance
+
+**Section sources**
+- [scripts/explore_cute_dsl.py:1-207](file://scripts/explore_cute_dsl.py#L1-L207)
+- [scripts/test_cute_dsl.py:1-137](file://scripts/test_cute_dsl.py#L1-L137)
+- [scripts/test_cute_minimal.py:1-194](file://scripts/test_cute_minimal.py#L1-L194)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:1-283](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L1-L283)

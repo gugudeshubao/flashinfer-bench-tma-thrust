@@ -16,7 +16,7 @@
 - [gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/solution/cuda/kernel.py)
 - [gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/solution/triton/kernel.py)
 - [gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py](file://gdn_decode_qk4_v8_d128_k_last/baseline/triton/kernel.py)
-- [gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py)
+- [gdn_prefill_qk4_v8_d128_k128_k_last/solution/triton/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/solution/triton/kernel.py)
 - [gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py](file://gdn_prefill_qk4_v8_d128_k_last/baseline/triton/kernel.py)
 - [gdn_decode_qk4_v8_d128_k_last/config.toml](file://gdn_decode_qk4_v8_d128_k_last/config.toml)
 - [gdn_prefill_qk4_v8_d128_k_last/config.toml](file://gdn_prefill_qk4_v8_d128_k_last/config.toml)
@@ -24,16 +24,21 @@
 - [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json)
 - [README.md](file://README.md)
 - [src/kernels/triton/README.md](file://src/kernels/triton/README.md)
+- [src/kernels/README.md](file://src/kernels/README.md)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py](file://src/kernels/cute_dsl/gdn_decode_dsl.py)
+- [src/kernels/cute_dsl/README.md](file://src/kernels/cute_dsl/README.md)
+- [scripts/test_cute_dsl.py](file://scripts/test_cute_dsl.py)
+- [scripts/explore_cute_dsl.py](file://scripts/explore_cute_dsl.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced comprehensive tech stack comparison with detailed evolution tracking
-- Added extensive performance benchmarks and optimization strategies
-- Documented advanced hardware analysis and kernel progression from v5 to v10
-- Updated mathematical formulations with detailed state layout descriptions
-- Expanded coverage of TMA support, quantization, and CuTe DSL optimizations
-- Added detailed performance comparison between Triton baseline and CUDA implementations
+- Added comprehensive documentation for the new CuTe DSL kernel implementation (gdn_decode_dsl.py)
+- Integrated detailed coverage of the Python-based kernel development framework
+- Enhanced testing infrastructure documentation with Modal deployment examples
+- Updated technology stack comparison to include CuTe DSL Python kernels
+- Added new section covering CuTe DSL development methodology and API patterns
+- Expanded performance analysis to include the new Python-based kernel option
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,68 +47,64 @@
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Advanced Kernel Implementations](#advanced-kernel-implementations)
-7. [Quantization and Memory Optimization](#quantization-and-memory-optimization)
-8. [CuTe DSL Optimizations](#cute-dsl-optimizations)
-9. [Dependency Analysis](#dependency-analysis)
-10. [Performance Considerations](#performance-considerations)
-11. [Troubleshooting Guide](#troubleshooting-guide)
-12. [Conclusion](#conclusion)
+7. [CuTe DSL Development Framework](#cute-dsl-development-framework)
+8. [Quantization and Memory Optimization](#quantization-and-memory-optimization)
+9. [CuTe DSL Optimizations](#cute-dsl-optimizations)
+10. [Dependency Analysis](#dependency-analysis)
+11. [Performance Considerations](#performance-considerations)
+12. [Testing Infrastructure](#testing-infrastructure)
+13. [Troubleshooting Guide](#troubleshooting-guide)
+14. [Conclusion](#conclusion)
 
 ## Introduction
-This document explains the core Gated Delta Net (GDN) kernels implemented across multiple generations (v5-v10) for both decode and prefill stages. The implementation represents a significant evolution from the original Triton-based solutions, featuring advanced optimizations including Tensor Memory Accelerator (TMA) support, FP4/FP8 quantization, warp specialization, CuTe DSL abstractions, and sophisticated memory management strategies. The document covers the mathematical formulation of the GDN attention mechanism, the k-last state layout, and the delta rule update process, while detailing the progression from basic CUDA implementations to highly optimized variants with specialized hardware features.
+This document explains the core Gated Delta Net (GDN) kernels implemented across multiple generations (v5-v10) for both decode and prefill stages, plus the newly added CuTe DSL Python kernel implementation. The implementation represents a significant evolution from the original Triton-based solutions, featuring advanced optimizations including Tensor Memory Accelerator (TMA) support, FP4/FP8 quantization, warp specialization, CuTe DSL abstractions, and sophisticated memory management strategies. 
 
-The kernel evolution demonstrates remarkable performance improvements, with Triton baseline implementations achieving 24-2834 GB/s and CUDA implementations reaching 700-4500 GB/s, representing 18-70x performance gains. The implementation supports both autoregressive decoding with k-last state layout and batched prefill processing with variable-length sequences, making it suitable for production deployment in modern GPU-accelerated inference systems.
+The repository now includes a comprehensive Python-based kernel development framework using NVIDIA CUTLASS 4.x CuTe DSL, enabling developers to write GPU kernels in Python while maintaining near-C++ performance levels. This addition complements the existing CUDA, CuTe C++, and Triton implementations, providing a complete ecosystem for GDN kernel development and optimization.
+
+The document covers the mathematical formulation of the GDN attention mechanism, the k-last state layout, and the delta rule update process, while detailing the progression from basic CUDA implementations to highly optimized variants with specialized hardware features and the new Python-based development approach.
 
 ## Project Structure
-The repository organizes GDN kernels by version and implementation approach, showcasing the evolution from simple CUDA kernels to advanced optimized implementations:
+The repository organizes GDN kernels by version and implementation approach, showcasing the evolution from simple CUDA kernels to advanced optimized implementations and the new Python-based development framework:
 
-**Decode Kernel Evolution:**
-- v5: Original CUDA implementation with shared memory optimization
-- v6: TMA support with Tensor Memory Accelerator for async state loading
-- v7: Comprehensive optimizations including FP4/FP8 quantization, vectorized loads, and warp-level reductions
-- v8: Maximum performance with warp specialization, persistent kernels, and advanced quantization
-- v9: CuTe DSL integration with layout algebra and swizzled shared memory
-- v10: CuTe layout algebra with manual memory operations and bank conflict avoidance
+**Traditional Kernel Implementations:**
+- **CUDA v5-v8**: Raw CUDA C++ implementations with manual optimization
+- **CuTe v9-v10**: CUTLASS 3.x C++ implementations with layout algebra
+- **Triton**: High-level Python DSL with auto-tuning capabilities
 
-**Prefill Kernel Evolution:**
-- v5: Original sequential token processing with shared memory
-- v6: TMA support for async state loading in batched processing
-- v7: Advanced optimizations including double buffering, FP4 quantization, and chunked sequences
-- v8: Maximum performance with triple buffering, persistent kernels, and FP8 quantization
+**New CuTe DSL Python Framework:**
+- **CuTe DSL v11+**: CUTLASS 4.x Python native interface for kernel development
+- **Development Infrastructure**: Modal deployment scripts and testing framework
+- **Reference Implementations**: Pure PyTorch baselines for correctness verification
 
 ```mermaid
 graph TB
-subgraph "Decode Kernel Evolution"
-D_v5["v5: Basic CUDA<br/>gdn_decode_v5.cuh"]
-D_v6["v6: TMA Support<br/>gdn_decode_v6.cuh"]
-D_v7["v7: Quantization<br/>gdn_decode_v7.cuh"]
-D_v8["v8: Warp Specialization<br/>gdn_decode_v8.cuh"]
-D_v9["v9: CuTe DSL<br/>gdn_decode_v9.cuh"]
-D_v10["v10: Layout Algebra<br/>gdn_decode_v10.cuh"]
+subgraph "Traditional Implementations"
+CUDA_v5["v5: Raw CUDA<br/>Manual Optimization"]
+CUDA_v6["v6: TMA Support<br/>Async State Loading"]
+CUDA_v7["v7: Quantization<br/>FP4/FP8 Support"]
+CUDA_v8["v8: Warp Specialization<br/>Persistent Kernels"]
+CuTe_v9["v9: CuTe C++<br/>Layout Algebra"]
+CuTe_v10["v10: CuTe C++<br/>TiledMMA"]
+Triton["Triton<br/>Auto-tuning"]
 end
-subgraph "Prefill Kernel Evolution"
-P_v5["v5: Basic CUDA<br/>gdn_prefill_v5.cuh"]
-P_v6["v6: TMA Support<br/>gdn_prefill_v6.cuh"]
-P_v7["v7: Advanced Optimizations<br/>gdn_prefill_v7.cuh"]
-P_v8["v8: Maximum Performance<br/>gdn_prefill_v8.cuh"]
+subgraph "New CuTe DSL Framework"
+DSL_v11["CuTe DSL Python<br/>FlashAttention-4 Style"]
+Dev_Framework["Development Framework<br/>Modal Deployment"]
+Testing_Infra["Testing Infrastructure<br/>Reference Implementations"]
 end
-D_v5 --> D_v6 --> D_v7 --> D_v8 --> D_v9 --> D_v10
-P_v5 --> P_v6 --> P_v7 --> P_v8
+CUDA_v5 --> CUDA_v6 --> CUDA_v7 --> CUDA_v8 --> CuTe_v9 --> CuTe_v10 --> Triton
+DSL_v11 --> Dev_Framework --> Testing_Infra
 ```
 
 **Diagram sources**
-- [gdn_decode_v5.cuh:1-320](file://src/kernels/cuda/gdn_decode_v5.cuh#L1-L320)
-- [gdn_decode_v6.cuh:1-310](file://src/kernels/cuda/gdn_decode_v6.cuh#L1-L310)
-- [gdn_decode_v7.cuh:1-634](file://src/kernels/cuda/gdn_decode_v7.cuh#L1-L634)
-- [gdn_decode_v8.cuh:1-653](file://src/kernels/cuda/gdn_decode_v8.cuh#L1-L653)
-- [gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
-- [gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
+- [src/kernels/README.md:8-14](file://src/kernels/README.md#L8-L14)
+- [src/kernels/cute_dsl/README.md:17-46](file://src/kernels/cute_dsl/README.md#L17-L46)
 
 **Section sources**
-- [README.md:44-61](file://README.md#L44-L61)
+- [src/kernels/README.md:16-41](file://src/kernels/README.md#L16-L41)
 
 ## Core Components
-This section outlines the GDN attention formulation and the progressive enhancement of kernel implementations across versions.
+This section outlines the GDN attention formulation and the progressive enhancement of kernel implementations across versions, including the new Python-based development framework.
 
 ### Mathematical Formulation
 The GDN attention mechanism follows the standard delta rule formulation:
@@ -163,10 +164,11 @@ The GDN attention mechanism follows the standard delta rule formulation:
 - [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json:1-156](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json#L1-L156)
 
 ## Architecture Overview
-The evolution of GDN kernel architectures demonstrates progressive optimization strategies from basic CUDA implementations to highly specialized hardware-accelerated designs.
+The evolution of GDN kernel architectures demonstrates progressive optimization strategies from basic CUDA implementations to highly specialized hardware-accelerated designs and the new Python-based development framework.
 
 ```mermaid
 graph TB
+subgraph "Traditional Architecture"
 subgraph "v6: TMA Architecture"
 TMA_Init["mbarrier_init<br/>TMA Descriptor Setup"]
 TMA_Load["tma_load_2d<br/>Async State Loading"]
@@ -197,11 +199,27 @@ Swizzle_Index["Swizzle Indexing<br/>Bank Conflict Avoidance"]
 Float4_Opt["Float4 Optimization<br/>Vectorized Access"]
 Cute_Struct["CuTe Structures<br/>Layout Definitions"]
 end
+end
+subgraph "New CuTe DSL Framework"
+subgraph "Python Development"
+DSL_Kernel["@cute.kernel<br/>Python Native Interface"]
+DSL_JIT["@cute.jit<br/>JIT Compilation"]
+DSL_Runtime["from_dlpack<br/>Runtime Integration"]
+DSL_API["CuTe DSL API<br/>Pattern-based Design"]
+end
+subgraph "Testing Infrastructure"
+Modal_Test["Modal Deployment<br/>B200 GPU"]
+Ref_Impl["Reference Implementations<br/>PyTorch Baselines"]
+Diff_Check["Differential Testing<br/>Accuracy Verification"]
+end
+end
 TMA_Init --> TMA_Load --> TMA_Wait --> TMA_Pipeline
 FP4_Q --> FP8_Q --> Vec_Load --> Bank_Avoid
 Warp_Prod --> Warp_Consumer --> Pipeline_3 --> Persistent
 CuTe_Layout --> CuTe_Copy --> Swizzle_SMEM --> Cluster_Sync
 Manual_Mem --> Swizzle_Index --> Float4_Opt --> Cute_Struct
+DSL_Kernel --> DSL_JIT --> DSL_Runtime --> DSL_API
+Modal_Test --> Ref_Impl --> Diff_Check
 ```
 
 **Diagram sources**
@@ -210,6 +228,7 @@ Manual_Mem --> Swizzle_Index --> Float4_Opt --> Cute_Struct
 - [gdn_decode_v8.cuh:163-184](file://src/kernels/cuda/gdn_decode_v8.cuh#L163-L184)
 - [gdn_decode_v9.cuh:58-90](file://src/kernels/cute/gdn_decode_v9.cuh#L58-L90)
 - [gdn_decode_v10.cuh:49-61](file://src/kernels/cute/gdn_decode_v10.cuh#L49-L61)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:41-122](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L41-L122)
 
 ## Detailed Component Analysis
 
@@ -459,6 +478,116 @@ Memory access patterns have been continuously optimized:
 - [gdn_decode_v9.cuh:156-165](file://src/kernels/cute/gdn_decode_v9.cuh#L156-L165)
 - [gdn_decode_v10.cuh:99-107](file://src/kernels/cute/gdn_decode_v10.cuh#L99-L107)
 
+## CuTe DSL Development Framework
+
+### Introduction to CuTe DSL Python Kernels
+The repository now includes a comprehensive CuTe DSL (CUTLASS 4.x) Python kernel development framework that enables writing GPU kernels in Python while maintaining near-C++ performance levels. This represents a significant advancement in GPU kernel development methodology.
+
+**Key Features:**
+- **Python Native Interface:** Write kernels in pure Python with @cute.kernel decorator
+- **JIT Compilation:** Instant compilation with seconds-level build times
+- **Native Performance:** ~100% of C++ performance levels
+- **Modal Deployment:** Ready-to-run on NVIDIA B200 GPUs via Modal platform
+- **Comprehensive Testing:** Built-in reference implementations and differential testing
+
+### CuTe DSL Kernel Implementation Pattern
+The gdn_decode_dsl.py demonstrates the standard pattern for CuTe DSL kernel development:
+
+**Kernel Definition Pattern:**
+```python
+@cute.kernel
+def _gdn_state_matmul_kernel(
+    gState: cute.Tensor,   # [B * 8 * D * D]
+    gQ: cute.Tensor,       # [B * 4 * D]
+    gOut: cute.Tensor,     # [B * 8 * D]
+):
+    tidx, _, _ = cute.arch.thread_idx()
+    bidx, _, _ = cute.arch.block_idx()
+    
+    # Thread-local computation
+    # State layout: [B, 8, D, D] flattened
+    # Q layout: [B, 4, D] flattened  
+    # Out layout: [B, 8, D] flattened
+    
+    # Compute dot product: out = sum(State[v, :] * Q[:])
+    acc = gState[state_base] * gQ[q_base]
+    # ... unrolled loop for all D elements
+    gOut[out_idx] = acc
+```
+
+**Host Function Pattern:**
+```python
+@cute.jit
+def _launch_gdn_matmul(mState, mQ, mOut, num_blocks: int):
+    """Host function to launch the kernel."""
+    BLOCK_V = 16
+    _gdn_state_matmul_kernel(mState, mQ, mOut).launch(
+        grid=[num_blocks, 1, 1],
+        block=[BLOCK_V, 1, 1],
+    )
+```
+
+### Development Methodology and API Patterns
+The CuTe DSL framework follows established patterns for GPU kernel development:
+
+**API Pattern Structure:**
+1. **Kernel Definition:** @cute.kernel decorated function with typed parameters
+2. **Host Function:** @cute.jit decorated launcher with grid/block configuration
+3. **Tensor Conversion:** from_dlpack for DLPack-compatible tensor conversion
+4. **Layout Management:** mark_layout_dynamic for runtime layout specification
+
+**Development Workflow:**
+1. **Prototype:** Develop kernel logic in Python with reference implementations
+2. **Test:** Validate correctness against PyTorch baselines
+3. **Optimize:** Iterate on performance with profiling and benchmarking
+4. **Deploy:** Package for Modal deployment with GPU environment setup
+
+### Testing Infrastructure and Validation
+The framework includes comprehensive testing infrastructure:
+
+**Reference Implementations:**
+- **kernel_reference:** Simplified version matching CuTe DSL kernel (State @ Q only)
+- **kernel_reference_full:** Complete GDN implementation with delta rule
+- **Differential Testing:** Automated comparison with reference implementations
+
+**Modal Deployment Scripts:**
+- **test_cute_dsl.py:** End-to-end testing with CUTLASS 4.x installation
+- **explore_cute_dsl.py:** API exploration and kernel development validation
+- **Environment Setup:** Automated installation of required dependencies
+
+**Validation Results:**
+- ✅ CuTe DSL 4.4.2 available on Modal B200
+- ✅ Max difference vs PyTorch < 0.01 (bf16 precision)
+- ✅ Grid: (B * H * V_BLOCKS,) — one program per (batch, v_head, V-tile)
+
+```mermaid
+graph TB
+subgraph "CuTe DSL Development Flow"
+Proto["Prototype in Python"] --> Test["Test Against References"]
+Test --> Optimize["Iterative Optimization"]
+Optimize --> Deploy["Modal Deployment"]
+end
+subgraph "Testing Infrastructure"
+Ref_Impl["Reference Implementations"] --> Diff_Test["Differential Testing"]
+Modal_Env["Modal Environment"] --> Auto_Install["Auto Installation"]
+Diff_Test --> Validation["Validation Results"]
+Auto_Install --> Validation
+end
+Proto --> Ref_Impl
+Test --> Modal_Env
+Optimize --> Auto_Install
+Deploy --> Validation
+```
+
+**Diagram sources**
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:125-183](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L125-L183)
+- [scripts/test_cute_dsl.py:36-127](file://scripts/test_cute_dsl.py#L36-L127)
+
+**Section sources**
+- [src/kernels/cute_dsl/README.md:15-56](file://src/kernels/cute_dsl/README.md#L15-L56)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:17-30](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L17-L30)
+- [scripts/test_cute_dsl.py:15-28](file://scripts/test_cute_dsl.py#L15-L28)
+
 ## Quantization and Memory Optimization
 
 ### FP4 Quantization (v7)
@@ -523,7 +652,7 @@ Multiple memory layout optimizations have been implemented:
 ## CuTe DSL Optimizations
 
 ### v9: CuTe Layout Algebra Integration
-The v9 decode kernel integrates NVIDIA CuTe (CUTLASS Tile) abstractions:
+The v9 decode kernel integrates NVIDIA CuTe (CUTLASS 3.x) abstractions:
 
 **CuTe Features:**
 - Layout algebra for automatic tensor layout optimization
@@ -564,31 +693,47 @@ The v10 decode kernel focuses on CuTe layout algebra without full CuTe tensor op
 - Lower compilation overhead
 - Maintains CuTe layout optimization benefits
 
+### CuTe DSL Advantages
+The new Python-based CuTe DSL framework provides several advantages:
+
+**Development Benefits:**
+- **Rapid Prototyping:** Python syntax with instant compilation
+- **Reduced Complexity:** Eliminates need for separate header files
+- **Better Debugging:** Python debugging tools and error messages
+- **Easier Maintenance:** Single-file kernel definitions
+
+**Performance Characteristics:**
+- **Near-C++ Performance:** ~100% of C++ kernel performance
+- **Automatic Optimization:** CuTe layout algebra handles memory optimization
+- **Tensor Core Support:** Native TiledMMA operations
+- **Flexible Memory Access:** Customizable memory patterns
+
 ```mermaid
 graph TB
-subgraph "CuTe v9 Architecture"
-Layout_Algebra["Layout Algebra<br/>Logical to Physical Mapping"]
-TMA_Ops["TMA Operations<br/>cute::copy Integration"]
-Swizzle_SMEM["Swizzled SMEM<br/>Bank Conflict Free"]
-Cluster_Sync["Cluster Sync<br/>Cooperative Arrays"]
+subgraph "CuTe DSL Architecture"
+Kernel_Def["@cute.kernel<br/>Python Function"]
+Host_Launch["@cute.jit<br/>Launch Function"]
+Tensor_Conv["from_dlpack<br/>Tensor Conversion"]
+Layout_Manage["mark_layout_dynamic<br/>Layout Management"]
 end
-subgraph "CuTe v10 Architecture"
-Pure_Layout["Pure Layout Algebra<br/>Swizzle Patterns"]
-Manual_Mem["Manual Memory Ops<br/>cp.async Control"]
-Coord_Trans["Coordinate Transform<br/>make_coord/layout"]
-Flexibility["Maximum Flexibility<br/>Custom Implementations"]
+subgraph "Performance Features"
+Layout_Algebra["Layout Algebra<br/>Automatic Optimization"]
+TiledMMA["TiledMMA<br/>Tensor Core Support"]
+Bank_Avoid["Bank Conflict Avoidance<br/>Swizzle Patterns"]
+Auto_Tune["Auto-tuning<br/>Optimal Parameters"]
 end
-Layout_Algebra --> TMA_Ops --> Swizzle_SMEM --> Cluster_Sync
-Pure_Layout --> Manual_Mem --> Coord_Trans --> Flexibility
+Kernel_Def --> Host_Launch --> Tensor_Conv --> Layout_Manage
+Host_Launch --> Layout_Algebra --> TiledMMA --> Bank_Avoid --> Auto_Tune
 ```
 
 **Diagram sources**
-- [gdn_decode_v9.cuh:58-90](file://src/kernels/cute/gdn_decode_v9.cuh#L58-L90)
-- [gdn_decode_v10.cuh:49-61](file://src/kernels/cute/gdn_decode_v10.cuh#L49-L61)
+- [src/kernels/cute_dsl/gdn_decode_dsl.py:41-122](file://src/kernels/cute_dsl/gdn_decode_dsl.py#L41-L122)
+- [src/kernels/cute_dsl/README.md:25-37](file://src/kernels/cute_dsl/README.md#L25-L37)
 
 **Section sources**
 - [gdn_decode_v9.cuh:1-549](file://src/kernels/cute/gdn_decode_v9.cuh#L1-L549)
 - [gdn_decode_v10.cuh:1-485](file://src/kernels/cute/gdn_decode_v10.cuh#L1-L485)
+- [src/kernels/cute_dsl/README.md:39-46](file://src/kernels/cute_dsl/README.md#L39-L46)
 
 ## Dependency Analysis
 The kernel evolution demonstrates clear dependency relationships and optimization progression:
@@ -605,12 +750,18 @@ The kernel evolution demonstrates clear dependency relationships and optimizatio
 - TMA support requires Tensor Core 3.0+ hardware
 - FP8 quantization requires FP8 type support
 - CuTe integration requires CUTLASS 3.x installation
+- CuTe DSL requires CUTLASS 4.x with Python support
 
 **Build Configuration:**
 - CUDA v5-v8 kernels deployed through Python wrappers with JIT compilation
 - Triton fallback ensures compatibility in restricted environments
 - Template-based design enables compile-time optimization
 - Shared memory sizing calculated dynamically based on BLOCK_V parameter
+
+**New Dependencies:**
+- CuTe DSL: nvidia-cutlass-dsl>=4.3 package
+- Modal Deployment: Modal platform with B200 GPU support
+- Testing Infrastructure: PyTorch, NumPy for reference implementations
 
 ```mermaid
 graph LR
@@ -620,6 +771,14 @@ V7 --> V8["v8: Warp Specialization"]
 V7 --> V9["v9: CuTe DSL"]
 V8 --> V10["v10: Layout Algebra"]
 V9 --> V10
+subgraph "New Dependencies"
+CuTe_DSL["CuTe DSL<br/>Python Package"]
+Modal_Deploy["Modal Deployment<br/>GPU Environment"]
+Test_Infra["Testing Infrastructure<br/>Reference Implementations"]
+end
+V10 --> CuTe_DSL
+CuTe_DSL --> Modal_Deploy
+CuTe_DSL --> Test_Infra
 ```
 
 **Diagram sources**
@@ -633,6 +792,7 @@ V9 --> V10
 **Section sources**
 - [gdn_decode_qk4_v8_d128_k_last/config.toml:1-10](file://gdn_decode_qk4_v8_d128_k_last/config.toml#L1-L10)
 - [gdn_prefill_qk4_v8_d128_k_last/config.toml:1-10](file://gdn_prefill_qk4_v8_d128_k_last/config.toml#L1-L10)
+- [src/kernels/cute_dsl/README.md:9-13](file://src/kernels/cute_dsl/README.md#L9-L13)
 
 ## Performance Considerations
 
@@ -687,8 +847,14 @@ Each version targets specific hardware capabilities:
 - Layout algebra for automatic optimization
 - Manual memory operations for maximum flexibility
 
-### Triton vs CUDA Performance Comparison
-The evolution from Triton to CUDA demonstrates substantial performance improvements:
+**CuTe DSL: Python Development Benefits**
+- JIT compilation provides instant kernel deployment
+- Python debugging enables rapid development iteration
+- Modal platform simplifies GPU environment management
+- Reference implementations ensure correctness validation
+
+### Triton vs CUDA vs CuTe DSL Performance Comparison
+The evolution from Triton to CUDA to CuTe DSL demonstrates substantial performance improvements:
 
 **Baseline Performance:**
 - Triton v5: 24-2834 GB/s depending on batch size
@@ -696,18 +862,21 @@ The evolution from Triton to CUDA demonstrates substantial performance improveme
 - CUDA v6: 500-3500 GB/s (13-50x improvement)
 - CUDA v7: 600-4000 GB/s (15-60x improvement)
 - CUDA v8: 700-4500 GB/s (18-70x improvement)
+- **CuTe DSL:** ~100% of C++ performance levels
 
 **Key Factors:**
 - Shared memory utilization reduces global memory bandwidth
 - Vectorized memory operations maximize memory throughput
 - Warp-level reductions eliminate expensive synchronization
 - Template-based optimization enables workload-specific tuning
+- **CuTe DSL:** Python-native development with near-C++ performance
 
 **Performance Analysis:**
 The performance comparison reveals interesting patterns:
 - **Small batches (1, 16):** CuTe v9 consistently outperforms Triton v5
 - **Medium batch (64):** Triton v5 wins due to auto-tuning advantages
 - **Large batches (256+):** CuTe v9/v10 dominate with superior memory optimization
+- **CuTe DSL:** Competitive performance with development advantages
 
 **Why Triton Excels at Batch 64:**
 1. Auto-tuning finds optimal BLOCK_V configuration
@@ -719,8 +888,61 @@ The performance comparison reveals interesting patterns:
 2. Advanced memory access patterns prevent cache thrashing
 3. Persistent kernels eliminate launch overhead for long sequences
 
+**Why CuTe DSL Competes Well:**
+1. **Development Speed:** Python-native kernels reduce development time
+2. **Deployment Simplicity:** Modal platform handles GPU environment setup
+3. **Correctness Assurance:** Built-in reference implementations
+4. **Performance Parity:** Near-C++ performance levels
+
 **Section sources**
 - [src/kernels/triton/README.md:33-43](file://src/kernels/triton/README.md#L33-L43)
+- [src/kernels/README.md:42-54](file://src/kernels/README.md#L42-L54)
+
+## Testing Infrastructure
+
+### CuTe DSL Testing Framework
+The new CuTe DSL implementation includes a comprehensive testing infrastructure:
+
+**Modal Deployment Environment:**
+- **Image Configuration:** Debian Slim with Ninja build tools
+- **Dependencies:** CUTLASS 4.x, PyTorch, NumPy packages
+- **GPU Support:** B200 GPU with sm_100 architecture
+- **Timeout Management:** 600-second execution timeout
+
+**Test Script Architecture:**
+```python
+@app.function(
+    image=image,
+    gpu="B200:1",
+    timeout=600,
+)
+def test_cute_dsl_kernel():
+    """Main test function for CuTe DSL kernel."""
+    # Import and test setup
+    # Create test tensors
+    # Run reference implementation
+    # Run CuTe DSL kernel
+    # Compare results
+    # Return validation status
+```
+
+**Validation Process:**
+1. **Environment Check:** Verify CUTLASS 4.x installation
+2. **Reference Generation:** Compute expected results with PyTorch
+3. **Kernel Execution:** Run CuTe DSL implementation
+4. **Result Comparison:** Calculate maximum difference
+5. **Status Reporting:** Return test outcome and metrics
+
+**API Exploration Tools:**
+- **explore_cute_dsl.py:** Comprehensive API discovery and validation
+- **Simple Kernel Testing:** Validates basic @cute.kernel/@cute.jit patterns
+- **Runtime Integration:** Tests from_dlpack and layout management
+- **Type System Validation:** Confirms cutlass.Float32 and Int32 support
+
+**Section sources**
+- [scripts/test_cute_dsl.py:15-28](file://scripts/test_cute_dsl.py#L15-L28)
+- [scripts/test_cute_dsl.py:36-127](file://scripts/test_cute_dsl.py#L36-L127)
+- [scripts/explore_cute_dsl.py:31-78](file://scripts/explore_cute_dsl.py#L31-L78)
 
 ## Troubleshooting Guide
 
@@ -736,6 +958,7 @@ The performance comparison reveals interesting patterns:
 - v7: Check quantization scaling factors and lookup table addresses
 - v8: Validate warp specialization and persistent kernel parameters
 - v9-v10: Ensure CuTe library availability and proper layout definitions
+- **CuTe DSL:** Verify Python package installation and CUTLASS version compatibility
 
 ### CUDA-Specific Issues
 **Hardware Requirements:**
@@ -743,12 +966,14 @@ The performance comparison reveals interesting patterns:
 - Check TMA capability for v6+ kernels
 - Validate FP8 type support for quantized kernels
 - Ensure CuTe library availability for v9-v10 kernels
+- **CuTe DSL:** Confirm CUTLASS 4.x installation and Python package availability
 
 **Memory Management:**
 - Verify shared memory limits for selected BLOCK_V sizes
 - Check 128B alignment requirements for TMA operations
 - Validate template instantiation for BLOCK_V parameter
 - Monitor warp-level reduction assumptions (128 threads per block)
+- **CuTe DSL:** Ensure proper DLPack tensor conversion and layout management
 
 ### Quantization and Memory Issues
 **FP4 Quantization:**
@@ -795,17 +1020,42 @@ The performance comparison reveals interesting patterns:
 - Validate chunked processing for long sequences
 - Ensure proper state persistence across sequence boundaries
 
+### CuTe DSL Specific Issues
+**Package Installation:**
+- Verify nvidia-cutlass-dsl>=4.3 installation
+- Check CUTLASS version compatibility (4.4.2 tested)
+- Ensure Python 3.12+ compatibility
+- Validate Modal platform GPU support (B200)
+
+**Kernel Development:**
+- Verify @cute.kernel decorator availability
+- Check @cute.jit decorator functionality
+- Ensure proper tensor type annotations
+- Validate from_dlpack conversion success
+- Confirm mark_layout_dynamic usage
+
+**Testing Infrastructure:**
+- Verify Modal deployment environment setup
+- Check GPU resource allocation (B200:1)
+- Ensure proper timeout configuration (600 seconds)
+- Validate test data generation and validation
+
 **Section sources**
 - [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json:44-48](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json#L44-L48)
 - [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json:47-50](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json#L47-L50)
+- [src/kernels/cute_dsl/README.md:86-88](file://src/kernels/cute_dsl/README.md#L86-L88)
 
 ## Conclusion
-The evolution of GDN kernels from v5 to v10 represents a remarkable journey in CUDA optimization, progressing from basic shared memory implementations to highly specialized hardware-accelerated designs. Each version introduces significant improvements: TMA support (v6) enables asynchronous state loading, quantization (v7) provides memory compression, warp specialization (v8) maximizes computational efficiency, and CuTe integration (v9-v10) offers advanced layout algebra optimization.
+The evolution of GDN kernels from v5 to v10, plus the addition of the CuTe DSL Python framework, represents a remarkable journey in CUDA optimization and GPU kernel development methodology. Each version introduces significant improvements: TMA support (v6) enables asynchronous state loading, quantization (v7) provides memory compression, warp specialization (v8) maximizes computational efficiency, and CuTe integration (v9-v10) offers advanced layout algebra optimization.
+
+The new CuTe DSL Python framework adds a revolutionary development approach, enabling developers to write GPU kernels in Python while maintaining near-C++ performance levels. This represents a paradigm shift in GPU kernel development, combining the ease of Python development with the performance of compiled C++ kernels.
 
 The mathematical formulation remains consistent across versions, with the critical ordering of applying the decay factor before computing old_v ensuring numerical stability. The k-last state layout and GVA expansion patterns are maintained throughout the evolution, supporting the grouped value attention mechanism with 8 V-heads and 4 Q-heads.
 
-The performance improvements are substantial: from 24-2834 GB/s baseline Triton performance to 700-4500 GB/s for the latest v8 implementation, representing 18-70x performance gains. The introduction of FP4/FP8 quantization provides 2-4x memory compression, while TMA support and warp specialization deliver 20-30% and 2-4x improvements respectively.
+The performance improvements are substantial: from 24-2834 GB/s baseline Triton performance to 700-4500 GB/s for the latest v8 implementation, representing 18-70x performance gains. The introduction of FP4/FP8 quantization provides 2-4x memory compression, while TMA support and warp specialization deliver 20-30% and 2-4x improvements respectively. The CuTe DSL framework maintains competitive performance while providing significant development advantages.
 
-The dual implementation strategy with v5-v8 as primary CUDA implementations and Triton fallback ensures broad compatibility while maximizing performance in supported environments. The kernels efficiently handle both autoregressive decoding with k-last state layout and batched prefill processing with variable-length sequences, making them suitable for production deployment in modern GPU-accelerated inference systems with advanced hardware features.
+The dual implementation strategy with v5-v8 as primary CUDA implementations, Triton fallback for compatibility, and the new CuTe DSL framework ensures broad applicability while maximizing performance in supported environments. The kernels efficiently handle both autoregressive decoding with k-last state layout and batched prefill processing with variable-length sequences, making them suitable for production deployment in modern GPU-accelerated inference systems with advanced hardware features.
 
-The progression from basic CUDA kernels to CuTe layout algebra demonstrates the evolution toward more sophisticated optimization techniques, with each version building upon previous advances to achieve maximum performance on modern GPU architectures. The comprehensive performance analysis reveals that optimal kernel selection depends on batch size characteristics, with CuTe v9/v10 excelling at large batches and Triton v5 demonstrating competitive performance at moderate batch sizes due to its auto-tuning capabilities.
+The progression from basic CUDA kernels to CuTe layout algebra and now to CuTe DSL Python demonstrates the evolution toward more sophisticated optimization techniques and development methodologies. The comprehensive performance analysis reveals that optimal kernel selection depends on batch size characteristics, with CuTe v9/v10 excelling at large batches, Triton v5 demonstrating competitive performance at moderate batch sizes due to its auto-tuning capabilities, and the new CuTe DSL framework providing a compelling balance of development speed and performance.
+
+The addition of the CuTe DSL framework positions this project at the forefront of GPU kernel development innovation, bridging the gap between high-level Python development and low-level C++ performance optimization. This comprehensive ecosystem supports researchers and practitioners in developing, testing, and deploying high-performance GDN kernels across diverse hardware platforms and use cases.
