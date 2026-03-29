@@ -8,7 +8,7 @@ Tests:
 4. Multi-batch correctness
 
 Usage:
-    modal run tests/test_correctness.py
+    modal run gdn/tests/test_correctness.py
 """
 
 import modal

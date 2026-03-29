@@ -2,11 +2,11 @@
 Modal benchmark runner for GDN kernels (decode + prefill).
 
 Usage:
-    modal run benchmarks/bench_modal.py              # run both (solution only)
-    modal run benchmarks/bench_modal.py --kernel decode
-    modal run benchmarks/bench_modal.py --kernel prefill
-    modal run benchmarks/bench_modal.py --compare     # solution vs Python baseline
-    modal run benchmarks/bench_modal.py --kernel decode --warmup 5 --iters 100
+    modal run gdn/benchmarks/bench_modal.py              # run both (solution only)
+    modal run gdn/benchmarks/bench_modal.py --kernel decode
+    modal run gdn/benchmarks/bench_modal.py --kernel prefill
+    modal run gdn/benchmarks/bench_modal.py --compare     # solution vs Python baseline
+    modal run gdn/benchmarks/bench_modal.py --kernel decode --warmup 5 --iters 100
 
 Setup (one-time):
     modal run scripts/setup_volume.py
@@ -16,7 +16,8 @@ import json
 import sys
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).parent.parent
+# GDN directory is the parent of benchmarks/
+GDN_ROOT = Path(__file__).parent.parent
 
 import modal
 
@@ -33,13 +34,13 @@ image = (
 
 
 KERNEL_NAMES = {
-    "decode": "gdn_decode_qk4_v8_d128_k_last",
-    "prefill": "gdn_prefill_qk4_v8_d128_k_last",
+    "decode": "decode",  # gdn/decode/
+    "prefill": "prefill",  # gdn/prefill/
 }
 
 
 KERNEL_CONFIGS = {
-    "gdn_decode_qk4_v8_d128_k_last": {
+    "decode": {
         "solution": {
             "name": "tma-thrust-gdn-decode-v1",
             "subdir": "solution/triton",
@@ -58,7 +59,7 @@ KERNEL_CONFIGS = {
         "entry_point": "kernel.py::kernel",
         "destination_passing_style": False,
     },
-    "gdn_prefill_qk4_v8_d128_k_last": {
+    "prefill": {
         "solution": {
             "name": "tma-thrust-gdn-prefill-v1",
             "subdir": "solution/triton",
@@ -86,7 +87,7 @@ def build_solution_dict(kernel_dir_name: str, variant: str = "solution") -> dict
     variant: 'solution' (optimized) or 'baseline' (Python reference)
     """
     cfg = KERNEL_CONFIGS[kernel_dir_name]
-    kernel_dir = REPO_ROOT / kernel_dir_name
+    kernel_dir = GDN_ROOT / kernel_dir_name
     source_dir = kernel_dir / cfg[variant]["subdir"]
 
     sources = []
