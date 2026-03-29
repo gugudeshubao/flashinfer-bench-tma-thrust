@@ -17,6 +17,14 @@
 - [gdn_prefill_ptx.cuh](file://src/kernels/ptx/gdn_prefill_ptx.cuh)
 </cite>
 
+## Update Summary
+**Changes Made**
+- Updated Priority 1 section to reflect completion of Decode TMA Prefetch implementation
+- Added comprehensive cp.async prefetch implementation details for both CuTe C++ and PTX frameworks
+- Updated performance analysis to reflect memory latency hiding benefits
+- Enhanced cp.async primitive function documentation with concrete implementations
+- Updated optimization tracking to mark Priority 1 as completed
+
 ## Table of Contents
 1. [Introduction](#introduction)
 2. [Project Structure](#project-structure)
@@ -88,7 +96,7 @@ TEST_CORR --> V9P
 - [test_correctness.py:1-363](file://tests/test_correctness.py#L1-L363)
 - [gdn_decode_v9.cuh:1-602](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L1-L602)
 - [gdn_prefill_v9.cuh:1-356](file://src/kernels/cute_cpp/gdn_prefill_v9.cuh#L1-L356)
-- [gdn_decode_ptx.cuh:1-491](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
+- [gdn_decode_ptx.cuh:1-543](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L543)
 - [gdn_prefill_ptx.cuh:1-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
 
 **Section sources**
@@ -184,6 +192,8 @@ Kernel-->>Host : Return results
 - [gdn_decode_v9.cuh:263-281](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L263-L281)
 - [gdn_decode_v9.cuh:428-437](file://src/kernels/cute_cpp/gdn_decode_v9.cuh#L428-L437)
 - [gdn_decode_ptx.cuh:331-342](file://src/kernels/ptx/gdn_decode_ptx.cuh#L331-L342)
+
+**Updated** Priority 1: Decode TMA Prefetch has been completed with comprehensive cp.async prefetch implementation
 
 Key implementation details:
 - **Async Prefetch**: cp.async primitives issue 4-byte transfers from global to shared memory
@@ -334,6 +344,8 @@ The optimization strategy targets specific performance bottlenecks identified th
 - **Bottleneck**: State access pattern causing bank conflicts and serialization
 - **Solution**: 8-byte swizzle pattern and asynchronous prefetch
 
+**Updated** **Memory Latency Hiding Benefits**: The cp.async prefetch implementation provides significant memory latency hiding benefits, allowing GPU to execute other instructions while waiting for data transfers to complete. This reduces stalls and improves overall GPU utilization, especially important for small batch decode operations.
+
 ### Compute-Bound Prefill Potential
 - **Current State**: 167 GB/s at N=16 (2% of B200 peak)
 - **Target**: 1,000+ GB/s through chunking and compute density
@@ -383,8 +395,10 @@ Common optimization challenges and their resolutions:
 The optimization tracking demonstrates a systematic approach to achieving near-peak memory bandwidth utilization on B200 hardware. Through the dual-path strategy—CuTe C++ for peak performance and PTX assembly for maximum control—the project has successfully:
 
 - **Achieved 95% B200 peak bandwidth** for decode operations (7,600 GB/s)
-- **Implemented cp.async prefetch** to hide memory latency in decode kernels
+- **Implemented comprehensive cp.async prefetch** to hide memory latency in decode kernels
 - **Deployed chunking strategy** to increase arithmetic intensity in prefill kernels
 - **Established comprehensive benchmarking infrastructure** for continuous validation
+
+**Updated** **Priority 1: Decode TMA Prefetch** has been completed with successful implementation of cp.async prefetch primitives in both CuTe C++ and PTX frameworks, marking a significant milestone in memory latency hiding optimization.
 
 The file freeze policy ensures focused iteration on the four core optimization files, while the dual-path architecture provides both performance and control trade-offs. Future work should focus on extending the prefill optimization to achieve 1,000+ GB/s and integrating true FP4 quantization for production deployment.

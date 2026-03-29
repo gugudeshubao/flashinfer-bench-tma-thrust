@@ -6,13 +6,14 @@
 
 ## File Freeze Policy
 
-**All future optimizations modify only these 4 files:**
+**All future optimizations modify only these 6 files:**
 
 | Path | Framework | Purpose |
 |------|-----------|---------|
-| `src/kernels/cute_cpp/gdn_decode_v9.cuh` | CuTe C++ | Decode kernel (primary) |
+| `src/kernels/cute_cpp/gdn_decode_v9.cuh` | CuTe C++ | Decode kernel (v9) |
+| `src/kernels/cute_cpp/gdn_decode_v10.cuh` | CuTe C++ | Decode kernel (v10 + FP8) |
 | `src/kernels/cute_cpp/gdn_prefill_v9.cuh` | CuTe C++ | Prefill kernel (primary) |
-| `src/kernels/ptx/gdn_decode_ptx.cuh` | PTX | Decode kernel (fallback) |
+| `src/kernels/ptx/gdn_decode_ptx.cuh` | PTX | Decode kernel (fallback + FP8) |
 | `src/kernels/ptx/gdn_prefill_ptx.cuh` | PTX | Prefill kernel (fallback) |
 
 **Baseline Commit**: `188dc04` (2026-03-28)
@@ -179,13 +180,100 @@ ptx_cp_async_wait<0>();
 
 ---
 
+## Iteration 2: FP8 State Quantization (2026-03-28)
+
+### Motivation
+
+Decode is **memory-bound** with arithmetic intensity AI ≈ 1. State matrix [128×128] is the largest memory consumer:
+
+| Precision | State Size/Head | Total (8 heads) | Memory BW Reduction |
+|-----------|-----------------|-----------------|---------------------|
+| FP32 | 64 KB | 512 KB | Baseline |
+| **FP8** | **16 KB** | **128 KB** | **4x** |
+
+### Changes Made
+
+**CuTe C++ v10 (`gdn_decode_v10.cuh`):**
+```cpp
+// FP8 conversion primitives
+__device__ __forceinline__ __nv_fp8_e4m3 v10_fp32_to_fp8(float val);
+__device__ __forceinline__ float v10_fp8_to_fp32(__nv_fp8_e4m3 val);
+__device__ __forceinline__ uint32_t v10_pack_fp8x4(...);
+__device__ __forceinline__ void v10_unpack_fp8x4(...);
+
+// New FP8 kernel
+template<int BLOCK_V>
+__global__ void gdn_decode_kernel_v10_fp8(
+    const uint32_t* State_FP8,    // Packed FP8x4 state
+    const float* State_Scale,     // Per-row dynamic scale
+    ...
+);
+
+// Launcher
+void gdn_decode_v10_launch_fp8(...);
+```
+
+**PTX (`gdn_decode_ptx.cuh`):**
+```cpp
+// FP8 PTX primitives
+__device__ __forceinline__ __nv_fp8_e4m3 ptx_fp32_to_fp8(float val);
+__device__ __forceinline__ float ptx_fp8_to_fp32(__nv_fp8_e4m3 val);
+__device__ __forceinline__ uint32_t ptx_pack_fp8x4(...);
+__device__ __forceinline__ void ptx_unpack_fp8x4(...);
+__device__ __forceinline__ uint32_t ptx_ld_nc_u32(const uint32_t* ptr);
+
+// New FP8 kernel
+template<int BLOCK_V>
+__global__ void gdn_decode_kernel_ptx_fp8(...);
+
+// Launcher
+void gdn_decode_ptx_fp8_launch(...);
+```
+
+### Design Decisions
+
+1. **Per-row dynamic scaling**: Each row of state has its own scale factor
+   - Scale = max_abs / 400.0 (FP8 E4M3 range is [-448, 448])
+   - Maintains accuracy better than global scaling
+
+2. **FP32 internal compute**: Only state storage is FP8
+   - Dequantize on load: `state = fp8_to_fp32(packed) * row_scale`
+   - Quantize on store: `fp8 = fp32_to_fp8(state * inv_scale)`
+
+3. **Vectorized memory**: Pack 4 FP8 values into uint32_t
+   - 4x memory bandwidth efficiency
+   - Aligned 4-byte loads/stores
+
+### Expected Benefits
+
+- **4x memory reduction**: 512KB → 128KB per batch
+- **4x lower memory BW**: State load/store bandwidth reduced
+- **Potential 2-4x speedup**: For memory-bound decode kernel
+
+### Accuracy Trade-offs
+
+| Precision | Mantissa Bits | Max Abs Error | Relative Error |
+|-----------|---------------|---------------|----------------|
+| FP32 | 23 | ~1e-7 | ~1e-7 |
+| FP8 E4M3 | 3 | ~0.5 | ~5% |
+
+For GDN state which accumulates over many steps, FP8 may introduce drift.
+Recommend FP8 for inference, FP32 for training.
+
+### Benchmark Status
+- [ ] Pending Modal B200 benchmark to measure FP8 vs FP32 performance
+- [ ] Pending accuracy comparison
+
+---
+
 ## Commit History
 
 | Commit | Date | Description |
 |--------|------|-------------|
 | `188dc04` | 2026-03-28 | feat: add CuTe C++ and PTX kernel implementations |
 | `a892d6c` | 2026-03-28 | docs: update performance benchmarks and create optimization log |
-| (next) | 2026-03-28 | **Iteration 1: cp.async prefetch for decode kernels** |
+| `49fff02` | 2026-03-28 | **Iteration 1: cp.async prefetch for decode kernels** |
+| `392a54c` | 2026-03-28 | **Iteration 2: FP8 state quantization (4x compression)** |
 
 ---
 
