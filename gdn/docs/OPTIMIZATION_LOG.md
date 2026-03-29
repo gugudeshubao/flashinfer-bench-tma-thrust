@@ -10,11 +10,11 @@
 
 | Path | Framework | Purpose |
 |------|-----------|---------|
-| `src/kernels/cute_cpp/gdn_decode_v9.cuh` | CuTe C++ | Decode kernel (v9) |
-| `src/kernels/cute_cpp/gdn_decode_v10.cuh` | CuTe C++ | Decode kernel (v10 + FP8) |
-| `src/kernels/cute_cpp/gdn_prefill_v9.cuh` | CuTe C++ | Prefill kernel (primary) |
-| `src/kernels/ptx/gdn_decode_ptx.cuh` | PTX | Decode kernel (fallback + FP8) |
-| `src/kernels/ptx/gdn_prefill_ptx.cuh` | PTX | Prefill kernel (fallback) |
+| `gdn/kernels/cute_cpp/gdn_decode_v9.cuh` | CuTe C++ | Decode kernel (v9) |
+| `gdn/kernels/cute_cpp/gdn_decode_v10.cuh` | CuTe C++ | Decode kernel (v10 + FP8) |
+| `gdn/kernels/cute_cpp/gdn_prefill_v9.cuh` | CuTe C++ | Prefill kernel (primary) |
+| `gdn/kernels/ptx/gdn_decode_ptx.cuh` | PTX | Decode kernel (fallback + FP8) |
+| `gdn/kernels/ptx/gdn_prefill_ptx.cuh` | PTX | Prefill kernel (fallback) |
 
 **Baseline Commit**: `188dc04` (2026-03-28)
 
@@ -452,6 +452,141 @@ for t in tokens:
 
 ---
 
+## Iteration 4: TMA Double-Buffering + cp.async Prefetch (2026-03-30)
+
+### Motivation
+
+The prefill kernel has two key bottlenecks:
+1. **Memory latency**: Loading Q/K/V/State blocks main compute
+2. **Sequential dependency**: Each token depends on previous state
+
+While we cannot parallelize across tokens, we CAN:
+- Hide memory latency via double-buffering
+- Prefetch next chunk while computing current chunk
+- Use cp.async for async state loading
+
+### Changes Made
+
+**PTX (`gdn_prefill_ptx.cuh`):**
+```cpp
+// Double-buffered shared memory layout
+float* qk_buf[2];    // [CHUNK_SIZE, D*2] × 2 buffers (Q+K interleaved)
+float* v_buf[2];     // [CHUNK_SIZE, BLOCK_V] × 2 buffers
+
+// cp.async for state loading
+for (int i = tid; i < BLOCK_V * D / 4; i += num_threads) {
+    ptx_cp_async_16(&state_smem[vi * D + ki], &state_ptr[...]);
+}
+ptx_cp_async_commit();
+
+// Prefetch first chunk while waiting for state
+// ... load Q, K, V, gates for chunk 0 ...
+ptx_cp_async_wait_all();
+
+// Main loop with double-buffering
+for (chunk = 0; chunk < num_chunks; chunk++) {
+    // Prefetch NEXT chunk into alternate buffer
+    if (next_chunk < num_chunks) {
+        // Load Q, K, V into qk_buf[next_buf], v_buf[next_buf]
+    }
+    
+    // Process CURRENT chunk from qk_buf[buf_idx], v_buf[buf_idx]
+    for (c = 0; c < actual_chunk_size; c++) {
+        // Fully unrolled 8-wide FMA chain for State @ Q and State @ K
+        #pragma unroll
+        for (int k = 0; k < D; k += 8) {
+            old_v = ptx_fma_pf(s0, k_ptr[k+0], old_v);
+            old_v = ptx_fma_pf(s1, k_ptr[k+1], old_v);
+            // ... 8 FMAs per iteration
+            out_val = ptx_fma_pf(s0, q_ptr[k+0], out_val);
+            // ... 8 FMAs per iteration
+        }
+    }
+    
+    // Swap buffers
+    buf_idx = 1 - buf_idx;
+}
+```
+
+### Key Optimizations
+
+| Optimization | Before | After | Benefit |
+|-------------|--------|-------|---------|
+| **State loading** | Sync ld.global | cp.async | Hide memory latency |
+| **Q/K/V loading** | Single buffer | Double buffer | Overlap prefetch + compute |
+| **FMA chain** | 4-wide unroll | 8-wide unroll | Better instruction-level parallelism |
+| **Gate compute** | Per-token | Per-chunk | Reduced branch divergence |
+
+### Shared Memory Usage
+
+```
+CHUNK_SIZE=8, BLOCK_V=16, D=128
+
+Before (single buffer):
+- state_smem:  16 × 128 = 2,048 floats
+- q_chunk:     8 × 128 = 1,024 floats
+- k_chunk:     8 × 128 = 1,024 floats
+- v_chunk:     8 × 16 = 128 floats
+- misc:        ~256 floats
+Total: ~4,480 floats = 17.9 KB
+
+After (double buffer):
+- state_smem:  16 × 128 = 2,048 floats
+- qk_buf[2]:   2 × 8 × 256 = 4,096 floats  (Q+K interleaved)
+- v_buf[2]:    2 × 8 × 16 = 256 floats
+- misc:        ~256 floats
+Total: ~6,656 floats = 26.6 KB
+
+B200 SMEM: 232 KB per SM → still fits easily
+```
+
+### Sequential Dependency Analysis
+
+**Why we can't use mma.sync for full batching:**
+
+```
+Token 0: out_0 = State_0 @ Q_0
+         State_1 = gate_0 * State_0 + delta_0 * K_0^T
+
+Token 1: out_1 = State_1 @ Q_1  ← depends on State_1
+         State_2 = gate_1 * State_1 + delta_1 * K_1^T
+
+Token 2: out_2 = State_2 @ Q_2  ← depends on State_2
+         ...
+```
+
+Each output depends on the previous state, creating a chain:
+```
+State_0 → State_1 → State_2 → ... → State_n
+    ↓         ↓         ↓              ↓
+  out_0    out_1     out_2           out_n
+```
+
+**Future optimization (parallel scan):**
+If we reformulate as linear recurrence:
+```
+State_t = A_t * State_{t-1} + B_t
+```
+We can use parallel scan to compute all states in O(log n) depth.
+This requires significant algorithm refactoring.
+
+### Expected Benefits
+
+| Metric | Before | After (Expected) | Notes |
+|--------|--------|------------------|-------|
+| **Memory latency** | Visible | Hidden | Double-buffer overlap |
+| **Prefetch utilization** | 0% | ~90% | cp.async overlap |
+| **FMA throughput** | ~60% | ~85% | 8-wide unroll |
+| **Overall speedup** | 1x | 1.3-1.5x | For compute-bound chunks |
+
+### Benchmark Status
+- [x] TMA double-buffering implemented
+- [x] cp.async state prefetch added
+- [x] 8-wide FMA unroll optimized
+- [ ] Pending Modal B200 benchmark
+
+---
+
 ## Commit History
 
 | Commit | Date | Description |
@@ -460,7 +595,10 @@ for t in tokens:
 | `a892d6c` | 2026-03-28 | docs: update performance benchmarks and create optimization log |
 | `49fff02` | 2026-03-28 | **Iteration 1: cp.async prefetch for decode kernels** |
 | `392a54c` | 2026-03-28 | **Iteration 2: FP8 state quantization (4x compression)** |
-| TBD | 2026-03-28 | **Iteration 3: mma.sync prefill kernel** |
+| `551e8d8` | 2026-03-28 | **Iteration 3: mma.sync prefill kernel** |
+| `cc3a6e7` | 2026-03-30 | Reorganize: Move GDN implementations to gdn/ directory |
+| `5fe786f` | 2026-03-30 | Move GDN scripts to gdn/scripts/ |
+| TBD | 2026-03-30 | **Iteration 4: TMA double-buffering + cp.async prefetch** |
 
 ---
 

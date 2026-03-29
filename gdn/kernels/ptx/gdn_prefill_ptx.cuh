@@ -417,6 +417,8 @@ __global__ void gdn_prefill_kernel_ptx_chunked(
 // ============================================================
 // Tensor Core Prefill Kernel using mma.sync.aligned
 // BLOCK_V=16 required for m16n8k16 tile size
+// 
+// Optimization: TMA double-buffering + cp.async prefetch
 // ============================================================
 
 template<int CHUNK_SIZE>
@@ -445,7 +447,6 @@ gdn_prefill_kernel_ptx_mma(
     constexpr int BLOCK_V = 16;  // Fixed for m16n8k16
     constexpr int D = PREFILL_D_PTX;
     constexpr int WARP_SIZE = 32;
-    constexpr int K_TILES = D / 16;  // 128/16 = 8 tiles
     
     const int n = blockIdx.x;
     const int h = blockIdx.y;
@@ -455,124 +456,255 @@ gdn_prefill_kernel_ptx_mma(
     const int lane_id = tid % WARP_SIZE;
     
     const int v0 = v_block * BLOCK_V;
-    const int num_threads = blockDim.x;
+    const int num_threads = blockDim.x;  // 128
     
     // Sequence bounds
     const int t_start = CuSeqlens[n];
     const int t_end = CuSeqlens[n + 1];
     const int seq_len = t_end - t_start;
     
+    if (seq_len <= 0) return;
+    
     // Gate values (constant for head h)
-    const float g_log = A_log[h];
-    const float g = ptx_exp_pf(g_log);
+    const float a_log_val = A_log[h];
     const float dt_bias = DtBias[h];
     
-    // Shared memory layout for mma.sync
+    // ══════════════════════════════════════════════════════════════════
+    // SHARED MEMORY LAYOUT with double-buffering for prefetch
+    // ══════════════════════════════════════════════════════════════════
     extern __shared__ char smem[];
-    float* state_smem = (float*)smem;                          // [BLOCK_V, D] = [16, 128]
-    float* q_chunk = state_smem + BLOCK_V * D;                 // [CHUNK_SIZE, D]
-    float* k_chunk = q_chunk + CHUNK_SIZE * D;                 // [CHUNK_SIZE, D]
-    float* v_chunk = k_chunk + CHUNK_SIZE * D;                 // [CHUNK_SIZE, BLOCK_V]
-    float* gate_chunk = v_chunk + CHUNK_SIZE * BLOCK_V;        // [CHUNK_SIZE] (a)
-    float* beta_chunk = gate_chunk + CHUNK_SIZE;               // [CHUNK_SIZE] (beta)
-    float* out_smem = beta_chunk + CHUNK_SIZE;                 // [CHUNK_SIZE, BLOCK_V]
     
-    // Load state to shared memory
+    // State: [BLOCK_V, D] = [16, 128] = 2048 floats
+    float* state_smem = (float*)smem;
+    
+    // Double-buffered Q/K/V for prefetch
+    // Buffer 0 and Buffer 1, each holds CHUNK_SIZE tokens
+    float* qk_buf[2];
+    float* v_buf[2];
+    
+    qk_buf[0] = state_smem + BLOCK_V * D;                    // [CHUNK_SIZE, D*2] for Q+K
+    qk_buf[1] = qk_buf[0] + CHUNK_SIZE * D * 2;              // Second buffer
+    v_buf[0] = qk_buf[1] + CHUNK_SIZE * D * 2;               // [CHUNK_SIZE, BLOCK_V]
+    v_buf[1] = v_buf[0] + CHUNK_SIZE * BLOCK_V;              // Second buffer
+    
+    // Gates and output (single buffer)
+    float* gate_smem = v_buf[1] + CHUNK_SIZE * BLOCK_V;      // [CHUNK_SIZE]
+    float* beta_smem = gate_smem + CHUNK_SIZE;               // [CHUNK_SIZE]
+    float* out_smem = beta_smem + CHUNK_SIZE;                // [CHUNK_SIZE, BLOCK_V]
+    
+    // ══════════════════════════════════════════════════════════════════
+    // LOAD STATE using cp.async for async prefetch
+    // ══════════════════════════════════════════════════════════════════
     const float* state_ptr = State + n * stride_s_n + h * stride_s_h + v0 * stride_s_v;
-    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
-        int vi = i / D;
-        int ki = i % D;
-        state_smem[vi * D + ki] = state_ptr[vi * stride_s_v + ki];
-    }
-    __syncthreads();
     
-    // Process chunks
-    for (int chunk_start = 0; chunk_start < seq_len; chunk_start += CHUNK_SIZE) {
-        const int actual_chunk_size = min(CHUNK_SIZE, seq_len - chunk_start);
+    // Use cp.async for 16-byte aligned loads (4 floats at a time)
+    for (int i = tid; i < BLOCK_V * D / 4; i += num_threads) {
+        int vi = (i * 4) / D;
+        int ki = (i * 4) % D;
+        const float* src = &state_ptr[vi * stride_s_v + ki];
+        float* dst = &state_smem[vi * D + ki];
         
-        // Load Q, K, V, gates for chunk
-        for (int c = 0; c < actual_chunk_size; c++) {
-            int t = t_start + chunk_start + c;
+        // Use cp.async for async copy
+        ptx_cp_async_16(dst, src);
+    }
+    ptx_cp_async_commit();
+    
+    // ══════════════════════════════════════════════════════════════════
+    // PREFETCH FIRST CHUNK while waiting for state
+    // ══════════════════════════════════════════════════════════════════
+    const int num_chunks = (seq_len + CHUNK_SIZE - 1) / CHUNK_SIZE;
+    int buf_idx = 0;
+    int k_head = h >> 1;  // Q/K have 4 heads
+    
+    // Prefetch chunk 0
+    {
+        int chunk_end = min(CHUNK_SIZE, seq_len);
+        for (int c = 0; c < chunk_end; c++) {
+            int t = t_start + c;
             
-            // Load Q and K (need k_head = h/2 since Q/K have 4 heads)
-            int k_head = h >> 1;
-            for (int i = tid; i < D; i += num_threads) {
-                q_chunk[c * D + i] = __bfloat162float(Q[t * stride_q_t + k_head * stride_q_h + i]);
-                k_chunk[c * D + i] = __bfloat162float(K[t * stride_k_t + k_head * stride_k_h + i]);
+            // Load Q (D elements)
+            for (int i = tid; i < D / 4; i += num_threads) {
+                const __nv_bfloat16* q_src = &Q[t * stride_q_t + k_head * stride_q_h + i * 4];
+                float* q_dst = &qk_buf[0][c * D * 2 + i * 4];
+                
+                // Load 4 BF16 values and convert
+                q_dst[0] = __bfloat162float(q_src[0]);
+                q_dst[1] = __bfloat162float(q_src[1]);
+                q_dst[2] = __bfloat162float(q_src[2]);
+                q_dst[3] = __bfloat162float(q_src[3]);
             }
             
-            // Load V (v_head = h)
+            // Load K (D elements, offset by D in buffer)
+            for (int i = tid; i < D / 4; i += num_threads) {
+                const __nv_bfloat16* k_src = &K[t * stride_k_t + k_head * stride_k_h + i * 4];
+                float* k_dst = &qk_buf[0][c * D * 2 + D + i * 4];
+                
+                k_dst[0] = __bfloat162float(k_src[0]);
+                k_dst[1] = __bfloat162float(k_src[1]);
+                k_dst[2] = __bfloat162float(k_src[2]);
+                k_dst[3] = __bfloat162float(k_src[3]);
+            }
+            
+            // Load V (BLOCK_V elements)
             for (int i = tid; i < BLOCK_V; i += num_threads) {
-                v_chunk[c * BLOCK_V + i] = __bfloat162float(V[t * stride_v_t + h * stride_v_h + v0 + i]);
-            }
-            
-            // Load gates (one per thread is enough)
-            if (tid < actual_chunk_size) {
-                float a_val = __bfloat162float(A[t * stride_a_t + h]);
-                float b_val = __bfloat162float(B_gate[t * stride_b_t + h]);
-                gate_chunk[c] = ptx_exp_pf(-ptx_softplus_pf(-a_val) + g_log);
-                beta_chunk[c] = ptx_sigmoid_pf(b_val + dt_bias);
+                v_buf[0][c * BLOCK_V + i] = __bfloat162float(V[t * stride_v_t + h * stride_v_h + v0 + i]);
             }
         }
-        __syncthreads();
         
-        // Process each token in chunk
-        for (int c = 0; c < actual_chunk_size; c++) {
-            float gate = gate_chunk[c];
-            float beta = beta_chunk[c];
+        // Compute gates for chunk 0
+        for (int c = tid; c < chunk_end; c += num_threads) {
+            int t = t_start + c;
+            float a_val = __bfloat162float(A[t * stride_a_t + h]);
+            float b_val = __bfloat162float(B_gate[t * stride_b_t + h]);
             
-            // Scale state: S = gate * S
+            // gate = exp(-exp(a_log) * softplus(a + dt_bias))
+            float sp = ptx_softplus_pf(a_val + dt_bias);
+            float exp_alog = ptx_exp_pf(a_log_val);
+            gate_smem[c] = ptx_exp_pf(-exp_alog * sp);
+            beta_smem[c] = ptx_sigmoid_pf(b_val);
+        }
+    }
+    
+    // Wait for state load
+    ptx_cp_async_wait_all();
+    __syncthreads();
+    
+    // ══════════════════════════════════════════════════════════════════
+    // MAIN LOOP: Process chunks with double-buffering
+    // ══════════════════════════════════════════════════════════════════
+    for (int chunk = 0; chunk < num_chunks; chunk++) {
+        const int chunk_start = chunk * CHUNK_SIZE;
+        const int actual_chunk_size = min(CHUNK_SIZE, seq_len - chunk_start);
+        
+        // Start prefetch of NEXT chunk (if exists)
+        const int next_chunk = chunk + 1;
+        const int next_buf = 1 - buf_idx;
+        
+        if (next_chunk < num_chunks) {
+            int next_chunk_start = next_chunk * CHUNK_SIZE;
+            int next_chunk_end = min(next_chunk_start + CHUNK_SIZE, seq_len);
+            int next_chunk_size = next_chunk_end - next_chunk_start;
+            
+            for (int c = 0; c < next_chunk_size; c++) {
+                int t = t_start + next_chunk_start + c;
+                
+                // Prefetch Q
+                for (int i = tid; i < D / 4; i += num_threads) {
+                    const __nv_bfloat16* q_src = &Q[t * stride_q_t + k_head * stride_q_h + i * 4];
+                    float* q_dst = &qk_buf[next_buf][c * D * 2 + i * 4];
+                    q_dst[0] = __bfloat162float(q_src[0]);
+                    q_dst[1] = __bfloat162float(q_src[1]);
+                    q_dst[2] = __bfloat162float(q_src[2]);
+                    q_dst[3] = __bfloat162float(q_src[3]);
+                }
+                
+                // Prefetch K
+                for (int i = tid; i < D / 4; i += num_threads) {
+                    const __nv_bfloat16* k_src = &K[t * stride_k_t + k_head * stride_k_h + i * 4];
+                    float* k_dst = &qk_buf[next_buf][c * D * 2 + D + i * 4];
+                    k_dst[0] = __bfloat162float(k_src[0]);
+                    k_dst[1] = __bfloat162float(k_src[1]);
+                    k_dst[2] = __bfloat162float(k_src[2]);
+                    k_dst[3] = __bfloat162float(k_src[3]);
+                }
+                
+                // Prefetch V
+                for (int i = tid; i < BLOCK_V; i += num_threads) {
+                    v_buf[next_buf][c * BLOCK_V + i] = __bfloat162float(
+                        V[t * stride_v_t + h * stride_v_h + v0 + i]);
+                }
+            }
+        }
+        
+        // ── Process current chunk ──────────────────────────────────────
+        float* cur_qk = qk_buf[buf_idx];
+        float* cur_v = v_buf[buf_idx];
+        
+        for (int c = 0; c < actual_chunk_size; c++) {
+            float gate = gate_smem[c];
+            float beta = beta_smem[c];
+            
+            // Pointers for this token
+            float* q_ptr = cur_qk + c * D * 2;
+            float* k_ptr = cur_qk + c * D * 2 + D;
+            float* v_ptr = cur_v + c * BLOCK_V;
+            
+            // Scale state: S = gate * S (vectorized)
             for (int i = tid; i < BLOCK_V * D; i += num_threads) {
                 state_smem[i] *= gate;
             }
             __syncthreads();
             
             // ══════════════════════════════════════════════════════════
-            // MMA COMPUTATION: old_v = State @ k, out = scale * State @ q
-            // State: [16, 128] @ k: [128] -> old_v: [16]
-            // For now: Use FMA (mma.sync requires proper 2D tiling)
-            // TODO: Full mma.sync path when chunk produces [16, 8] output
+            // COMPUTE: old_v = State @ k, out = scale * State @ q
+            // Each thread handles one row of state (v dimension)
             // ══════════════════════════════════════════════════════════
             
-            // Compute old_v[v] = sum_k(State[v,k] * K[k])
-            // Compute out[v] = scale * sum_k(State[v,k] * Q[k])
             if (tid < BLOCK_V) {
                 float old_v = 0.0f;
                 float out_val = 0.0f;
                 
-                // FMA chain along D dimension
-                #pragma unroll 8
-                for (int k = 0; k < D; k += 16) {
-                    #pragma unroll
-                    for (int kk = 0; kk < 16; kk++) {
-                        float s = state_smem[tid * D + k + kk];
-                        old_v = ptx_fma_pf(s, k_chunk[c * D + k + kk], old_v);
-                        out_val = ptx_fma_pf(s, q_chunk[c * D + k + kk], out_val);
-                    }
+                // Fully unrolled FMA chain along D=128 dimension
+                // Each thread reads one row of state: state_smem[tid * D : tid * D + D]
+                float* state_row = state_smem + tid * D;
+                
+                #pragma unroll
+                for (int k = 0; k < D; k += 8) {
+                    // Load 8 state values
+                    float s0 = state_row[k + 0];
+                    float s1 = state_row[k + 1];
+                    float s2 = state_row[k + 2];
+                    float s3 = state_row[k + 3];
+                    float s4 = state_row[k + 4];
+                    float s5 = state_row[k + 5];
+                    float s6 = state_row[k + 6];
+                    float s7 = state_row[k + 7];
+                    
+                    // FMA for old_v = State @ K
+                    old_v = ptx_fma_pf(s0, k_ptr[k + 0], old_v);
+                    old_v = ptx_fma_pf(s1, k_ptr[k + 1], old_v);
+                    old_v = ptx_fma_pf(s2, k_ptr[k + 2], old_v);
+                    old_v = ptx_fma_pf(s3, k_ptr[k + 3], old_v);
+                    old_v = ptx_fma_pf(s4, k_ptr[k + 4], old_v);
+                    old_v = ptx_fma_pf(s5, k_ptr[k + 5], old_v);
+                    old_v = ptx_fma_pf(s6, k_ptr[k + 6], old_v);
+                    old_v = ptx_fma_pf(s7, k_ptr[k + 7], old_v);
+                    
+                    // FMA for out = State @ Q
+                    out_val = ptx_fma_pf(s0, q_ptr[k + 0], out_val);
+                    out_val = ptx_fma_pf(s1, q_ptr[k + 1], out_val);
+                    out_val = ptx_fma_pf(s2, q_ptr[k + 2], out_val);
+                    out_val = ptx_fma_pf(s3, q_ptr[k + 3], out_val);
+                    out_val = ptx_fma_pf(s4, q_ptr[k + 4], out_val);
+                    out_val = ptx_fma_pf(s5, q_ptr[k + 5], out_val);
+                    out_val = ptx_fma_pf(s6, q_ptr[k + 6], out_val);
+                    out_val = ptx_fma_pf(s7, q_ptr[k + 7], out_val);
                 }
                 
                 // Delta update: delta = beta * (v - old_v)
-                float v_val = v_chunk[c * BLOCK_V + tid];
+                float v_val = v_ptr[tid];
                 float delta = beta * (v_val - old_v);
                 
                 // Store output
                 out_smem[c * BLOCK_V + tid] = scale * out_val;
                 
-                // Update state: S[v,:] += delta * K
-                #pragma unroll 8
-                for (int k = 0; k < D; k += 16) {
-                    #pragma unroll
-                    for (int kk = 0; kk < 16; kk++) {
-                        state_smem[tid * D + k + kk] = 
-                            ptx_fma_pf(delta, k_chunk[c * D + k + kk], 
-                                      state_smem[tid * D + k + kk]);
-                    }
+                // Update state: S[v,:] += delta * K (rank-1 update)
+                #pragma unroll
+                for (int k = 0; k < D; k += 8) {
+                    state_row[k + 0] = ptx_fma_pf(delta, k_ptr[k + 0], state_row[k + 0]);
+                    state_row[k + 1] = ptx_fma_pf(delta, k_ptr[k + 1], state_row[k + 1]);
+                    state_row[k + 2] = ptx_fma_pf(delta, k_ptr[k + 2], state_row[k + 2]);
+                    state_row[k + 3] = ptx_fma_pf(delta, k_ptr[k + 3], state_row[k + 3]);
+                    state_row[k + 4] = ptx_fma_pf(delta, k_ptr[k + 4], state_row[k + 4]);
+                    state_row[k + 5] = ptx_fma_pf(delta, k_ptr[k + 5], state_row[k + 5]);
+                    state_row[k + 6] = ptx_fma_pf(delta, k_ptr[k + 6], state_row[k + 6]);
+                    state_row[k + 7] = ptx_fma_pf(delta, k_ptr[k + 7], state_row[k + 7]);
                 }
             }
             __syncthreads();
         }
         
-        // Store outputs for chunk
+        // ── Store outputs for current chunk ─────────────────────────────
         for (int c = 0; c < actual_chunk_size; c++) {
             int t = t_start + chunk_start + c;
             for (int i = tid; i < BLOCK_V; i += num_threads) {
@@ -580,10 +712,32 @@ gdn_prefill_kernel_ptx_mma(
                     __float2bfloat16(out_smem[c * BLOCK_V + i]);
             }
         }
+        
+        // Prefetch next chunk's gates
+        if (next_chunk < num_chunks) {
+            int next_chunk_start_t = next_chunk * CHUNK_SIZE;
+            int next_chunk_size = min(CHUNK_SIZE, seq_len - next_chunk_start_t);
+            
+            for (int c = tid; c < next_chunk_size; c += num_threads) {
+                int t = t_start + next_chunk_start_t + c;
+                float a_val = __bfloat162float(A[t * stride_a_t + h]);
+                float b_val = __bfloat162float(B_gate[t * stride_b_t + h]);
+                
+                float sp = ptx_softplus_pf(a_val + dt_bias);
+                float exp_alog = ptx_exp_pf(a_log_val);
+                gate_smem[c] = ptx_exp_pf(-exp_alog * sp);
+                beta_smem[c] = ptx_sigmoid_pf(b_val);
+            }
+        }
+        
+        // Swap buffers
+        buf_idx = next_buf;
         __syncthreads();
     }
     
-    // Store final state
+    // ══════════════════════════════════════════════════════════════════
+    // STORE FINAL STATE
+    // ══════════════════════════════════════════════════════════════════
     float* new_state_ptr = NewState + n * stride_ns_n + h * stride_ns_h + v0 * stride_ns_v;
     for (int i = tid; i < BLOCK_V * D; i += num_threads) {
         int vi = i / D;
@@ -648,6 +802,7 @@ inline void gdn_prefill_ptx_launch(
 
 // ============================================================
 // Tensor Core Optimized Launcher (BLOCK_V=16 only)
+// With TMA double-buffering and cp.async prefetch
 // ============================================================
 
 inline void gdn_prefill_ptx_mma_launch(
@@ -672,13 +827,21 @@ inline void gdn_prefill_ptx_mma_launch(
     dim3 grid(N, num_v_heads, V_BLOCKS);
     dim3 block(128);
     
-    size_t smem_size = (BLOCK_V * D +           // state_smem
-                        CHUNK_SIZE * D +         // q_chunk
-                        CHUNK_SIZE * D +         // k_chunk
-                        CHUNK_SIZE * BLOCK_V +   // v_chunk
-                        CHUNK_SIZE +             // gate_chunk
-                        CHUNK_SIZE +             // beta_chunk
-                        CHUNK_SIZE * BLOCK_V     // out_smem
+    // Shared memory layout with double-buffering:
+    // - state_smem: [BLOCK_V, D] = [16, 128]
+    // - qk_buf[0]: [CHUNK_SIZE, D*2]  (Q+K interleaved)
+    // - qk_buf[1]: [CHUNK_SIZE, D*2]
+    // - v_buf[0]: [CHUNK_SIZE, BLOCK_V]
+    // - v_buf[1]: [CHUNK_SIZE, BLOCK_V]
+    // - gate_smem: [CHUNK_SIZE]
+    // - beta_smem: [CHUNK_SIZE]
+    // - out_smem: [CHUNK_SIZE, BLOCK_V]
+    size_t smem_size = (BLOCK_V * D +                    // state_smem
+                        CHUNK_SIZE * D * 2 * 2 +         // qk_buf[0] + qk_buf[1]
+                        CHUNK_SIZE * BLOCK_V * 2 +       // v_buf[0] + v_buf[1]
+                        CHUNK_SIZE +                     // gate_smem
+                        CHUNK_SIZE +                     // beta_smem
+                        CHUNK_SIZE * BLOCK_V             // out_smem
                        ) * sizeof(float);
     
     if (CHUNK_SIZE == 8) {
