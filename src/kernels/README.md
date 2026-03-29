@@ -6,34 +6,38 @@ Gated Delta Net (GDN) kernel implementations organized by framework.
 
 ```
 src/kernels/
-├── cuda/          # Raw CUDA (v5-v8) — 低级控制
-├── cute/          # CuTe DSL (v9-v10) — 中级抽象
-└── triton/        # Triton (baseline) — 高级 DSL
+├── cuda/          # Raw CUDA C++ (v5-v8) — 低级控制，手动优化
+├── cute/          # CuTe C++ (v9-v10) — CUTLASS 3.x 张量抽象
+├── cute_dsl/      # CuTe DSL Python (规划) — CUTLASS 4.0，FlashAttention-4 风格
+├── cutile/        # cuTile Python (v11 规划) — CUDA 13.1，对标 Triton
+└── triton/        # Triton (baseline) — OpenAI 高级 DSL
 ```
 
 ## Technology Stack Comparison
 
-| 维度 | Raw CUDA | CuTe | Triton |
-|------|----------|------|--------|
-| **抽象级别** | 低 | 中 | 高 |
-| **SMEM 控制** | 手动 | 声明式 | 自动 |
-| **Bank Conflict** | 手动 swizzle | `Swizzle<B,M,S>` | 自动 |
-| **Tensor Core** | 手动 PTX | WGMMA 抽象 | 自动 |
-| **学习成本** | 高 | 中高 | 低 |
-| **性能上限** | 最高 | 最高 | 略低 |
-| **代码量** | 最多 | 中等 | 最少 |
+| 维度 | Raw CUDA | CuTe C++ | CuTe DSL | cuTile | Triton |
+|------|----------|----------|----------|--------|--------|
+| **语言** | C++ | C++ | **Python** | Python | Python |
+| **抽象级别** | 低 | 中 | 中 | 高 | 高 |
+| **编译时间** | 秒 | 分钟 | **秒** | 秒 | 秒 |
+| **SMEM 控制** | 手动 | 声明式 | 声明式 | 自动 | 自动 |
+| **Tensor Core** | 手动 PTX | `TiledMMA` | `TiledMMA` | 自动 | 自动 |
+| **学习成本** | 高 | 中高 | 中 | 低 | 低 |
+| **性能上限** | 最高 | 最高 | **最高** | TBD | 略低 |
+| **典型应用** | v7/v8 | v9/v10 | **FlashAttn-4** | v11 | v5 |
 
 ## Version Summary
 
-| Version | Framework | Abstraction | Key Feature | Best At |
-|---------|-----------|-------------|-------------|---------|
-| v5 | Raw CUDA | Low | Baseline | - |
-| v6 | Raw CUDA | Low | TMA async | - |
-| v7 | Raw CUDA | Low | float4 + FP4 | batch=256 |
-| v8 | Raw CUDA | Low | Warp specialization | batch=256 |
-| **v9** | **CuTe** | **Medium** | **SMEM swizzle** | **batch=1,16** |
-| v10 | CuTe | Medium | `Swizzle<3,3,3>` | batch=256 |
-| Triton | Triton | High | Auto-tuning | batch=64 |
+| Version | Framework | Language | Key Feature | Status |
+|---------|-----------|----------|-------------|--------|
+| v5 | Raw CUDA | C++ | Baseline | ✅ |
+| v6 | Raw CUDA | C++ | TMA async | ✅ |
+| v7 | Raw CUDA | C++ | float4 + FP4 | ✅ |
+| v8 | Raw CUDA | C++ | Warp specialization | ✅ |
+| **v9** | **CuTe** | C++ | **SMEM swizzle** | ✅ |
+| v10 | CuTe | C++ | TiledMMA | ✅ |
+| v11 | cuTile | Python | Tile-based | 🚧 规划 |
+| Triton | Triton | Python | Auto-tuning | ✅ |
 
 ## Performance Summary (B200, 8 TB/s peak)
 
@@ -59,7 +63,7 @@ GDN Decode: S @ q = [128×128] × [128] → [128]
 ```
 
 - **Decode**: Memory-bound (AI=1 FLOP/byte) → 优化带宽
-- **Prefill**: Can be compute-bound (AI=7.5 with chunking) → 可用 WGMMA
+- **Prefill**: Can be compute-bound (AI=7.5 with chunking) → 可用 tcgen05.mma (Blackwell)
 
 ## Delta Rule (All Versions)
 
