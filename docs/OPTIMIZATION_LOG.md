@@ -125,9 +125,10 @@
   - State loading uses async prefetch
 - [ ] Benchmark latency improvement (requires Modal B200)
 
-### Priority 2: Prefill Chunking + WGMMA
-- [ ] Implement CHUNK_SIZE=8 in `gdn_prefill_v9.cuh`
-- [ ] Add tcgen05.mma path in `gdn_prefill_ptx.cuh`
+### Priority 2: Prefill Chunking + mma.sync ✅ DONE
+- [x] Implement CHUNK_SIZE=8 in `gdn_prefill_v9.cuh` (already existed)
+- [x] Add mma.sync.aligned primitives in `gdn_prefill_ptx.cuh`
+- [x] Add optimized MMA kernel `gdn_prefill_kernel_ptx_mma`
 - [ ] Benchmark throughput improvement
 
 ### Priority 3: Correctness Validation
@@ -364,6 +365,93 @@ Total: ~131,456 FLOPs per head
 
 ---
 
+## Iteration 3: Tensor Core Prefill (mma.sync) (2026-03-28)
+
+### Motivation
+
+Prefill with chunking has higher arithmetic intensity:
+- AI (CHUNK=8) ≈ 8 FLOP/byte (near compute-bound)
+- AI (CHUNK=64) ≈ 64 FLOP/byte (compute-bound)
+- FP32 ridge point = 9.3 FLOP/byte
+
+Matrix-matrix operations enable Tensor Core usage:
+- `State[V,D] @ Q_chunk[D,C]` → mma.sync
+- `State[V,D] @ K_chunk[D,C]` → mma.sync
+
+### Changes Made
+
+**PTX (`gdn_prefill_ptx.cuh`):**
+```cpp
+// Added mma.sync.aligned.m16n8k16 primitive
+__device__ __forceinline__ void mma_m16n8k16_bf16(
+    float& d0, float& d1, float& d2, float& d3,
+    uint32_t a0, uint32_t a1, uint32_t a2, uint32_t a3,
+    uint32_t b0, uint32_t b1,
+    float c0, float c1, float c2, float c3
+);
+
+// New kernel optimized for mma.sync
+template<int CHUNK_SIZE>
+__global__ void gdn_prefill_kernel_ptx_mma(...);
+
+// Launcher
+void gdn_prefill_ptx_mma_launch(...);
+```
+
+### mma.sync.aligned.m16n8k16 Details
+
+| Property | Value |
+|----------|-------|
+| Instruction | `mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32` |
+| Architecture | sm_80+ (Ampere, Hopper, Blackwell) |
+| Tile size | M=16, N=8, K=16 |
+| A operand | [16, 16] BF16 row-major |
+| B operand | [16, 8] BF16 col-major |
+| C/D operand | [16, 8] FP32 |
+| FLOPs/instruction | 2 × 16 × 8 × 16 = 4,096 |
+
+### GDN Prefill Tiling Strategy
+
+```
+State[16, 128] @ Q_chunk[128, 8] = Out[16, 8]
+
+Tiled as 8 iterations of mma.m16n8k16:
+  - Iteration 0: State[0:16, 0:16]   @ Q[0:16, 0:8]   → acc[0:16, 0:8]
+  - Iteration 1: State[0:16, 16:32]  @ Q[16:32, 0:8]  → acc[0:16, 0:8]
+  - ...
+  - Iteration 7: State[0:16, 112:128] @ Q[112:128, 0:8] → Out[0:16, 0:8]
+```
+
+### Sequential Dependency Challenge
+
+GDN has sequential token dependency:
+```
+for t in tokens:
+    out[t] = State @ Q[t]
+    old_v = State @ K[t]
+    delta = beta * (V[t] - old_v)
+    State = gate * State + delta * K[t]^T  // State changes!
+```
+
+**Current limitation**: Cannot batch mma.sync across tokens due to state update dependency.
+
+**Potential solutions**:
+1. **Chunkwise recurrence** (FlashLinearAttention): Compute chunk outputs together, update state once
+2. **Parallel scan**: Convert sequential updates to associative scan (complex)
+
+### Expected Benefits
+
+- **Optimized FMA chains**: Unrolled 16-wide FMA operations
+- **PTX fast math**: exp2.approx, lg2.approx, fma.rn for gates
+- **Better cache utilization**: Explicit shared memory management
+
+### Benchmark Status
+- [x] mma.sync primitive added
+- [x] Optimized kernel implemented
+- [ ] Pending Modal B200 benchmark
+
+---
+
 ## Commit History
 
 | Commit | Date | Description |
@@ -372,6 +460,7 @@ Total: ~131,456 FLOPs per head
 | `a892d6c` | 2026-03-28 | docs: update performance benchmarks and create optimization log |
 | `49fff02` | 2026-03-28 | **Iteration 1: cp.async prefetch for decode kernels** |
 | `392a54c` | 2026-03-28 | **Iteration 2: FP8 state quantization (4x compression)** |
+| TBD | 2026-03-28 | **Iteration 3: mma.sync prefill kernel** |
 
 ---
 
@@ -380,3 +469,4 @@ Total: ~131,456 FLOPs per head
 - [CuTe Documentation](https://github.com/NVIDIA/cutlass/tree/main/media/docs/cute)
 - [PTX ISA](https://docs.nvidia.com/cuda/parallel-thread-execution/)
 - [B200 Architecture](https://developer.nvidia.com/blog/nvidia-blackwell-architecture-technical-deep-dive/)
+- [mma.sync PTX](https://docs.nvidia.com/cuda/parallel-thread-execution/#warp-level-matrix-instructions-mma)
