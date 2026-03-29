@@ -20,7 +20,8 @@
 | **AI** | Arithmetic Intensity | 算术强度，每字节内存访问的浮点操作数 |
 | **TMA** | Tensor Memory Accelerator | Hopper+ 架构的异步内存加载单元 |
 | **CuTe** | CUTLASS Tensor | NVIDIA CUTLASS 库的 C++ 张量抽象层 |
-| **cuTile** | CUDA Tile | **NVIDIA 新推出的 Python GPU 编程 API** (CUDA 13.1, 2025.12) |
+| **CuTe DSL** | CuTe Domain Specific Language | **CUTLASS 4.0 的 Python 接口**，FlashAttention-4 使用 |
+| **cuTile** | CUDA Tile | NVIDIA CUDA 13.1 新推出的 Python GPU 编程 API |
 | **GEMM** | General Matrix Multiply | 通用矩阵乘法 |
 | **GEMV** | General Matrix Vector Multiply | 矩阵-向量乘法 |
 | **Warp** | Warp | GPU 上 32 个线程组成的执行单元 |
@@ -268,11 +269,14 @@ S_3 = g_3 * S_2 + outer(k_3, delta_3)  ← 依赖 S_2
 | 技术栈 | 抽象级别 | 语言 | 核心特点 |
 |--------|---------|------|---------|
 | **Raw CUDA** | 低 | C++ | 完全控制，手动管理一切 |
-| **CuTe** | 中 | C++ | Layout algebra + Swizzle 抽象 (CUTLASS) |
-| **cuTile** | 高 | **Python** | **CUDA 13.1 新增，Tile-based 编程** |
+| **CuTe C++** | 中 | C++ | Layout algebra + Swizzle 抽象 (CUTLASS 3.x) |
+| **CuTe DSL** | 中 | **Python** | **CUTLASS 4.0，FlashAttention-4 使用** |
+| **cuTile** | 高 | Python | CUDA 13.1 新增，Tile-based 编程 |
 | **Triton** | 高 | Python | Auto-tuning，跨平台 |
 
-> **注意**: cuTile 是 NVIDIA 在 **CUDA 13.1 (2025.12)** 新发布的 Python GPU 编程模型，直接对标 Triton！它与 CuTe (C++ DSL) 是**完全不同的东西**。
+> **重要区分**:
+> - **CuTe DSL** (CUTLASS 4.0) = CuTe 的 Python 版本，保持底层控制
+> - **cuTile** (CUDA 13.1) = 全新高级抽象，对标 Triton
 
 ### 5.2 我们的版本演进
 
@@ -429,7 +433,128 @@ __global__ void gdn_decode_v9(float* state_ptr, float* q, float* k, ...) {
 | `Swizzle` | Bank conflict 消除 | `Swizzle<3,3,3>` |
 | `make_tensor` | 创建 tensor 视图 | `make_tensor(ptr, layout)` |
 
-### 5.5 CuTe 高级实现 (v10)
+### 5.5 CuTe DSL Python (FlashAttention-4 风格)
+
+> **CuTe DSL** 是 CUTLASS 4.0 新增的 **Python 原生接口**，让开发者用 Python 编写 GPU kernel，同时保持 C++ 级别的性能。FlashAttention-4 完全使用 CuTe DSL 实现！
+
+**CuTe DSL vs CuTe C++**：
+
+| 特性 | CuTe C++ | CuTe DSL (Python) |
+|------|----------|-------------------|
+| 语言 | C++ 模板 | **Python** |
+| 编译时间 | 分钟级 | **秒级** (20-30x 更快) |
+| 学习曲线 | 陡峭 | 更平缓 |
+| 性能 | 100% | ~100% (几乎无损) |
+| 框架集成 | 需要胶水代码 | 原生 DLPack |
+
+**FlashAttention-4 CuTe DSL 示例**:
+
+```python
+import cute
+from cutlass import Float16, Float32
+
+# CuTe DSL: FlashAttention-4 Forward Pass (简化版)
+@cute.jit
+def flash_attention_fwd(
+    Q, K, V, O,           # [B, H, N, D] tensors
+    softmax_scale: float,
+    block_M: int = 128,   # Query block size
+    block_N: int = 128,   # Key/Value block size
+):
+    # 获取 block/thread 索引
+    batch_id = cute.blockIdx.x
+    head_id = cute.blockIdx.y
+    block_m_id = cute.blockIdx.z
+    
+    # ========== Layout 定义 (与 C++ CuTe 一致) ==========
+    # Q tile: [block_M, D] 
+    Q_layout = cute.make_layout(
+        cute.make_shape(block_M, D),
+        cute.make_stride(D, 1)  # row-major
+    )
+    
+    # K tile: [block_N, D]
+    K_layout = cute.make_layout(
+        cute.make_shape(block_N, D),
+        cute.make_stride(D, 1)
+    )
+    
+    # ========== SMEM 分配 (with Swizzle) ==========
+    smem_Q = cute.SharedMemory(Q_layout, dtype=Float16)
+    smem_K = cute.SharedMemory(K_layout, dtype=Float16)
+    smem_V = cute.SharedMemory(K_layout, dtype=Float16)
+    
+    # ========== TiledMMA 定义 (tcgen05.mma for Blackwell) ==========
+    mma_atom = cute.tcgen05.MmaF16BF16Op(
+        io_dtype=Float16,
+        acc_dtype=Float32,
+        mma_inst_shape_mnk=(128, 128, 64),  # Blackwell 128x128 tile
+        cta_group=cute.tcgen05.CtaGroup.ONE,
+        operand_source=cute.tcgen05.OperandSource.SMEM,
+    )
+    tiled_mma = cute.make_tiled_mma(mma_atom)
+    
+    # ========== TiledCopy: Global -> SMEM (TMA) ==========
+    tma_load_Q = cute.make_tma_copy(
+        cute.SM100_TMA_LOAD{},
+        Q[batch_id, head_id, block_m_id * block_M:],
+        smem_Q
+    )
+    
+    # ========== 主循环: Tiled Attention ==========
+    # 初始化累加器 (在 TMEM)
+    acc = tiled_mma.make_fragment_C(...)  # [block_M, D]
+    m_i = cute.fill(-float('inf'), block_M)  # row max
+    l_i = cute.fill(0.0, block_M)             # row sum
+    
+    # 加载 Q block
+    cute.copy(tma_load_Q, Q_tile, smem_Q)
+    cute.cp_async_wait_group(0)
+    
+    # 遍历 K/V blocks
+    for block_n_id in range(num_blocks_n):
+        # 加载 K, V blocks
+        cute.copy(tma_load_K, K[..., block_n_id * block_N:], smem_K)
+        cute.copy(tma_load_V, V[..., block_n_id * block_N:], smem_V)
+        cute.cp_async_wait_group(0)
+        
+        # S = Q @ K^T (使用 tcgen05.mma)
+        S = cute.gemm(tiled_mma, smem_Q, smem_K.T)
+        S = S * softmax_scale
+        
+        # Online Softmax
+        m_ij = cute.rowmax(S)
+        m_new = cute.max(m_i, m_ij)
+        p = cute.exp(S - m_new)
+        l_new = cute.exp(m_i - m_new) * l_i + cute.rowsum(p)
+        
+        # 更新累加器
+        acc = acc * cute.exp(m_i - m_new) + cute.gemm(tiled_mma, p, smem_V)
+        
+        m_i, l_i = m_new, l_new
+    
+    # 归一化
+    O_tile = acc / l_i
+    
+    # 写回 Global Memory
+    cute.copy(O_tile, O[batch_id, head_id, block_m_id * block_M:])
+```
+
+**CuTe DSL 核心 API**:
+
+| API | 作用 | C++ 对应 |
+|-----|------|---------|
+| `@cute.jit` | JIT 编译 kernel | `__global__` |
+| `cute.make_layout()` | 创建 Layout | `make_layout()` |
+| `cute.SharedMemory()` | 分配 SMEM | `__shared__` |
+| `cute.make_tiled_mma()` | 创建 TiledMMA | `make_tiled_mma()` |
+| `cute.gemm()` | 执行矩阵乘法 | `gemm()` |
+| `cute.copy()` | 内存拷贝 | `copy()` |
+| `cute.tcgen05.*` | Blackwell 指令 | `SM100_*` |
+
+> **FlashAttention-4 成果**: 在 B200 上，BF16 达到 ~1600 TFLOPS (71% 理论峰值)，比 cuDNN 快 **1.3x**，比 Triton 快 **2.7x**。
+
+### 5.6 CuTe C++ 高级实现 (v10)
 
 v10 使用 CuTe 的高级抽象，如 TiledCopy 和 TiledMMA：
 
@@ -522,7 +647,7 @@ __global__ void gdn_prefill_v11(...) {
 }
 ```
 
-### 5.6 cuTile Python 实现 (v11 规划)
+### 5.7 cuTile Python 实现 (v11 规划)
 
 > **cuTile** 是 NVIDIA 在 **CUDA 13.1 (2025年12月)** 发布的全新 Python GPU 编程模型，直接对标 Triton！
 
@@ -576,7 +701,7 @@ def gdn_decode_v11(state, q, k, v, out,
 | 跨架构移植 | ✅ (Ampere → Blackwell) | ✅ |
 | 开源 | ❌ | ✅ |
 
-### 5.7 Swizzle 原理详解
+### 5.8 Swizzle 原理详解
 
 **Bank Conflict 问题**:
 ```
@@ -607,21 +732,24 @@ int swizzled_idx = logical_idx ^ ((logical_idx >> 3) & 7);
 
 **效果**: 将 8-way bank conflict 降为 1-way，SMEM 吞吐量提升 **8x**。
 
-### 5.8 技术栈对比总结
+### 5.9 技术栈对比总结
 
-| 维度 | Raw CUDA | CuTe | cuTile | Triton |
-|------|----------|------|--------|--------|
-| **语言** | C++ | C++ | **Python** | Python |
-| **抽象级别** | 低 | 中 | 高 | 高 |
-| **SMEM 控制** | 手动 | 声明式 | 自动 | 自动 |
-| **Bank Conflict** | 手动 XOR | `Swizzle<B,M,S>` | 自动 | 自动 |
-| **Tensor Core** | 手动 PTX | `TiledMMA` | 自动 | 自动 |
-| **学习成本** | 高 | 中高 | 低 | 低 |
-| **代码量** | ~650 行 | ~400 行 | ~100 行 | ~200 行 |
-| **性能上限** | 最高 | 最高 | TBD | 略低 |
-| **我们的选择** | v7/v8 | **v9** | v11 (规划) | v5 (baseline) |
+| 维度 | Raw CUDA | CuTe C++ | CuTe DSL | cuTile | Triton |
+|------|----------|----------|----------|--------|--------|
+| **语言** | C++ | C++ | **Python** | Python | Python |
+| **抽象级别** | 低 | 中 | 中 | 高 | 高 |
+| **编译时间** | 秒 | 分钟 | **秒** | 秒 | 秒 |
+| **SMEM 控制** | 手动 | 声明式 | 声明式 | 自动 | 自动 |
+| **Tensor Core** | 手动 PTX | `TiledMMA` | `TiledMMA` | 自动 | 自动 |
+| **学习成本** | 高 | 中高 | 中 | 低 | 低 |
+| **代码量** | ~650 行 | ~400 行 | ~200 行 | ~100 行 | ~200 行 |
+| **性能上限** | 最高 | 最高 | **最高** | TBD | 略低 |
+| **典型应用** | v7/v8 | v9/v10 | **FlashAttn-4** | v11 (规划) | v5 |
 
-> **结论**: CuTe 是当前最佳平衡点——获得接近 Raw CUDA 的性能，同时保持代码可维护性。cuTile 是未来方向，但刚发布 (2025.12)，性能待验证。
+> **结论**: 
+> - **CuTe C++** 是当前最佳平衡点
+> - **CuTe DSL** 是未来方向 (FlashAttention-4 已验证其性能)
+> - **cuTile** 刚发布 (2025.12)，性能待验证
 
 ---
 
