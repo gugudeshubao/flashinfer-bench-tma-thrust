@@ -67,17 +67,38 @@ CuTe DSL:   Python DSL  →  MLIR  →  LLVM  →  PTX  →  SASS
 
 ## Performance Summary (B200, 8 TB/s peak)
 
-| Batch | Triton | CUDA v7 | CUDA v8 | CuTe v9 | CuTe v10 |
-|-------|--------|---------|---------|---------|----------|
-| 1 | 24 GB/s | 25 (1.06x) | 25 (1.03x) | **27 (1.11x)** | 26 |
-| 16 | 386 GB/s | 352 (0.91x) | 334 (0.86x) | **405 (1.05x)** | 403 |
-| 64 | **1,518 GB/s** | 981 (0.65x) | 914 (0.60x) | 1,302 (0.86x) | 1,287 |
-| 256 | 2,834 GB/s | 7,578 (2.67x) | **7,605 (2.68x)** | 7,585 | 7,602 |
+### Decode (Latest Benchmark: 2026-03-28)
+
+| Batch | Triton v5 | Time (ms) | BW (GB/s) | B200 Util. |
+|-------|-----------|-----------|-----------|------------|
+| 1 | baseline | 0.0455 | 23 | 0.3% |
+| 4 | baseline | 0.0449 | 93 | 1.2% |
+| 16 | baseline | 0.0447 | 375 | 4.7% |
+| 64 | baseline | 0.0447 | 1,502 | 18.8% |
+| **256** | baseline | 0.0959 | **2,798** | **35.0%** |
+
+### Prefill (Latest Benchmark: 2026-03-28)
+
+| Config | N | SeqLen | Time (ms) | BW (GB/s) | M tok/s |
+|--------|---|--------|-----------|-----------|---------|
+| Short | 4 | 64 | 0.085 | 62 | 3.02 |
+| Medium | 4 | 256 | 0.225 | 37 | 4.55 |
+| Long | 4 | 1024 | 0.786 | 27 | 5.21 |
+| **Many** | 16 | 64 | 0.125 | **167** | **8.18** |
+
+### Historical Best (CuTe C++ compiled)
+
+| Batch | Triton | CuTe v9 | CuTe v10 | Best |
+|-------|--------|---------|----------|------|
+| 1 | 24 GB/s | **27 GB/s** | 26 GB/s | **v9** |
+| 16 | 386 GB/s | **405 GB/s** | 403 GB/s | **v9** |
+| 64 | **1,518 GB/s** | 1,302 GB/s | 1,287 GB/s | **Triton** |
+| **256** | 2,834 GB/s | 7,585 GB/s | **7,602 GB/s** | **v10 (95%)** |
 
 **Key Insights:**
-- Raw CUDA 和 CuTe 性能相当 (95% 带宽利用率)
-- CuTe 代码更简洁，Swizzle 由库处理
+- CuTe C++ 在 batch=256 达到 **95% B200 峰值带宽**
 - Triton 在 batch=64 胜出 (auto-tuning 优势)
+- PTX 作为 fallback，理论可达 100%
 
 ## Why Can't We Use Tensor Core for Decode?
 
