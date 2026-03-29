@@ -1,6 +1,6 @@
 # GDN Kernel 优化深度解析：为什么 Decode 无法使用 Tensor Core？
 
-> 本文基于 NVIDIA B200 (Blackwell) 上 Gated Delta Net 内核的优化实践，解析 Decode 与 Prefill 阶段的性能瓶颈差异，以及 Raw CUDA、CuTe、CuTile、Triton 四种技术栈的对比。
+> 本文基于 NVIDIA B200 (Blackwell) 上 Gated Delta Net 内核的优化实践，解析 Decode 与 Prefill 阶段的性能瓶颈差异，以及 Raw CUDA、CuTe、cuTile、Triton 四种技术栈的对比。
 
 ---
 
@@ -19,8 +19,8 @@
 | **Ridge Point** | Ridge Point | Roofline 模型中算力和带宽的转折点 |
 | **AI** | Arithmetic Intensity | 算术强度，每字节内存访问的浮点操作数 |
 | **TMA** | Tensor Memory Accelerator | Hopper+ 架构的异步内存加载单元 |
-| **CuTe** | CUTLASS Tensor | NVIDIA CUTLASS 库的张量抽象层 |
-| **CuTile** | CUTLASS Tile | CuTe 的 Tile 迭代抽象 |
+| **CuTe** | CUTLASS Tensor | NVIDIA CUTLASS 库的 C++ 张量抽象层 |
+| **cuTile** | CUDA Tile | **NVIDIA 新推出的 Python GPU 编程 API** (CUDA 13.1, 2025.12) |
 | **GEMM** | General Matrix Multiply | 通用矩阵乘法 |
 | **GEMV** | General Matrix Vector Multiply | 矩阵-向量乘法 |
 | **Warp** | Warp | GPU 上 32 个线程组成的执行单元 |
@@ -261,16 +261,18 @@ S_3 = g_3 * S_2 + outer(k_3, delta_3)  ← 依赖 S_2
 
 ---
 
-## 5. 技术栈深度对比：Raw CUDA vs CuTe vs CuTile vs Triton
+## 5. 技术栈深度对比：Raw CUDA vs CuTe vs cuTile vs Triton
 
 ### 5.1 技术栈概览
 
 | 技术栈 | 抽象级别 | 语言 | 核心特点 |
 |--------|---------|------|---------|
 | **Raw CUDA** | 低 | C++ | 完全控制，手动管理一切 |
-| **CuTe** | 中 | C++ | Layout algebra + Swizzle 抽象 |
-| **CuTile** | 中 | C++ | CuTe 的 Tile 迭代器抽象 |
+| **CuTe** | 中 | C++ | Layout algebra + Swizzle 抽象 (CUTLASS) |
+| **cuTile** | 高 | **Python** | **CUDA 13.1 新增，Tile-based 编程** |
 | **Triton** | 高 | Python | Auto-tuning，跨平台 |
+
+> **注意**: cuTile 是 NVIDIA 在 **CUDA 13.1 (2025.12)** 新发布的 Python GPU 编程模型，直接对标 Triton！它与 CuTe (C++ DSL) 是**完全不同的东西**。
 
 ### 5.2 我们的版本演进
 
@@ -280,7 +282,8 @@ S_3 = g_3 * S_2 + outer(k_3, delta_3)  ← 依赖 S_2
 | v7 | Raw CUDA | float4 向量化 | ~650 | 95% |
 | v8 | Raw CUDA | Warp Specialization | ~650 | 95% |
 | **v9** | **CuTe** | **SMEM Swizzle** | ~400 | **95%** |
-| v10 | CuTe/CuTile | Layout Algebra | ~350 | 95% |
+| v10 | CuTe (高级) | TiledMMA 抽象 | ~350 | 95% |
+| v11 | cuTile (规划) | Python Tile API | ~100 | TBD |
 
 ### 5.3 Raw CUDA 实现 (v7/v8)
 
@@ -426,9 +429,9 @@ __global__ void gdn_decode_v9(float* state_ptr, float* q, float* k, ...) {
 | `Swizzle` | Bank conflict 消除 | `Swizzle<3,3,3>` |
 | `make_tensor` | 创建 tensor 视图 | `make_tensor(ptr, layout)` |
 
-### 5.5 CuTile 实现 (v10)
+### 5.5 CuTe 高级实现 (v10)
 
-CuTile 是 CuTe 的高级抽象，提供 Tile 迭代器：
+v10 使用 CuTe 的高级抽象，如 TiledCopy 和 TiledMMA：
 
 ```cpp
 #include <cute/tensor.hpp>
@@ -438,7 +441,7 @@ CuTile 是 CuTe 的高级抽象，提供 Tile 迭代器：
 using namespace cute;
 
 // ============================================
-// CuTile: Tile 迭代和分区抽象
+// CuTe 高级抽象: TiledCopy + TiledMMA
 // ============================================
 
 // 定义 Tile 形状
@@ -459,11 +462,11 @@ using MmaAtom = MMA_Atom<SM100_64x64x16_F32BF16BF16_SS>;  // Blackwell tcgen05.m
 using TiledMma = TiledMMA<MmaAtom, Layout<Shape<_2, _2, _1>>>;
 
 // ============================================
-// v10 Kernel: 使用 CuTile 抽象
+// v10 Kernel: 使用 CuTe TiledMMA 抽象
 // ============================================
 template<int BLOCK_V>
 struct SwizzledStateLayout {
-    // CuTile 风格的 Layout 计算
+    // CuTe 风格的 Layout 计算
     using SwizzleType = Swizzle<3, 3, 3>;
     
     static constexpr int D = 128;
@@ -477,7 +480,7 @@ struct SwizzledStateLayout {
 };
 
 __global__ void gdn_decode_v10(...) {
-    // 使用 CuTile 的 Swizzle 计算
+    // 使用 CuTe 的 Swizzle 计算
     using SL = SwizzledStateLayout<BLOCK_V>;
     
     __shared__ float smem_state[BLOCK_V * 128];
@@ -519,17 +522,61 @@ __global__ void gdn_prefill_v11(...) {
 }
 ```
 
-**CuTe vs CuTile**:
+### 5.6 cuTile Python 实现 (v11 规划)
 
-| 维度 | CuTe | CuTile |
-|------|------|--------|
-| 抽象级别 | Layout + Swizzle | + Tile 迭代器 |
-| 主要用途 | 内存布局 | Tile 级并行 |
-| Tensor Core | 需手动 | TiledMMA 抽象 |
-| 学习曲线 | 陡峭 | 更陡峭 |
-| 适用场景 | 内存密集型 | 计算密集型 |
+> **cuTile** 是 NVIDIA 在 **CUDA 13.1 (2025年12月)** 发布的全新 Python GPU 编程模型，直接对标 Triton！
 
-### 5.6 Swizzle 原理详解
+cuTile 的核心特点：
+- **纯 Python 语法**，无需 C++
+- **Tile-based 抽象**，自动管理线程/block
+- 自动利用 **Tensor Core** 和 **TMA**
+- 编译器自动优化，无需手动调优
+
+```python
+import cuda.tile as ct
+
+# cuTile Python: GDN Decode Kernel (规划中)
+@ct.kernel
+def gdn_decode_v11(state, q, k, v, out, 
+                   D: ct.Constant[int] = 128,
+                   V: ct.Constant[int] = 128):
+    # 获取 block ID
+    batch_id = ct.bid(0)
+    head_id = ct.bid(1)
+    
+    # 加载 tiles (自动处理内存传输)
+    state_tile = ct.load(state, index=(batch_id, head_id), shape=(V, D))
+    q_tile = ct.load(q, index=(batch_id, head_id), shape=(D,))
+    k_tile = ct.load(k, index=(batch_id, head_id), shape=(D,))
+    
+    # 计算 (自动向量化，无需手动 float4)
+    # o = state @ q
+    o_tile = ct.sum(state_tile * q_tile, axis=1)  # [V,D] * [D] -> [V]
+    
+    # 更新 state (delta rule)
+    # state += outer(k, v) - outer(k, old_v)
+    v_tile = ct.load(v, index=(batch_id, head_id), shape=(V,))
+    delta = v_tile - o_tile
+    state_tile = state_tile + ct.outer(k_tile, delta)
+    
+    # 写回
+    ct.store(state, index=(batch_id, head_id), tile=state_tile)
+    ct.store(out, index=(batch_id, head_id), tile=o_tile)
+```
+
+**cuTile vs Triton 对比**：
+
+| 特性 | cuTile | Triton |
+|------|--------|--------|
+| 发布方 | NVIDIA (官方) | OpenAI |
+| 发布时间 | 2025.12 | 2021 |
+| 支持硬件 | NVIDIA only | NVIDIA + AMD |
+| Tensor Core | 自动 | 自动 |
+| TMA 支持 | 原生 | 需要 tl.experimental |
+| 跨架构移植 | ✅ (Ampere → Blackwell) | ✅ |
+| 开源 | ❌ | ✅ |
+
+### 5.7 Swizzle 原理详解
 
 **Bank Conflict 问题**:
 ```
@@ -560,21 +607,21 @@ int swizzled_idx = logical_idx ^ ((logical_idx >> 3) & 7);
 
 **效果**: 将 8-way bank conflict 降为 1-way，SMEM 吞吐量提升 **8x**。
 
-### 5.7 技术栈对比总结
+### 5.8 技术栈对比总结
 
-| 维度 | Raw CUDA | CuTe | CuTile | Triton |
+| 维度 | Raw CUDA | CuTe | cuTile | Triton |
 |------|----------|------|--------|--------|
-| **语言** | C++ | C++ | C++ | Python |
-| **抽象级别** | 低 | 中 | 中高 | 高 |
-| **SMEM 控制** | 手动 | 声明式 | 声明式 | 自动 |
-| **Bank Conflict** | 手动 XOR | `Swizzle<B,M,S>` | `Swizzle<B,M,S>` | 自动 |
-| **Tensor Core** | 手动 PTX | 手动 | `TiledMMA` | 自动 |
-| **学习成本** | 高 | 中高 | 高 | 低 |
-| **代码量** | ~650 行 | ~400 行 | ~350 行 | ~200 行 |
-| **性能上限** | 最高 | 最高 | 最高 | 略低 |
-| **我们的选择** | v7/v8 | **v9** | v10 | v5 (baseline) |
+| **语言** | C++ | C++ | **Python** | Python |
+| **抽象级别** | 低 | 中 | 高 | 高 |
+| **SMEM 控制** | 手动 | 声明式 | 自动 | 自动 |
+| **Bank Conflict** | 手动 XOR | `Swizzle<B,M,S>` | 自动 | 自动 |
+| **Tensor Core** | 手动 PTX | `TiledMMA` | 自动 | 自动 |
+| **学习成本** | 高 | 中高 | 低 | 低 |
+| **代码量** | ~650 行 | ~400 行 | ~100 行 | ~200 行 |
+| **性能上限** | 最高 | 最高 | TBD | 略低 |
+| **我们的选择** | v7/v8 | **v9** | v11 (规划) | v5 (baseline) |
 
-> **结论**: CuTe 是最佳平衡点——获得接近 Raw CUDA 的性能，同时保持代码可维护性。
+> **结论**: CuTe 是当前最佳平衡点——获得接近 Raw CUDA 的性能，同时保持代码可维护性。cuTile 是未来方向，但刚发布 (2025.12)，性能待验证。
 
 ---
 
@@ -588,11 +635,11 @@ int swizzled_idx = logical_idx ^ ((logical_idx >> 3) & 7);
 | CUDA v7 | Raw CUDA | 7,578 GB/s | 2.67x | float4 向量化 |
 | CUDA v8 | Raw CUDA | 7,605 GB/s | 2.68x | Warp Specialization |
 | **CuTe v9** | **CuTe** | **7,585 GB/s** | **2.68x** | **SMEM Swizzle** |
-| CuTile v10 | CuTile | 7,602 GB/s | 2.68x | Layout Algebra |
+| CuTe v10 | CuTe (高级) | 7,602 GB/s | 2.68x | TiledMMA |
 
 **观察**:
-- Raw CUDA、CuTe、CuTile 性能相当（都达到 **95% 带宽利用率**）
-- CuTe/CuTile 代码更简洁，Swizzle 逻辑由库处理
+- Raw CUDA、CuTe 性能相当（都达到 **95% 带宽利用率**）
+- CuTe 代码更简洁，Swizzle 逻辑由库处理
 - Triton 在大 batch 时差距明显（35% vs 95%）
 
 ### 6.2 不同 Batch Size 表现
@@ -615,7 +662,7 @@ int swizzled_idx = logical_idx ^ ((logical_idx >> 3) & 7);
 ✅ Chunked Recurrence (chunk_size=64)
 ✅ tcgen05.mma for S @ Q_chunk
 ✅ TMA for async bulk loads
-✅ CuTile TiledMMA abstraction
+✅ CuTe TiledMMA abstraction (或 cuTile Python)
 
 挑战:
 ⚠️ State 更新仍为顺序
@@ -642,9 +689,9 @@ int swizzled_idx = logical_idx ^ ((logical_idx >> 3) & 7);
 
 | 场景 | 推荐技术栈 | 原因 |
 |------|-----------|------|
-| 快速原型 | Triton | Python，学习成本低 |
+| 快速原型 | Triton / cuTile | Python，学习成本低 |
 | 内存密集型 | **CuTe** | Swizzle 抽象，代码简洁 |
-| 计算密集型 | CuTile | TiledMMA 支持 tcgen05.mma |
+| 计算密集型 | CuTe TiledMMA | TiledMMA 支持 tcgen05.mma |
 | 极致性能 | Raw CUDA | 完全控制 |
 
 ---
