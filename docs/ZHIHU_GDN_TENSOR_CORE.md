@@ -2,6 +2,33 @@
 
 > 本文基于 NVIDIA B200 (Blackwell) 上 Gated Delta Net 内核的优化实践，解析 Decode 与 Prefill 阶段的性能瓶颈差异，以及 Raw CUDA、CuTe、CuTile、Triton 四种技术栈的对比。
 
+---
+
+## 术语表 (Glossary)
+
+| 术语 | 英文全称 | 中文解释 |
+|------|---------|---------|
+| **Tensor Core** | Tensor Core | NVIDIA GPU 上专门用于矩阵乘法的硬件单元 |
+| **tcgen05.mma** | Tensor Core Gen 05 Matrix Multiply Accumulate | Blackwell 架构的 Tensor Core 指令 |
+| **WGMMA** | Warpgroup Matrix Multiply Accumulate | Hopper 架构的 Tensor Core 指令 |
+| **SMEM** | Shared Memory | GPU 上 SM 内线程共享的高速缓存 |
+| **HBM** | High Bandwidth Memory | GPU 的高带宽显存 |
+| **Swizzle** | Swizzle | 地址重映射技术，用于消除 Bank Conflict |
+| **Bank Conflict** | Bank Conflict | 多线程同时访问同一 SMEM bank 导致的性能下降 |
+| **Roofline** | Roofline Model | 分析算法受限于算力还是带宽的性能模型 |
+| **Ridge Point** | Ridge Point | Roofline 模型中算力和带宽的转折点 |
+| **AI** | Arithmetic Intensity | 算术强度，每字节内存访问的浮点操作数 |
+| **TMA** | Tensor Memory Accelerator | Hopper+ 架构的异步内存加载单元 |
+| **CuTe** | CUTLASS Tensor | NVIDIA CUTLASS 库的张量抽象层 |
+| **CuTile** | CUTLASS Tile | CuTe 的 Tile 迭代抽象 |
+| **GEMM** | General Matrix Multiply | 通用矩阵乘法 |
+| **GEMV** | General Matrix Vector Multiply | 矩阵-向量乘法 |
+| **Warp** | Warp | GPU 上 32 个线程组成的执行单元 |
+| **Lane** | Lane | Warp 内的单个线程 |
+| **PTX** | Parallel Thread Execution | NVIDIA GPU 的虚拟指令集 |
+
+---
+
 ## TL;DR
 
 | 阶段 | 操作类型 | 能否用 Tensor Core | 瓶颈 | 最佳策略 |
@@ -13,7 +40,9 @@
 
 ## 1. 背景：什么是 Gated Delta Net (GDN)？
 
-GDN 是一种线性注意力变体，用于替代标准 Transformer 的 Softmax Attention。其核心是一个**递归状态更新**：
+GDN (Gated Delta Net，门控增量网络) 是一种**线性注意力变体**，用于替代标准 Transformer 的 Softmax Attention。相比 Softmax Attention 的 O(L²) 复杂度，GDN 使用递归状态实现 O(L) 复杂度。
+
+其核心是一个**递归状态更新** (Recurrent State Update)：
 
 ```python
 # 每个 token 的计算
@@ -76,18 +105,25 @@ o = scale * q @ S                     # 输出 [K] × [K,V] → [V]
 
 ### 2.5 Ridge Point（转折点）
 
+Ridge Point 是 Roofline 模型中的关键概念：当算法的**算术强度 (Arithmetic Intensity, AI)** 等于 Ridge Point 时，算法刚好平衡算力和带宽。
+
 ```
 Ridge Point = Peak Compute / Peak Bandwidth
+            = 峰值算力 / 峰值带宽
 
 BF16 Tensor: 2.25 PFLOPS / 8 TB/s = 281 FLOP/byte
 FP32 CUDA:   74.45 TFLOPS / 8 TB/s = 9.3 FLOP/byte
 ```
 
-> **解读**：如果你的算法 Arithmetic Intensity (AI) < Ridge Point，则为**内存瓶颈**；反之为**算力瓶颈**。
+> **解读**：
+> - 如果 AI < Ridge Point → **内存瓶颈** (Memory-Bound)，优化带宽
+> - 如果 AI > Ridge Point → **算力瓶颈** (Compute-Bound)，优化计算
 
 ---
 
 ## 3. Decode 阶段：为什么无法使用 Tensor Core？
+
+> **Decode (解码阶段)**：在自回归生成 (如 GPT) 中，每次生成一个新 token 的阶段。特点是每次只处理 1 个 token。
 
 ### 3.1 操作分析
 
@@ -153,6 +189,10 @@ AI (1) << FP32 Ridge (9.3) << BF16 Ridge (281)
 
 ## 4. Prefill/Encoder 阶段：可以使用 Tensor Core！
 
+> **Prefill (预填充阶段)**：处理用户输入的完整 prompt 的阶段。特点是一次处理 L 个 token (L = prompt 长度)。
+> 
+> **Encoder (编码器)**：在 BERT 等模型中，处理整个输入序列的阶段，与 Prefill 类似。
+
 ### 4.1 关键差异：批量处理多个 Token
 
 Prefill 阶段处理整个输入序列 (L tokens)：
@@ -170,6 +210,8 @@ O_chunk = S @ Q_chunk.T  # [V,K] × [K,C] → [V,C]
 ```
 
 ### 4.2 Chunked Prefill 算法
+
+> **Chunked Prefill (分块预填充)**：将长度为 L 的序列分成多个大小为 C 的 chunk，在 chunk 内部使用 GEMM (矩阵乘法)，chunk 之间传递状态。这样可以将 GEMV 转换为 GEMM，从而利用 Tensor Core。
 
 ```python
 def prefill_chunked(Q, K, V, S, chunk_size=64):
