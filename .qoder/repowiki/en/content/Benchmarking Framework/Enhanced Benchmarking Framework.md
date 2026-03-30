@@ -17,7 +17,19 @@
 - [docs/ROADMAP.md](file://docs/ROADMAP.md)
 - [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json)
 - [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json)
+- [moe/solution/v4/kernel.py](file://moe/solution/v4/kernel.py)
+- [moe/benchmarks/bench_modal.py](file://moe/benchmarks/bench_modal.py)
+- [moe/solution/v2/kernel.py](file://moe/solution/v2/kernel.py)
+- [moe/solution/v3/kernel.py](file://moe/solution/v3/kernel.py)
+- [moe/solution/triton/kernel.py](file://moe/solution/triton/kernel.py)
 </cite>
+
+## Update Summary
+**Changes Made**
+- Added comprehensive documentation for the new MoE v4 variant implementation
+- Updated kernel implementation suite to include the systematic v4 optimization
+- Enhanced benchmark configuration documentation to reflect iterative optimization approach
+- Added detailed analysis of MoE v4's bf16 matmul optimizations and performance improvements
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -32,9 +44,11 @@
 
 ## Introduction
 
-The Enhanced Benchmarking Framework is a comprehensive system designed for evaluating and optimizing Gated Delta Net (GDN) kernels on NVIDIA B200 hardware. This framework provides a unified approach to benchmarking multiple kernel implementations, from Triton baseline to advanced CUDA optimizations including FP4/FP8 quantization, warp specialization, and CuTe DSL layouts.
+The Enhanced Benchmarking Framework is a comprehensive system designed for evaluating and optimizing Gated Delta Net (GDN) kernels and Mixture-of-Experts (MoE) kernels on NVIDIA B200 hardware. This framework provides a unified approach to benchmarking multiple kernel implementations, from Triton baseline to advanced CUDA optimizations including FP4/FP8 quantization, warp specialization, and CuTe DSL layouts.
 
-The framework supports both decode and prefill operations for the GDN algorithm, with automatic correctness validation, performance measurement, and detailed reporting. It leverages Modal AI infrastructure for distributed benchmarking and includes sophisticated memory bandwidth optimization techniques optimized for the Blackwell architecture.
+The framework now supports both GDN decode and prefill operations for the GDN algorithm, along with comprehensive MoE kernel benchmarking, with automatic correctness validation, performance measurement, and detailed reporting. It leverages Modal AI infrastructure for distributed benchmarking and includes sophisticated memory bandwidth optimization techniques optimized for the Blackwell architecture.
+
+**Updated** The framework now demonstrates a systematic approach to iterative optimization evaluation through the addition of the MoE v4 variant, showcasing how each iteration builds upon previous optimizations to achieve incremental performance improvements.
 
 ## Project Structure
 
@@ -55,30 +69,41 @@ C[src/kernels/] --> C1[CUDA kernels]
 C --> C2[CuTe kernels]
 C --> C3[Triton kernels]
 end
+subgraph "MoE Solutions"
+D[moe/solution/] --> D1[v2 (baseline)]
+D --> D2[v3 (optimized)]
+D --> D3[v4 (bf16 matmul)]
+D --> D4[triton reference]
+end
 subgraph "Documentation"
-D[docs/] --> D1[PERFORMANCE.md]
-D --> D2[ROADMAP.md]
+E[docs/] --> E1[PERFORMANCE.md]
+E --> E2[ROADMAP.md]
 end
 subgraph "Trace Definitions"
-E[flashinfer_trace/] --> E1[JSON definitions]
+F[flashinfer_trace/] --> F1[JSON definitions]
 end
 subgraph "Core"
-F[CMakeLists.txt]
-G[src/gdn_kernels.cu]
+G[CMakeLists.txt]
+H[src/gdn_kernels.cu]
 end
-A1 --> E1
-B5 --> E1
-C1 --> G
-C2 --> G
+A1 --> F1
+B5 --> F1
+C1 --> H
+C2 --> H
+D1 --> H
+D2 --> H
+D3 --> H
 ```
 
 **Diagram sources**
 - [README.md:63-92](file://README.md#L63-L92)
 - [scripts/setup_volume.py:23-24](file://scripts/setup_volume.py#L23-L24)
+- [moe/benchmarks/bench_modal.py:32-57](file://moe/benchmarks/bench_modal.py#L32-L57)
 
 **Section sources**
 - [README.md:63-92](file://README.md#L63-L92)
 - [CMakeLists.txt:1-68](file://CMakeLists.txt#L1-L68)
+- [moe/benchmarks/bench_modal.py:32-57](file://moe/benchmarks/bench_modal.py#L32-L57)
 
 ## Core Components
 
@@ -105,6 +130,14 @@ The framework encompasses six distinct kernel implementations, each optimized fo
 | v9 | CuTe | SMEM swizzle | FP32 | Layout optimization |
 | v10 | CuTe | Swizzle<3,3,3> | FP32 | Advanced swizzling |
 
+**Updated** The framework now includes a comprehensive MoE kernel suite with systematic iterative optimization:
+
+| MoE Version | Key Optimization | Performance Gain | Precision Handling |
+|-------------|------------------|------------------|-------------------|
+| v2 | Lazy dequant, single-pass token permutation | Baseline (1.00x) | f32 for correctness |
+| v3 | torch._scaled_mm FP8 GEMM | ~1.59x speedup | Mixed precision |
+| v4 | bf16 matmul (2x GEMM speedup) | ~2.00x speedup | bf16 for GEMM, f32 for precision |
+
 ### Volume Management System
 
 The framework includes sophisticated volume management for persistent storage of benchmark datasets and kernel definitions:
@@ -118,6 +151,7 @@ The framework includes sophisticated volume management for persistent storage of
 - [benchmarks/bench_modal.py:15-80](file://benchmarks/bench_modal.py#L15-L80)
 - [scripts/bench_all_versions.py:32-44](file://scripts/bench_all_versions.py#L32-L44)
 - [scripts/setup_volume.py:32-57](file://scripts/setup_volume.py#L32-L57)
+- [moe/benchmarks/bench_modal.py:32-57](file://moe/benchmarks/bench_modal.py#L32-L57)
 
 ## Architecture Overview
 
@@ -142,6 +176,7 @@ subgraph "Kernel Layer"
 GPU --> Triton[Triton Kernels]
 GPU --> CUDA[CUDA Kernels]
 GPU --> CuTe[CuTe Kernels]
+GPU --> MoE[MoE Kernels]
 end
 subgraph "Analysis Layer"
 Results --> Metrics[Performance Metrics]
@@ -152,12 +187,14 @@ Builder --> Storage
 Triton --> Results
 CUDA --> Results
 CuTe --> Results
+MoE --> Results
 ```
 
 **Diagram sources**
 - [benchmarks/bench_modal.py:23-33](file://benchmarks/bench_modal.py#L23-L33)
 - [scripts/build_cuda.py:63-68](file://scripts/build_cuda.py#L63-L68)
 - [scripts/setup_volume.py:141-145](file://scripts/setup_volume.py#L141-L145)
+- [moe/benchmarks/bench_modal.py:101-106](file://moe/benchmarks/bench_modal.py#L101-L106)
 
 The architecture supports both synchronous and asynchronous execution patterns, enabling efficient resource utilization across multiple GPU instances while maintaining consistent benchmarking standards.
 
@@ -273,11 +310,6 @@ BenchmarkEngine --> TraceSet : "consumes"
 - [scripts/bench_all_versions.py:32-44](file://scripts/bench_all_versions.py#L32-L44)
 - [scripts/bench_cuda_real.py:28-50](file://scripts/bench_cuda_real.py#L28-L50)
 
-**Section sources**
-- [benchmarks/bench_modal.py:115-176](file://benchmarks/bench_modal.py#L115-L176)
-- [scripts/bench_all_versions.py:32-44](file://scripts/bench_all_versions.py#L32-L44)
-- [scripts/bench_cuda_real.py:28-50](file://scripts/bench_cuda_real.py#L28-L50)
-
 ### Volume Management System
 
 The volume management system handles persistent storage and dataset organization:
@@ -290,15 +322,20 @@ A --> A2[gdn_prefill_qk4_v8_d128_k_last.json]
 B[workloads/gdn/] --> B1[gdn_decode_qk4_v8_d128_k_last.jsonl]
 B --> B2[gdn_prefill_qk4_v8_d128_k_last.jsonl]
 C[tensors/gdn_prefill/] --> C1[tensors_<uuid>.safetensors]
+D[definitions/moe/] --> D1[moe_fp8_block_scale_ds_routing_topk8_ng8_kg4_e32_h7168_i2048.json]
+E[workloads/moe/] --> E1[moe_fp8_block_scale_ds_routing_topk8_ng8_kg4_e32_h7168_i2048.jsonl]
 end
 subgraph "Generation Process"
-D[make_decode_workloads()] --> B1
-E[make_prefill_workloads()] --> B2
-F[generate_safetensors()] --> C1
+F[make_decode_workloads()] --> B1
+G[make_prefill_workloads()] --> B2
+H[generate_safetensors()] --> C1
+I[make_moe_workloads()] --> E1
+J[generate_moe_tensors()] --> C1
 end
-A1 --> D
-A2 --> E
-E --> F
+A1 --> F
+A2 --> G
+D1 --> I
+E1 --> J
 ```
 
 **Diagram sources**
@@ -309,6 +346,54 @@ E --> F
 **Section sources**
 - [scripts/setup_volume.py:32-57](file://scripts/setup_volume.py#L32-L57)
 - [scripts/setup_volume.py:141-168](file://scripts/setup_volume.py#L141-L168)
+
+### MoE Kernel Optimization Evolution
+
+**Updated** The MoE kernel suite demonstrates a systematic approach to iterative optimization, with each version building upon previous improvements:
+
+```mermaid
+flowchart TD
+subgraph "MoE Optimization Evolution"
+A[v2 Baseline] --> B[v3 torch._scaled_mm]
+B --> C[v4 bf16 MatMul]
+C --> D[v5 Future Optimizations]
+end
+subgraph "v2 Optimizations"
+A1[Lazy dequant] --> A2[Single-pass token permutation]
+A2 --> A3[torch._scaled_mm detection]
+A3 --> A4[Reduced allocations]
+end
+subgraph "v3 Improvements"
+B1[FP8 GEMM for GEMM1] --> B2[Lazy dequant for GEMM2]
+B2 --> B3[Optimized token permutation]
+B3 --> B4[Correctness verification]
+end
+subgraph "v4 Advantages"
+C1[bf16 matmul (2x speedup)] --> C2[Lazy per-expert weight dequant]
+C2 --> C3[bf16 for GEMM, f32 for precision]
+C3 --> C4[Final accumulation in f32]
+end
+A --> A1
+B --> B1
+C --> C1
+```
+
+**Diagram sources**
+- [moe/solution/v2/kernel.py:1-227](file://moe/solution/v2/kernel.py#L1-L227)
+- [moe/solution/v3/kernel.py:1-217](file://moe/solution/v3/kernel.py#L1-L217)
+- [moe/solution/v4/kernel.py:1-166](file://moe/solution/v4/kernel.py#L1-L166)
+
+The MoE v4 implementation showcases advanced optimizations:
+- **bf16 MatMul**: Leverages B200's superior bf16 Tensor Core throughput compared to f32
+- **Lazy Weight Dequant**: Processes only active experts, reducing unnecessary computations
+- **Precision Strategy**: Uses f32 for numerical stability in SwiGLU and final accumulation
+- **Memory Efficiency**: Reduces memory bandwidth by using bf16 for intermediate computations
+
+**Section sources**
+- [moe/benchmarks/bench_modal.py:32-57](file://moe/benchmarks/bench_modal.py#L32-L57)
+- [moe/solution/v2/kernel.py:1-227](file://moe/solution/v2/kernel.py#L1-L227)
+- [moe/solution/v3/kernel.py:1-217](file://moe/solution/v3/kernel.py#L1-L217)
+- [moe/solution/v4/kernel.py:1-166](file://moe/solution/v4/kernel.py#L1-L166)
 
 ## Dependency Analysis
 
@@ -328,11 +413,12 @@ F[Kernel Implementations]
 G[Benchmark Scripts]
 H[Volume Management]
 I[Trace Definitions]
+J[MoE Solution Variants]
 end
 subgraph "Build System"
-J[CMake]
-K[NVCC Compiler]
-L[Python Packages]
+K[CMake]
+L[NVCC Compiler]
+M[Python Packages]
 end
 A --> F
 B --> F
@@ -342,26 +428,30 @@ E --> G
 F --> G
 G --> H
 H --> I
-J --> K
-K --> F
-L --> G
+J --> G
+K --> L
+L --> F
+M --> G
 ```
 
 **Diagram sources**
 - [benchmarks/bench_modal.py:28-32](file://benchmarks/bench_modal.py#L28-L32)
 - [scripts/build_cuda.py:18-34](file://scripts/build_cuda.py#L18-L34)
 - [CMakeLists.txt:10-17](file://CMakeLists.txt#L10-L17)
+- [moe/benchmarks/bench_modal.py:25-28](file://moe/benchmarks/bench_modal.py#L25-28)
 
 The dependency analysis reveals several key characteristics:
 - **Modular design**: Clear separation between benchmarking logic and kernel implementations
 - **Infrastructure abstraction**: Modal AI provides platform independence
 - **Build system integration**: CMake enables cross-platform compilation
 - **Runtime flexibility**: Support for multiple execution environments
+- **Systematic optimization**: MoE variants demonstrate clear evolutionary progression
 
 **Section sources**
 - [benchmarks/bench_modal.py:28-32](file://benchmarks/bench_modal.py#L28-L32)
 - [scripts/build_cuda.py:18-34](file://scripts/build_cuda.py#L18-L34)
 - [CMakeLists.txt:10-17](file://CMakeLists.txt#L10-L17)
+- [moe/benchmarks/bench_modal.py:25-28](file://moe/benchmarks/bench_modal.py#L25-28)
 
 ## Performance Considerations
 
@@ -393,6 +483,20 @@ The framework scales effectively across different batch sizes and hardware confi
 - **Persistent kernels**: Reduces launch overhead for small batch scenarios
 - **Multi-GPU support**: Leverages Modal's distributed computing capabilities
 - **Resource pooling**: Efficient GPU resource utilization across concurrent jobs
+
+### MoE Performance Evolution
+
+**Updated** The MoE kernel suite demonstrates systematic performance improvements through iterative optimization:
+
+- **v2 Baseline**: Establishes foundation with lazy dequant and single-pass token permutation
+- **v3 torch._scaled_mm**: Achieves ~1.59x speedup through native FP8 Tensor Core utilization
+- **v4 bf16 MatMul**: Delivers ~2.00x speedup by leveraging superior bf16 throughput on B200
+- **Precision preservation**: Maintains numerical stability through strategic f32 usage
+
+**Section sources**
+- [moe/solution/v4/kernel.py:4-10](file://moe/solution/v4/kernel.py#L4-L10)
+- [moe/solution/v3/kernel.py:4-9](file://moe/solution/v3/kernel.py#L4-L9)
+- [moe/solution/v2/kernel.py:4-10](file://moe/solution/v2/kernel.py#L4-L10)
 
 ## Troubleshooting Guide
 
@@ -429,19 +533,30 @@ Common issues and their resolution strategies:
 - **Solution**: Adjust tile sizes based on batch characteristics
 - **Verification**: Monitor memory bandwidth utilization and occupancy metrics
 
+**Problem**: MoE v4 performance not as expected
+- **Cause**: Incorrect bf16 matmul configuration or precision handling
+- **Solution**: Verify torch._scaled_mm availability and precision strategy
+- **Verification**: Check bf16 Tensor Core utilization and numerical stability
+
 **Section sources**
 - [scripts/build_cuda.py:352-356](file://scripts/build_cuda.py#L352-L356)
 - [scripts/bench_cuda_real.py:52-54](file://scripts/bench_cuda_real.py#L52-L54)
 - [scripts/setup_volume.py:168-169](file://scripts/setup_volume.py#L168-L169)
+- [moe/solution/v4/kernel.py:117-165](file://moe/solution/v4/kernel.py#L117-L165)
 
 ## Conclusion
 
-The Enhanced Benchmarking Framework represents a comprehensive solution for evaluating and optimizing GDN kernel implementations on modern GPU architectures. The framework's strength lies in its modular design, extensive kernel coverage, and sophisticated performance measurement capabilities.
+The Enhanced Benchmarking Framework represents a comprehensive solution for evaluating and optimizing GDN kernel implementations and MoE kernels on modern GPU architectures. The framework's strength lies in its modular design, extensive kernel coverage, and sophisticated performance measurement capabilities.
+
+**Updated** The framework now demonstrates a systematic approach to iterative optimization evaluation through the addition of the MoE v4 variant, showcasing how each optimization builds upon previous improvements to achieve incremental performance gains.
 
 Key achievements include:
-- **Unified benchmarking**: Single interface for testing multiple kernel variants
-- **Advanced optimizations**: Support for cutting-edge techniques like FP4/FP8 quantization and CuTe layouts
+- **Unified benchmarking**: Single interface for testing multiple kernel variants across GDN and MoE domains
+- **Advanced optimizations**: Support for cutting-edge techniques like FP4/FP8 quantization, CuTe layouts, and bf16 matmul
+- **Systematic evolution**: Clear demonstration of iterative optimization progression from v2 to v4
 - **Scalable architecture**: Designed for both small-scale testing and large-scale distributed benchmarking
 - **Comprehensive analysis**: Provides both performance metrics and correctness validation
 
-The framework successfully demonstrates the transition from memory-bound to compute-bound regimes as batch sizes increase, with the B200 achieving 95% of peak memory bandwidth utilization. Future enhancements could focus on expanding support for additional hardware architectures and integrating more advanced profiling capabilities.
+The framework successfully demonstrates the transition from memory-bound to compute-bound regimes as batch sizes increase, with the B200 achieving 95% of peak memory bandwidth utilization. The MoE v4 implementation achieves approximately 2.00x speedup over the baseline through strategic bf16 matmul utilization while maintaining numerical precision.
+
+Future enhancements could focus on expanding support for additional hardware architectures, integrating more advanced profiling capabilities, and developing automated optimization discovery systems that can systematically evaluate kernel variants for optimal performance across different workloads and hardware configurations.

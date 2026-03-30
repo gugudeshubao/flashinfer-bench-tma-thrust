@@ -3,6 +3,9 @@
 <cite>
 **Referenced Files in This Document**
 - [OPTIMIZATION_LOG.md](file://gdn/docs/OPTIMIZATION_LOG.md)
+- [ROADMAP.md](file://gdn/docs/ROADMAP.md)
+- [ZHIHU_GDN_STATE_OPTIMIZATION.md](file://gdn/docs/ZHIHU_GDN_STATE_OPTIMIZATION.md)
+- [ZHIHU_CHUNKWISE_PARALLEL.md](file://gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md)
 - [gdn_decode_v9.cuh](file://gdn/kernels/cute_cpp/gdn_decode_v9.cuh)
 - [gdn_decode_v10.cuh](file://gdn/kernels/cute_cpp/gdn_decode_v10.cuh)
 - [gdn_decode_v8.cuh](file://gdn/kernels/cuda/gdn_decode_v8.cuh)
@@ -11,15 +14,17 @@
 - [gdn_prefill_v10.cuh](file://gdn/kernels/cute_cpp/gdn_prefill_v10.cuh)
 - [gdn_prefill_v8.cuh](file://gdn/kernels/cuda/gdn_prefill_v8.cuh)
 - [gdn_prefill_ptx.cuh](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh)
+- [bench_prefill_all.py](file://gdn/scripts/bench_prefill_all.py)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated to reflect Applied Changes: Comprehensive optimization log updates documenting TMA double-buffering, cp.async prefetch, 8-wide FMA unrolling, and project reorganization
-- Removed references to dropped mma.sync prefill kernel and placeholder Iteration 4 implementation
-- Enhanced documentation of TMA double-buffering implementation with cp.async prefetch and 8-wide FMA unrolling
-- Updated project structure documentation reflecting gdn/ directory reorganization
-- Revised optimization phases to remove Iteration 4 placeholder and integrate TMA double-buffering into Phase 1
+- Updated to reflect Applied Changes: significantly expanded optimization status summary with new analysis of decode fundamental limits, prefill optimization opportunities, and three-phase optimization roadmap
+- Documented comprehensive TMA double-buffering implementation with cp.async prefetch and 8-wide FMA unrolling
+- Added detailed three-phase optimization roadmap including TMA double-buffering, prefill state quantization, and chunkwise tensor core implementations
+- Enhanced decode fundamental limits analysis showing why Tensor Core optimization is not applicable
+- Expanded prefill optimization opportunities with detailed performance analysis and expected benefits
+- Integrated comprehensive benchmarking framework for multi-precision state quantization
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -27,17 +32,20 @@
 3. [Core Components](#core-components)
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
-6. [Dependency Analysis](#dependency-analysis)
-7. [Performance Considerations](#performance-considerations)
-8. [Troubleshooting Guide](#troubleshooting-guide)
-9. [Conclusion](#conclusion)
+6. [Three-Phase Optimization Roadmap](#three-phase-optimization-roadmap)
+7. [Decode Fundamental Limits Analysis](#decode-fundamental-limits-analysis)
+8. [Prefill Optimization Opportunities](#prefill-optimization-opportunities)
+9. [Dependency Analysis](#dependency-analysis)
+10. [Performance Considerations](#performance-considerations)
+11. [Troubleshooting Guide](#troubleshooting-guide)
+12. [Conclusion](#conclusion)
 
 ## Introduction
 This document presents a comprehensive optimization tracking log for the Gated Delta Net (GDN) kernel implementations targeting NVIDIA B200 hardware. The project employs a dual-path optimization strategy: CuTe C++ kernels for peak performance and PTX assembly kernels for maximum control. The optimization log documents iterative improvements, performance baselines, and strategic directions for achieving near-peak memory bandwidth utilization across decode and prefill workloads.
 
 **Updated** The latest iteration introduces comprehensive multi-precision state quantization implementation (Iteration 2) with motivation, design decisions, expected benefits, and accuracy trade-offs across BF16, FP8, and FP4 precisions. This implementation provides 2x-8x memory compression through per-row dynamic scaling and vectorized memory operations, available across all kernel frameworks (CuTe C++, CUDA, and PTX).
 
-**Updated** The project has successfully implemented comprehensive TMA (Tensor Memory Accelerator) and Tensor Core optimization phases, establishing a robust foundation for B200 architecture optimization with detailed Phase 1 (TMA Prefetch) and Phase 2 (WGMMA) strategies.
+**Updated** The project has successfully implemented comprehensive TMA (Tensor Memory Accelerator) and Tensor Core optimization phases, establishing a robust foundation for B200 architecture optimization with detailed Phase 1 (TMA Prefetch), Phase 2 (WGMMA), and Phase 3 (Multi-stage) strategies.
 
 ## Project Structure
 The repository organizes optimization artifacts and kernel implementations across several key areas:
@@ -55,6 +63,8 @@ OPT["gdn/docs/OPTIMIZATION_LOG.md"]
 ROAD["gdn/docs/ROADMAP.md"]
 PERF["gdn/docs/PERFORMANCE.md"]
 READ["gdn/README.md"]
+STATE["gdn/docs/ZHIHU_GDN_STATE_OPTIMIZATION.md"]
+CHUNK["gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md"]
 end
 subgraph "Kernel Implementations"
 subgraph "CuTe C++"
@@ -106,7 +116,8 @@ TEST_FP8 --> V9D
 ```
 
 **Diagram sources**
-- [OPTIMIZATION_LOG.md:1-611](file://gdn/docs/OPTIMIZATION_LOG.md#L1-L611)
+- [OPTIMIZATION_LOG.md:19-21](file://gdn/docs/OPTIMIZATION_LOG.md#L19-L21)
+- [OPTIMIZATION_LOG.md:590-602](file://gdn/docs/OPTIMIZATION_LOG.md#L590-L602)
 
 **Section sources**
 - [OPTIMIZATION_LOG.md:19-21](file://gdn/docs/OPTIMIZATION_LOG.md#L19-L21)
@@ -545,6 +556,170 @@ Key benchmark capabilities:
 **Section sources**
 - [OPTIMIZATION_LOG.md:590-602](file://gdn/docs/OPTIMIZATION_LOG.md#L590-L602)
 
+## Three-Phase Optimization Roadmap
+
+**Updated** The project has established a comprehensive three-phase optimization roadmap for GDN kernels, building upon the successful completion of Phase 1 and preparing for advanced optimizations in Phases 2 and 3.
+
+### Phase 1: TMA Double-Buffering (Completed)
+**Status**: ✅ Successfully implemented and validated
+
+**Objectives Achieved:**
+- **TMA Double-Buffering**: Implemented comprehensive double-buffering for Q/K/V data with automatic buffer swapping
+- **cp.async Prefetch**: Integrated asynchronous state loading with 16-byte aligned transfers
+- **8-Wide FMA Unrolling**: Optimized FMA chains for maximum instruction-level parallelism
+- **Shared Memory Management**: Efficient double-buffered layout with 26.6 KB usage
+
+**Implementation Details:**
+- **Double-Buffered Layout**: qk_buf[2] and v_buf[2] for chunk data
+- **Automatic Prefetch**: Next chunk loading while current chunk processes
+- **Buffer Alternation**: Seamless switching between buffers for continuous processing
+- **Memory Efficiency**: Optimized shared memory usage for B200 architecture
+
+**Benefits Realized:**
+- **1.3-1.5x Speedup**: For compute-bound prefill operations
+- **90% Prefetch Utilization**: Significantly improved memory overlap
+- **Hidden Memory Latency**: Effective latency hiding through double-buffering
+
+### Phase 2: Prefill State Quantization (Planned)
+**Status**: 🎯 Next priority with high expected ROI
+
+**Expected Benefits:**
+- **1.5-2x Speedup**: Through reduced state memory bandwidth requirements
+- **2x-4x Memory Reduction**: FP32 state → BF16/FP8 state compression
+- **Improved Throughput**: Enhanced memory efficiency for state-heavy operations
+
+**Implementation Strategy:**
+- **BF16 State Quantization**: Balanced precision and memory efficiency
+- **FP8 State Quantization**: Aggressive compression for inference workloads
+- **Per-Row Scaling**: Maintain accuracy through dynamic scaling factors
+- **Framework Integration**: Multi-precision support across all kernel implementations
+
+### Phase 3: Chunkwise Tensor Core (Advanced)
+**Status**: 📋 Future development with significant potential
+
+**Expected Benefits:**
+- **2-3x Speedup**: Through direct Tensor Core utilization
+- **Matrix-Matrix Operations**: Leverage mma.sync for chunk-level computations
+- **Parallel Prefix Processing**: Enable chunk-level parallelization where possible
+
+**Technical Challenges:**
+- **Sequential Dependency**: GDN delta rule fundamentally sequential per token
+- **State Management**: Complex state passing between chunks
+- **Memory Bandwidth**: Balancing chunk size with memory constraints
+
+**Section sources**
+- [OPTIMIZATION_LOG.md:808-842](file://gdn/docs/OPTIMIZATION_LOG.md#L808-L842)
+
+## Decode Fundamental Limits Analysis
+
+**Updated** The optimization analysis reveals fundamental computational limits that define decode kernel optimization boundaries.
+
+### Decode Architecture Analysis
+**Fundamental Constraint**: Decode operations are inherently sequential and memory-bound:
+
+```
+Decode Operation Flow:
+├── Load Q [128]: 256 bytes (BF16)
+├── Load K [128]: 256 bytes (BF16)  
+├── Load V [128]: 256 bytes (BF16)
+├── Load State [128×128]: 64 KB (FP32)
+├── Compute gates: ~20 bytes
+├── Store Out [128]: 256 bytes (BF16)
+└── Store NewState [128×128]: 64 KB (FP32)
+```
+
+**Arithmetic Intensity Analysis:**
+- **Decode**: 131,456 FLOPs / 1,049 KB = 0.12 FLOP/B (Memory-bound)
+- **B200 Ridge Point**: ~30 FLOP/B (Tensor Core threshold)
+- **Ratio**: 120x gap → Tensor Core optimization not applicable
+
+### Why Tensor Core Cannot Help Decode
+**Mathematical Constraint**: Decode performs matrix-vector operations:
+- `S @ q` → [128×128] @ [128] = [128] (N=1)
+- `k.T @ v` → [128×1] @ [1×128] = [128×128] (rank-1 update)
+
+**Tensor Core Requirement**: N ≥ 16 for matrix-matrix operations
+**Decode Reality**: N = 1 (single token) → Cannot use Tensor Cores
+
+### Optimization Strategy for Decode
+Given the fundamental constraints, optimization must focus on:
+
+1. **Memory Bandwidth Optimization**: BF16/FP8/FP4 state compression
+2. **Latency Hiding**: cp.async prefetch and shared memory optimization
+3. **Multi-Batch Scaling**: System-level optimization through batching
+4. **Launch Overhead Reduction**: Persistent kernels and CUDA Graphs
+
+### Decode Optimization Summary
+**Completed Optimizations:**
+- ✅ cp.async prefetch for state loading
+- ✅ BF16/FP8/FP4 state quantization (v10)
+- ✅ Warp-cooperative reduction (PTX prefill)
+- ✅ Multi-batch optimization (N=32)
+
+**Remaining Limitations:**
+- ❌ Tensor Core utilization impossible due to N=1 constraint
+- ❌ Cross-token parallelization blocked by sequential dependency
+- ❌ Parallel scan not applicable due to delta rule dependency
+
+**Section sources**
+- [OPTIMIZATION_LOG.md:769-805](file://gdn/docs/OPTIMIZATION_LOG.md#L769-L805)
+
+## Prefill Optimization Opportunities
+
+**Updated** The prefill optimization landscape offers substantial opportunities for performance improvement through strategic implementation of advanced techniques.
+
+### Current Prefill Architecture Analysis
+**Sequential Dependency Chain:**
+```
+Token 0: out_0 = State_0 @ Q_0
+         State_1 = gate_0 * State_0 + delta_0 * K_0^T
+
+Token 1: out_1 = State_1 @ Q_1  ← depends on State_1  
+         State_2 = gate_1 * State_1 + delta_1 * K_1^T
+
+Token 2: out_2 = State_2 @ Q_2  ← depends on State_2
+         ...
+```
+
+**Parallelism Opportunities:**
+- **V-Slice Parallelism**: Only within V dimension (16-way parallel)
+- **Multi-Batch Parallelism**: Across sequences (N-way parallel)
+- **Chunk-Level Parallelism**: Within chunks (C-way parallel)
+
+### Three-Phase Prefill Optimization Roadmap
+
+#### Phase 1: TMA Double-Buffering (Completed)
+**Benefits Achieved:**
+- **1.3-1.5x Speedup**: Through memory overlap and latency hiding
+- **90% Prefetch Utilization**: Significantly improved memory efficiency
+- **26.6 KB Shared Memory**: Double-buffered layout for chunks
+
+#### Phase 2: Prefill State Quantization (Next)
+**Expected Benefits:**
+- **1.5-2x Speedup**: Through reduced state memory bandwidth
+- **2x-4x Memory Reduction**: FP32 → BF16/FP8 state compression
+- **Improved Memory Efficiency**: Lower state load/store requirements
+
+#### Phase 3: Chunkwise Tensor Core (Advanced)
+**Theoretical Benefits:**
+- **2-3x Speedup**: Through direct Tensor Core utilization
+- **Matrix-Matrix Operations**: mma.sync for chunk-level computations
+- **Parallel Prefix Processing**: Where sequential dependency allows
+
+### Prefill Performance Analysis
+**Current Performance Characteristics:**
+- **Memory-Bound**: AI ≈ 1 FLOP/byte (unchunked)
+- **Compute-Bound**: AI ≈ 8 FLOP/byte (CHUNK_SIZE=8)
+- **B200 Ridge Point**: ~30 FLOP/B (Tensor Core threshold)
+
+**Scaling Analysis:**
+- **Multi-Batch Scaling**: Linear scaling up to N=32
+- **Long Sequence Handling**: Linear time scaling with no throughput degradation
+- **Memory Requirements**: 64 MB state memory at N=32
+
+**Section sources**
+- [OPTIMIZATION_LOG.md:808-842](file://gdn/docs/OPTIMIZATION_LOG.md#L808-L842)
+
 ## Dependency Analysis
 The optimization tracking reveals clear dependency relationships between components:
 
@@ -776,6 +951,14 @@ The optimization tracking demonstrates a systematic approach to achieving near-p
 - **Performance Validation**: Theoretical analysis showing 281 FLOP/byte ridge point for BF16 on B200
 - **Framework Consistency**: TMA and Tensor Core support available across all kernel implementations
 
+**Updated** **Three-Phase Optimization Roadmap**: The project has successfully completed Phase 1 (TMA Double-Buffering) and established clear pathways for advanced optimizations:
+
+- **Phase 1 Completed**: TMA double-buffering with cp.async prefetch and 8-wide FMA unrolling
+- **Phase 2 Planned**: Prefill state quantization (BF16/FP8) for 1.5-2x speedup
+- **Phase 3 Advanced**: Chunkwise Tensor Core utilization for 2-3x performance gains
+
 The file freeze policy ensures focused iteration on the four core optimization files, while the dual-path architecture provides both performance and control trade-offs. The multi-precision implementation positions the project to achieve 1.5-4x speedup potential for memory-bound decode operations while maintaining the flexibility to choose between BF16, FP8, and FP4 based on application requirements and accuracy constraints.
 
 **Future Work**: The project is ready for comprehensive multi-precision performance validation on Modal B200 hardware, with the multi-precision accuracy testing framework providing confidence in numerical stability for inference workloads. The implementation establishes a foundation for further optimizations including advanced scaling strategies for long-sequence processing, precision-aware optimization techniques, and continued refinement of TMA and Tensor Core utilization patterns.
+
+The comprehensive three-phase optimization roadmap provides clear strategic direction for maximizing GDN kernel performance on B200 architecture, with each phase building upon previous achievements to deliver substantial performance improvements while maintaining numerical accuracy and system reliability.
