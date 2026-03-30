@@ -29,22 +29,46 @@ image = (
 
 DEFINITION_NAME = "moe_fp8_block_scale_ds_routing_topk8_ng8_kg4_e32_h7168_i2048"
 
-KERNEL_CONFIG = {
-    "solution": {
+VARIANTS = {
+    "triton": {
         "name": "tma-thrust-moe-v1",
         "subdir": "solution/triton",
     },
-    "definition": DEFINITION_NAME,
-    "author": "tma-thrust",
-    "language": "triton",
-    "entry_point": "kernel.py::kernel",
-    "destination_passing_style": False,
+    "cuda": {
+        "name": "tma-thrust-moe-cuda-v1",
+        "subdir": "solution/cuda",
+    },
+    "scaled_mm": {
+        "name": "tma-thrust-moe-scaled-mm-v1",
+        "subdir": "solution/scaled_mm",
+    },
+    "v2": {
+        "name": "tma-thrust-moe-v2",
+        "subdir": "solution/v2",
+    },
+    "v3": {
+        "name": "tma-thrust-moe-v3",
+        "subdir": "solution/v3",
+    },
 }
 
+DEFAULT_VARIANT = "triton"
 
-def build_solution_dict() -> dict:
+def _get_kernel_config(variant: str = DEFAULT_VARIANT) -> dict:
+    v = VARIANTS[variant]
+    return {
+        "solution": v,
+        "definition": DEFINITION_NAME,
+        "author": "tma-thrust",
+        "language": "triton",
+        "entry_point": "kernel.py::kernel",
+        "destination_passing_style": False,
+    }
+
+
+def build_solution_dict(variant: str = DEFAULT_VARIANT) -> dict:
     """Build Solution JSON dict from local source files."""
-    cfg = KERNEL_CONFIG
+    cfg = _get_kernel_config(variant)
     source_dir = MOE_ROOT / cfg["solution"]["subdir"]
 
     sources = []
@@ -172,18 +196,24 @@ def main(
     warmup: int = 3,
     iters: int = 100,
     trials: int = 5,
+    variant: str = DEFAULT_VARIANT,
 ):
     """
     Run MoE kernel benchmark on Modal B200.
 
-    --warmup: number of warmup runs
-    --iters:  number of benchmark iterations
-    --trials: number of trials
+    --warmup:  number of warmup runs
+    --iters:   number of benchmark iterations
+    --trials:  number of trials
+    --variant: solution variant (triton, cuda)
     """
+    if variant not in VARIANTS:
+        print(f"Unknown variant '{variant}'. Available: {list(VARIANTS.keys())}")
+        sys.exit(1)
+
     config_dict = {"warmup_runs": warmup, "iterations": iters, "num_trials": trials}
 
-    print("Packing MoE solution...")
-    sol_dict = build_solution_dict()
+    print(f"Packing MoE solution (variant={variant})...")
+    sol_dict = build_solution_dict(variant)
     print(f"  -> {sol_dict['name']}")
 
     print("\nRunning benchmark on Modal B200...")
