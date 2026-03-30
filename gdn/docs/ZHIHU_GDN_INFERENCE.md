@@ -83,7 +83,7 @@ S₀ ──▶ S₁ ──▶ S₂ ──▶ S₃ ──▶ ...
 
 ## 三、顺序依赖的代价：实测数据
 
-我们在 NVIDIA B200 GPU 上对 GDN Prefill 进行了详细测试：
+我们在 **NVIDIA B200 GPU** (8 TB/s HBM3e, 192GB) 上对 GDN Prefill 进行了详细测试：
 
 ### 3.1 单序列：吞吐与长度无关
 
@@ -98,7 +98,7 @@ S₀ ──▶ S₁ ──▶ S₂ ──▶ S₃ ──▶ ...
 
 ### 3.2 Tensor Core 无法救场
 
-GDN 的计算强度 (Arithmetic Intensity) 约为 0.87 FLOP/B，而 H100 的 ridge point 是 25.6 FLOP/B。
+GDN 的计算强度 (Arithmetic Intensity) 约为 0.87 FLOP/B，而 B200 的 ridge point 约为 30 FLOP/B。
 
 ```
 GDN Decode 位于 Roofline 模型的哪里？
@@ -217,18 +217,18 @@ total_state = 32 layers * 64 KB = 2 MB  # 恒定！
 ### 5.3 对部署的实际影响
 
 ```python
-# 假设 80GB 显存，模型占用 30GB，100K 上下文
+# 假设 192GB 显存 (B200)，模型占用 30GB，100K 上下文
 
 # 纯 Attention 模型
-可用内存 = 50 GB
+可用内存 = 162 GB
 每请求 KV Cache = 1.6 GB
-最大并发 = 50 / 1.6 ≈ 31 请求
+最大并发 = 162 / 1.6 ≈ 101 请求
 
 # Qwen3.5 混合模型 (1:3 Attention:GDN)
 Attention 层 (8层) = 8 * 51.2 MB = 410 MB
 GDN 层 (24层) = 24 * 64 KB = 1.5 MB
 每请求总计 ≈ 412 MB
-最大并发 = 50 GB / 412 MB ≈ 121 请求  # 4倍并发能力！
+最大并发 = 162 GB / 412 MB ≈ 393 请求  # 约 4 倍并发能力！
 ```
 
 ### 5.4 混合架构的精妙平衡
@@ -258,7 +258,7 @@ GDN 层 (24层) = 24 * 64 KB = 1.5 MB
 2. **支持无限上下文**而不会 OOM（机器人 8 小时对话？没问题）
 3. **延迟恒定可预测**，适合实时控制系统
 
-有研究表明，在 FPGA 上将 GDN 状态持久化到 BRAM，相比 H100 可实现 **4.5x 延迟降低**和 **60x 能效提升**。
+有研究表明，在 FPGA 上将 GDN 状态持久化到 BRAM，相比高端 GPU 可实现 **4.5x 延迟降低**和 **60x 能效提升**。
 
 ---
 
