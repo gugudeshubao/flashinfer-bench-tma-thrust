@@ -941,6 +941,55 @@ Correctness: PASS ✓
 | `397cf12` | 2026-03-30 | **Iteration 5: Parallel scan analysis + warp-cooperative reduction** |
 | `510c69c` | 2026-03-30 | **Iteration 6: Long sequence & multi-batch analysis** |
 | WIP | 2026-03-30 | **Iteration 7: Software pipelining prefill (1.68x speedup)** |
+| `7386b08` | 2026-03-30 | **Iteration 8: CuTe C++ v11 with token-level pipelining** |
+
+---
+
+## Current CUDA Kernel Status
+
+### CuTe C++ Prefill Kernels
+
+| Version | Features | Status |
+|---------|----------|--------|
+| v9 | Chunked + SMEM swizzle | ✅ Baseline |
+| v10 | TiledMMA-ready structure | ✅ Baseline |
+| **v11** | **Token-level software pipelining** | ✅ **NEW** |
+
+**v11 优化:**
+- Token-level double-buffering with cp.async
+- Prefetch next token's Q/K/V while computing current
+- Expected 1.5-1.7x speedup for single-sequence
+
+### PTX Prefill Kernels
+
+| Kernel | Features | Status |
+|--------|----------|--------|
+| `gdn_prefill_kernel_ptx_chunked` | Basic PTX fast-math | ✅ |
+| `gdn_prefill_kernel_ptx_mma` | **Chunk-level double-buffer** | ✅ Best |
+| `gdn_prefill_kernel_ptx_warp_coop` | Parallel reduction | ✅ |
+
+**PTX 已有 chunk-level double-buffering:**
+```cpp
+// Line 520-534 in gdn_prefill_ptx.cuh
+float* qk_buf[2];    // Double-buffered Q/K
+float* v_buf[2];     // Double-buffered V
+
+// Line 620-658: Prefetch next chunk while processing current
+if (next_chunk < num_chunks) {
+    // Prefetch Q, K, V for next chunk
+    for (int c = 0; c < next_chunk_size; c++) {
+        // Async load into next buffer
+    }
+}
+```
+
+### 对比
+
+| 实现 | 级别 | 收益场景 |
+|------|------|----------|
+| Triton v5 | Token-level | 单序列长上下文 (1.68x) |
+| CuTe C++ v11 | Token-level | 单序列长上下文 (预期 1.5-1.7x) |
+| PTX mma | Chunk-level | 长序列多 chunk (已集成) |
 
 ---
 
