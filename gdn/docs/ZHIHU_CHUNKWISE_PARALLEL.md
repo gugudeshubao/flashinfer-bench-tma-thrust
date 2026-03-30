@@ -2,6 +2,8 @@
 
 > 本文深入解析 Gated DeltaNet 的 Chunkwise Parallel 算法，从数学推导到实现细节，帮你理解这个让"无法并行"的算法变得高效的关键技术。
 
+**TL;DR**: GDN 的 delta rule 存在严格顺序依赖，无法用 Parallel Scan。Chunkwise Parallel 的解法是：将序列分成 L/C 个 chunk，**chunk 内用矩阵乘法**（Tensor Core 友好），**chunk 间顺序传递状态**。这样顺序步骤从 O(L) 降到 O(L/C)，同时获得 Tensor Core 加速。
+
 ---
 
 ## 一、问题背景：为什么 GDN 无法直接并行？
