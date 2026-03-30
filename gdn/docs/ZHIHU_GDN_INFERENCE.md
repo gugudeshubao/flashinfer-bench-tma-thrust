@@ -287,4 +287,4 @@ GDN 层 (24层) = 24 * 64 KB = 1.5 MB
 
 ---
 
-*本文基于我们在 FlashInfer GDN 内核优化项目中的实践经验，完整优化日志和代码见 [GitHub](https://github.com/flashinfer-ai)。*
+*本文基于我们在 GDN 内核优化项目中的实践经验。*
