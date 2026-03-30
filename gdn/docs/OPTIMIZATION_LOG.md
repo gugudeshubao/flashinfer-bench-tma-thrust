@@ -766,6 +766,168 @@ Overhead per sequence:
 
 ---
 
+## Current Optimization Status Summary (2026-03-30)
+
+### Decode: At Fundamental Limit ⚠️
+
+**已完成的优化:**
+
+| 优化 | 文件 | 收益 | 状态 |
+|------|------|------|------|
+| cp.async prefetch | PTX decode | 隐藏延迟 | ✅ 已做 |
+| FP8 state quantization | v10 | 4x 带宽 | ✅ 已做 |
+| Warp-coop reduction | PTX prefill | 8x dot 并行 | ✅ 已做 |
+
+**根本性限制:**
+
+```
+Decode 的本质是 RNN：每个 token 依赖前一个 token 的状态
+
+Arithmetic Intensity = 32K FLOPs / 128 KB = 0.25 FLOP/B
+B200 Ridge Point ≈ 30 FLOP/B
+差距：120x → 完全内存受限
+
+无法突破的限制：
+  ❌ Tensor Core: N=1，无法形成矩阵
+  ❌ 跨 token 并行: 顺序依赖
+  ❌ Parallel Scan: delta rule 依赖 S_{t-1}
+```
+
+**唯一出路:**
+
+| 方向 | 可行性 | 说明 |
+|------|--------|------|
+| Multi-Batch | ✅ 系统级 | N=32 可达 11x 吞吐（已验证） |
+| FPGA/ASIC | ✅ 硬件级 | State 驻留片上，论文显示 4.5x |
+| 更激进量化 | ⚠️ 有风险 | FP4 state？精度存疑 |
+
+**结论**: Decode kernel 优化已到顶，剩余空间 <10%。
+
+---
+
+### Prefill: 仍有显著优化空间 🎯
+
+**已完成的优化:**
+
+| 优化 | 收益 | 状态 |
+|------|------|------|
+| V-Slice 并行 | ~8x 并行度 | ✅ 已做 |
+| Adaptive BLOCK_V | 5-10% | ✅ 已做 |
+| Multi-Batch | 11x (N=32) | ✅ 已验证 |
+
+**未完成的高价值优化:**
+
+| 阶段 | 优化 | 预期收益 | 时间 | 难度 | 状态 |
+|------|------|----------|------|------|------|
+| 1 | **TMA Double-Buffer** | 1.3-1.5x | 2-3 天 | 中 | 🎯 下一步 |
+| 2 | Prefill State 量化 | 1.5-2x | 1-2 天 | 中 | 待做 |
+| 3 | Chunkwise TC | 2-3x | 1-2 周 | 高 | 待做 |
+| **总计** | | **4-9x** | | | |
+
+**当前 Prefill 架构问题:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Chunk 内：逐 token 顺序 (for loop)                     │
+│  Chunk 间：顺序传递状态                                  │
+│  并行：只在 V-Slice 维度                                │
+│                                                         │
+│  核心问题：没有利用 Tensor Core！                       │
+│                                                         │
+│  解决方案：                                              │
+│    Phase 1: TMA Double-Buffer (异步预取)                │
+│    Phase 2: State 量化 (BF16/FP8)                       │
+│    Phase 3: Chunkwise TC (chunk 内矩阵乘法)             │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Iteration 7: TMA Double-Buffering for Prefill (WIP)
+
+### 目标
+
+异步预取下一个 chunk 的数据，重叠计算和访存：
+
+```
+当前 (同步):
+  load(chunk_0) → compute(chunk_0) → load(chunk_1) → compute(chunk_1)
+  
+优化 (异步 double-buffer):
+  load(chunk_0) ─────────────────────────────────────────────►
+                  compute(chunk_0) ─────────────────────────►
+                  load(chunk_1) ─────────────────────────────►
+                                    compute(chunk_1) ────────►
+```
+
+### 实现计划
+
+**Triton 版本:**
+```python
+@triton.jit
+def _prefill_kernel_double_buffer(...):
+    # 分配两个 buffer
+    buf_0 = tl.zeros([BLOCK_V, D])
+    buf_1 = tl.zeros([BLOCK_V, D])
+    
+    # 预取第一个 chunk
+    buf_0 = load_async(chunk_0)
+    
+    for i in range(num_chunks):
+        # 预取下一个 chunk (异步)
+        if i + 1 < num_chunks:
+            next_buf = buf_1 if (i % 2 == 0) else buf_0
+            next_buf = load_async(chunk_{i+1})
+        
+        # 等待当前 chunk
+        curr_buf = buf_0 if (i % 2 == 0) else buf_1
+        wait(curr_buf)
+        
+        # 计算当前 chunk
+        compute(curr_buf)
+```
+
+**PTX 版本:**
+```cpp
+// 使用 cp.async.bulk.tensor (TMA)
+__device__ void prefill_double_buffer(...) {
+    // Double buffer in SMEM
+    __shared__ float buf[2][BLOCK_V][D];
+    
+    // Prefetch first chunk
+    ptx_cp_async_bulk(&buf[0], &gmem_chunk_0);
+    ptx_cp_async_commit();
+    
+    for (int i = 0; i < num_chunks; i++) {
+        int curr = i % 2;
+        int next = (i + 1) % 2;
+        
+        // Prefetch next chunk (async)
+        if (i + 1 < num_chunks) {
+            ptx_cp_async_bulk(&buf[next], &gmem_chunk_{i+1});
+            ptx_cp_async_commit();
+        }
+        
+        // Wait for current chunk
+        ptx_cp_async_wait<1>();  // Wait for curr, allow next in flight
+        __syncthreads();
+        
+        // Compute on current chunk
+        compute(buf[curr]);
+    }
+}
+```
+
+### 预期收益
+
+| 指标 | 当前 | 优化后 | 提升 |
+|------|------|--------|------|
+| 计算/访存重叠 | 0% | 50-80% | - |
+| 有效带宽利用 | ~60% | ~90% | 1.5x |
+| Prefill 吞吐 | 14 M tok/s | 18-21 M tok/s | 1.3-1.5x |
+
+---
+
 ## Commit History
 
 | Commit | Date | Description |
@@ -779,7 +941,8 @@ Overhead per sequence:
 | `5fe786f` | 2026-03-30 | Move GDN scripts to gdn/scripts/ |
 | `62aeefd` | 2026-03-30 | **Iteration 4: TMA double-buffering + cp.async prefetch** |
 | `397cf12` | 2026-03-30 | **Iteration 5: Parallel scan analysis + warp-cooperative reduction** |
-| TBD | 2026-03-30 | **Iteration 6: Long sequence & multi-batch analysis** |
+| `510c69c` | 2026-03-30 | **Iteration 6: Long sequence & multi-batch analysis** |
+| WIP | 2026-03-30 | **Iteration 7: TMA double-buffering for prefill** |
 
 ---
 

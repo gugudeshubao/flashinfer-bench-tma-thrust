@@ -50,6 +50,10 @@ VARIANTS = {
         "name": "tma-thrust-moe-v3",
         "subdir": "solution/v3",
     },
+    "v4": {
+        "name": "tma-thrust-moe-v4",
+        "subdir": "solution/v4",
+    },
 }
 
 DEFAULT_VARIANT = "triton"
