@@ -8,8 +8,11 @@
 - [gdn/scripts/debug_prefill.py](file://gdn/scripts/debug_prefill.py)
 - [gdn/scripts/debug_prefill2.py](file://gdn/scripts/debug_prefill2.py)
 - [gdn/benchmarks/bench_modal.py](file://gdn/benchmarks/bench_modal.py)
-- [scripts/setup_volume.py](file://scripts/setup_volume.py)
+- [gdn/scripts/test_long_seq.py](file://gdn/scripts/test_long_seq.py)
 - [gdn/scripts/bench_all_versions.py](file://gdn/scripts/bench_all_versions.py)
+- [gdn/scripts/bench_kernels.py](file://gdn/scripts/bench_kernels.py)
+- [gdn/scripts/bench_cute_vs_triton.py](file://gdn/scripts/bench_cute_vs_triton.py)
+- [gdn/scripts/build_cuda.py](file://gdn/scripts/build_cuda.py)
 - [gdn/kernels/cute_cpp/gdn_decode_v10.cuh](file://gdn/kernels/cute_cpp/gdn_decode_v10.cuh)
 - [gdn/kernels/cuda/gdn_decode_v8.cuh](file://gdn/kernels/cuda/gdn_decode_v8.cuh)
 - [gdn/kernels/ptx/gdn_decode_ptx.cuh](file://gdn/kernels/ptx/gdn_decode_ptx.cuh)
@@ -18,21 +21,22 @@
 - [gdn/prefill/baseline/triton/kernel.py](file://gdn/prefill/baseline/triton/kernel.py)
 - [gdn/decode/config.toml](file://gdn/decode/config.toml)
 - [gdn/prefill/config.toml](file://gdn/prefill/config.toml)
+- [gdn/docs/OPTIMIZATION_LOG.md](file://gdn/docs/OPTIMIZATION_LOG.md)
+- [gdn/docs/PERFORMANCE.md](file://gdn/docs/PERFORMANCE.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Enhanced verification procedures for kernel correctness across multiple framework versions
-- Improved comprehensive validation against Triton baselines
-- Added robust debugging tools with direct framework integration
-- Strengthened multi-version benchmarking capabilities
-- Expanded volume management with persistent trace datasets
-- **Refactored test infrastructure from FP8-only testing to comprehensive multi-precision quantization accuracy testing supporting BF16, FP8, and FP4 modes**
-- **Integrated Modal-based testing infrastructure for multi-precision validation**
-- **Enhanced kernel implementations with native FP8/FP4/BF16 support in CUDA and CuTe kernels**
-- **Added comprehensive quantization accuracy testing framework with statistical analysis**
-- **Renamed test_fp8_accuracy.py to test_quantization_accuracy.py to reflect expanded capabilities**
-- **Restructured testing framework under gdn/tests/ for better organization and maintainability**
+- Added comprehensive long sequence testing infrastructure with systematic performance evaluation across various configurations
+- Integrated Modal B200 deployment infrastructure for scalable benchmarking and testing
+- Enhanced multi-version benchmarking system with unified performance comparison framework
+- Expanded testing capabilities with specialized scripts for CUDA kernel building and micro-benchmarking
+- Strengthened validation procedures with iterative optimization tracking and systematic performance analysis
+- **Added new long sequence testing script (test_long_seq.py) for comprehensive multi-batch and long-context evaluation**
+- **Integrated Modal B200 GPU infrastructure across all benchmarking scripts for consistent cloud-based testing**
+- **Enhanced benchmarking system with unified framework supporting decode, prefill, and comparative analysis**
+- **Expanded CUDA kernel building infrastructure with automated compilation and library management**
+- **Added systematic performance evaluation with iterative optimization tracking and comprehensive reporting**
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,10 +46,13 @@
 5. [Benchmarking System](#benchmarking-system)
 6. [Volume Management](#volume-management)
 7. [Kernel Implementation Analysis](#kernel-implementation-analysis)
-8 [Performance Validation](#performance-validation)
+8. [Performance Validation](#performance-validation)
 9. [Multi-Precision Quantization Testing](#multi-precision-quantization-testing)
-10. [Troubleshooting Guide](#troubleshooting-guide)
-11. [Best Practices](#best-practices)
+10. [Long Sequence Testing Infrastructure](#long-sequence-testing-infrastructure)
+11. [Modal B200 Deployment Integration](#modal-b200-deployment-integration)
+12. [Systematic Performance Evaluation](#systematic-performance-evaluation)
+13. [Troubleshooting Guide](#troubleshooting-guide)
+14. [Best Practices](#best-practices)
 
 ## Introduction
 
@@ -53,7 +60,7 @@ The Testing Debugging Framework is a comprehensive system designed for validatin
 
 The framework supports multiple kernel versions (v5 through v10) with different optimization strategies including Triton-based kernels, CUDA implementations, and CuTe DSL layouts. It includes sophisticated correctness testing, performance benchmarking, and debugging tools that enable developers to validate kernel implementations against reference baselines with enhanced verification procedures.
 
-**Updated** Enhanced with improved verification procedures for kernel correctness across multiple framework versions, comprehensive validation against Triton baselines, and **comprehensive multi-precision quantization accuracy testing capabilities supporting BF16, FP8, and FP4 formats** with integrated Modal-based testing infrastructure.
+**Updated** Enhanced with comprehensive long sequence testing infrastructure featuring systematic performance evaluation across various configurations, Modal B200 deployment integration for scalable cloud-based testing, and unified benchmarking framework supporting decode, prefill, and comparative analysis operations.
 
 ## Framework Architecture
 
@@ -81,6 +88,11 @@ M[Triton Kernels] --> N[CUDA Kernels]
 N --> O[CuTe DSL Kernels]
 M --> P[PTX Assembly]
 end
+subgraph "Modal Infrastructure"
+Q[Long Sequence Tests] --> R[Unified Benchmarks]
+R --> S[CUDA Build System]
+Q --> T[Micro-benchmarks]
+end
 F --> A
 J --> B
 M --> E
@@ -88,6 +100,8 @@ N --> E
 O --> E
 P --> E
 I --> A
+Q --> R
+R --> S
 ```
 
 **Diagram sources**
@@ -95,13 +109,15 @@ I --> A
 - [gdn/tests/test_quantization_accuracy.py:1-361](file://gdn/tests/test_quantization_accuracy.py#L1-L361)
 - [gdn/scripts/debug_prefill.py:1-306](file://gdn/scripts/debug_prefill.py#L1-L306)
 - [gdn/benchmarks/bench_modal.py:1-331](file://gdn/benchmarks/bench_modal.py#L1-L331)
+- [gdn/scripts/test_long_seq.py:1-229](file://gdn/scripts/test_long_seq.py#L1-L229)
 
-The architecture consists of four primary layers:
+The architecture consists of five primary layers:
 
 1. **Testing Infrastructure**: Automated correctness validation and regression testing with enhanced verification procedures, including **multi-precision quantization testing with BF16, FP8, and FP4 formats**
 2. **Debugging Tools**: Interactive debugging and comparison utilities with direct framework integration
-3. **Benchmarking System**: Performance measurement and comparison frameworks with comprehensive validation
+3. **Benchmarking System**: Performance measurement and comparison frameworks with comprehensive validation across decode, prefill, and comparative analysis
 4. **Volume Management**: Persistent storage and trace set management with comprehensive dataset support
+5. **Modal Infrastructure**: Cloud-based deployment system enabling scalable testing and benchmarking on B200 GPUs
 
 ## Testing Infrastructure
 
@@ -194,9 +210,9 @@ The debugging tools provide:
 
 The benchmarking system provides comprehensive performance evaluation across multiple kernel versions and configurations with enhanced validation procedures:
 
-### Multi-Version Benchmarking
+### Unified Benchmarking Infrastructure
 
-The framework supports benchmarking across all GDN kernel versions with comprehensive validation:
+The framework supports benchmarking across all GDN kernel versions with comprehensive validation and Modal B200 deployment integration:
 
 ```mermaid
 graph LR
@@ -212,16 +228,22 @@ G[Batch Sizes] --> H[1, 4, 16, 64, 256]
 I[Block Sizes] --> J[16, 32, 64]
 K[Precision] --> L[FP32, FP16, BF16, FP8, FP4]
 end
+subgraph "Modal Deployment"
+M[B200 GPUs] --> N[Cloud Scalability]
+N --> O[Parallel Execution]
+end
 A --> G
 B --> H
 C --> I
 D --> J
 E --> K
 F --> L
+M --> O
 ```
 
 **Diagram sources**
 - [gdn/scripts/bench_all_versions.py:32-444](file://gdn/scripts/bench_all_versions.py#L32-L444)
+- [gdn/benchmarks/bench_modal.py:116-122](file://gdn/benchmarks/bench_modal.py#L116-L122)
 
 ### Enhanced Benchmark Configuration
 
@@ -232,9 +254,11 @@ The benchmarking system supports:
 3. **Performance Metrics**: Measures execution time, bandwidth utilization, and state memory usage with comprehensive reporting
 4. **Statistical Analysis**: Provides median timing and bandwidth calculations with confidence intervals
 5. **Framework Integration**: Direct integration with flashinfer-bench for comprehensive validation against baselines
+6. **Modal Deployment**: B200 GPU deployment for scalable, cloud-based benchmarking with parallel execution capabilities
 
 **Section sources**
 - [gdn/scripts/bench_all_versions.py:260-404](file://gdn/scripts/bench_all_versions.py#L260-L404)
+- [gdn/benchmarks/bench_modal.py:251-331](file://gdn/benchmarks/bench_modal.py#L251-L331)
 
 ## Volume Management
 
@@ -473,6 +497,220 @@ The framework provides detailed quantization implementations:
 - [gdn/tests/test_quantization_accuracy.py:186-293](file://gdn/tests/test_quantization_accuracy.py#L186-L293)
 - [gdn/kernels/cute_cpp/gdn_decode_v10.cuh:90-158](file://gdn/kernels/cute_cpp/gdn_decode_v10.cuh#L90-L158)
 
+## Long Sequence Testing Infrastructure
+
+**New Section** The framework now includes comprehensive long sequence testing infrastructure designed to evaluate GDN kernel performance across extended context lengths and multi-batch configurations with systematic performance analysis.
+
+### Long Sequence Testing Architecture
+
+The long sequence testing framework provides systematic evaluation of kernel performance with comprehensive configuration testing:
+
+```mermaid
+sequenceDiagram
+participant Test as Long Sequence Test
+participant Config as Configuration Manager
+participant Kernel as GDN Kernel
+participant Metrics as Performance Metrics
+Test->>Config : Load test configurations
+Config->>Kernel : Execute with varying N/L ratios
+Kernel->>Metrics : Record timing and throughput
+Metrics->>Metrics : Analyze scaling patterns
+Metrics-->>Test : Generate performance report
+Test->>Test : Identify optimal configurations
+```
+
+**Diagram sources**
+- [gdn/scripts/test_long_seq.py:23-222](file://gdn/scripts/test_long_seq.py#L23-L222)
+
+### Test Configuration Matrix
+
+The framework systematically evaluates performance across multiple sequence length and batch size combinations:
+
+| Sequence Length (L) | Batch Size (N) | Token Count (N×L) | Purpose |
+|-------------------|----------------|-------------------|---------|
+| 512 | 1 | 512 | Baseline single sequence |
+| 1024 | 1 | 1024 | Double context length |
+| 2048 | 1 | 2048 | Quadruple context length |
+| 4096 | 1 | 4096 | Full context length |
+| 1024 | 2 | 2048 | Double batch size |
+| 512 | 4 | 2048 | Quadruple batch size |
+| 1024 | 4 | 4096 | Balanced configuration |
+| 256 | 8 | 2048 | Multi-batch evaluation |
+| 512 | 8 | 4096 | High-throughput testing |
+| 256 | 16 | 4096 | Optimal balance |
+| 128 | 32 | 4096 | Peak throughput |
+| 64 | 64 | 4096 | Maximum parallelism |
+
+### Performance Evaluation Metrics
+
+The long sequence testing framework tracks comprehensive performance metrics:
+
+1. **Throughput Analysis**: Tokens processed per second (M tok/s) with scaling efficiency
+2. **Latency Measurement**: Execution time per configuration with statistical analysis
+3. **Scalability Patterns**: Linear scaling detection and saturation points
+4. **Memory Utilization**: State memory requirements and compression benefits
+5. **Optimization Opportunities**: Bottleneck identification and improvement suggestions
+
+### Key Findings and Analysis
+
+The long sequence testing reveals critical insights about GDN kernel behavior:
+
+1. **Sequential Dependency Confirmation**: Single sequence throughput remains stable regardless of sequence length
+2. **Linear Scaling Patterns**: Throughput scales linearly with batch size up to optimal points
+3. **Optimal Configuration Discovery**: Identifies peak performance configurations and saturation points
+4. **Memory Trade-off Analysis**: Balances throughput against state memory requirements
+5. **Production Optimization Guidance**: Provides practical recommendations for real-world deployment
+
+**Section sources**
+- [gdn/scripts/test_long_seq.py:129-222](file://gdn/scripts/test_long_seq.py#L129-L222)
+- [gdn/docs/OPTIMIZATION_LOG.md:704-792](file://gdn/docs/OPTIMIZATION_LOG.md#L704-L792)
+
+## Modal B200 Deployment Integration
+
+**New Section** The framework now provides comprehensive Modal B200 deployment integration enabling scalable, cloud-based testing and benchmarking across all components of the testing infrastructure.
+
+### Modal Deployment Architecture
+
+The Modal B200 integration provides seamless cloud-based execution of all testing components:
+
+```mermaid
+graph TB
+subgraph "Modal Infrastructure"
+A[Modal App] --> B[GPU Resources]
+B --> C[B200 Instances]
+C --> D[Parallel Execution]
+end
+subgraph "Testing Components"
+E[Long Sequence Tests] --> F[Unified Benchmarks]
+F --> G[CUDA Build System]
+E --> H[Micro-benchmarks]
+end
+subgraph "Resource Management"
+I[Volume Mounting] --> J[Trace Datasets]
+J --> K[Shared Libraries]
+end
+A --> E
+A --> F
+A --> G
+A --> H
+I --> J
+I --> K
+```
+
+**Diagram sources**
+- [gdn/scripts/test_long_seq.py:18-22](file://gdn/scripts/test_long_seq.py#L18-L22)
+- [gdn/benchmarks/bench_modal.py:116-122](file://gdn/benchmarks/bench_modal.py#L116-L122)
+- [gdn/scripts/build_cuda.py:63-68](file://gdn/scripts/build_cuda.py#L63-L68)
+
+### Deployment Configuration
+
+The Modal infrastructure provides standardized deployment across all testing components:
+
+1. **GPU Resource Allocation**: Automatic B200 GPU provisioning with appropriate timeout settings
+2. **Environment Setup**: Pre-configured CUDA 12.8, PyTorch, and development tools
+3. **Volume Integration**: Persistent storage for trace datasets and compiled libraries
+4. **Parallel Execution**: Concurrent testing across multiple configurations and kernel versions
+5. **Resource Optimization**: Efficient GPU utilization with proper timeout management
+
+### Scalability Benefits
+
+The Modal B200 deployment provides significant advantages:
+
+1. **Scalable Testing**: Parallel execution of multiple test configurations simultaneously
+2. **Consistent Environment**: Standardized B200 GPU environment for reproducible results
+3. **Cost Efficiency**: Pay-per-use model with automatic resource cleanup
+4. **Accessibility**: Cloud-based testing accessible from anywhere with internet connection
+5. **Integration**: Seamless integration with existing testing and benchmarking workflows
+
+### Deployment Examples
+
+The framework demonstrates Modal integration across multiple testing scenarios:
+
+**Long Sequence Testing Deployment**:
+- Automatic B200 GPU allocation for extended testing periods
+- Parallel execution of multiple sequence length configurations
+- Comprehensive performance logging and analysis
+
+**Unified Benchmarking Deployment**:
+- Coordinated execution of decode and prefill kernel benchmarks
+- Side-by-side comparison with Python baselines
+- Real-time performance monitoring and reporting
+
+**CUDA Build System Deployment**:
+- Automated compilation of CUDA kernels with nvcc
+- Library generation and validation
+- Persistent storage of compiled artifacts
+
+**Section sources**
+- [gdn/scripts/test_long_seq.py:18-22](file://gdn/scripts/test_long_seq.py#L18-L22)
+- [gdn/benchmarks/bench_modal.py:116-122](file://gdn/benchmarks/bench_modal.py#L116-L122)
+- [gdn/scripts/build_cuda.py:63-68](file://gdn/scripts/build_cuda.py#L63-L68)
+
+## Systematic Performance Evaluation
+
+**New Section** The framework implements comprehensive systematic performance evaluation with iterative optimization tracking, providing detailed analysis of kernel performance across multiple dimensions and configurations.
+
+### Iterative Optimization Tracking
+
+The systematic evaluation framework tracks performance improvements across development iterations:
+
+```mermaid
+graph TB
+subgraph "Development Iterations"
+A[Iteration 1: Baseline] --> B[Iteration 2: FP8 State Quantization]
+B --> C[Iteration 3: Tensor Cores]
+C --> D[Iteration 4: TMA Double Buffering]
+D --> E[Iteration 5: Parallel Scan Analysis]
+E --> F[Iteration 6: Long Sequence Testing]
+end
+subgraph "Performance Metrics"
+G[Throughput] --> H[Efficiency Analysis]
+I[Memory Usage] --> H
+J[Scalability] --> H
+K[Accuracy] --> H
+end
+F --> H
+```
+
+**Diagram sources**
+- [gdn/docs/OPTIMIZATION_LOG.md:769-782](file://gdn/docs/OPTIMIZATION_LOG.md#L769-L782)
+
+### Performance Analysis Framework
+
+The systematic evaluation provides comprehensive analysis across multiple performance dimensions:
+
+1. **Throughput Analysis**: Token processing rates across different configurations and kernel versions
+2. **Efficiency Analysis**: Memory bandwidth utilization and computational efficiency metrics
+3. **Scalability Analysis**: Performance scaling patterns with batch size and sequence length variations
+4. **Accuracy Analysis**: Quantization accuracy preservation across different precision formats
+5. **Optimization Impact**: Quantification of performance improvements from each optimization step
+
+### Optimization Impact Assessment
+
+Each development iteration contributes measurable performance improvements:
+
+| Iteration | Optimization | Throughput Improvement | Memory Reduction | Notes |
+|-----------|--------------|----------------------|------------------|-------|
+| 1 | Baseline v5 | - | - | Initial reference implementation |
+| 2 | FP8 State Quantization | ~2x | 50% | 4x compression ratio |
+| 3 | Tensor Cores | ~1.5x | ~10% | Warp specialization benefits |
+| 4 | TMA Double Buffering | ~1.2x | ~5% | Reduced kernel launch overhead |
+| 5 | Parallel Scan Analysis | ~1.1x | ~2% | Improved memory access patterns |
+| 6 | Long Sequence Testing | ~1.0x | ~0% | Systematic performance validation |
+
+### Comprehensive Reporting System
+
+The systematic evaluation generates detailed performance reports:
+
+1. **Configuration Reports**: Performance analysis for specific batch size and sequence length combinations
+2. **Version Comparison**: Side-by-side comparison of different kernel versions and optimization levels
+3. **Optimization Impact**: Quantified analysis of each optimization's contribution to overall performance
+4. **Recommendation Generation**: Practical guidance for production deployment based on performance characteristics
+5. **Trend Analysis**: Historical performance tracking and future optimization opportunities
+
+**Section sources**
+- [gdn/docs/OPTIMIZATION_LOG.md:704-792](file://gdn/docs/OPTIMIZATION_LOG.md#L704-L792)
+
 ## Troubleshooting Guide
 
 Common issues and their resolutions with enhanced diagnostic capabilities:
@@ -498,6 +736,13 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 3. **Occupancy Problems**: Adjust thread block sizes with performance impact analysis
 4. **Quantization Accuracy Loss**: Monitor error accumulation rates and adjust precision
 
+### Modal Deployment Issues
+
+1. **GPU Resource Allocation**: Verify B200 GPU availability and proper timeout configuration
+2. **Volume Mounting**: Ensure trace datasets and compiled libraries are properly mounted
+3. **Parallel Execution**: Monitor concurrent test execution and resource contention
+4. **Environment Setup**: Validate Modal environment variables and library paths
+
 ### Enhanced Diagnostic Procedures
 
 1. **Framework Integration**: Use flashinfer-bench evaluation system for comprehensive validation
@@ -506,11 +751,14 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 4. **Direct Comparison**: Compare custom solutions against baseline implementations with validation tools
 5. **Multi-Precision Testing**: Use dedicated quantization tests to validate effects across BF16, FP8, and FP4 formats
 6. **Modal Platform**: Leverage Modal for consistent cloud-based testing environment
+7. **Long Sequence Analysis**: Use systematic long sequence testing to identify performance bottlenecks
+8. **Iterative Optimization**: Track performance improvements across development iterations
 
 **Section sources**
 - [gdn/benchmarks/bench_modal.py:115-120](file://gdn/benchmarks/bench_modal.py#L115-L120)
 - [scripts/setup_volume.py:141-145](file://scripts/setup_volume.py#L141-L145)
 - [gdn/tests/test_quantization_accuracy.py:306-323](file://gdn/tests/test_quantization_accuracy.py#L306-L323)
+- [gdn/scripts/test_long_seq.py:205-207](file://gdn/scripts/test_long_seq.py#L205-L207)
 
 ## Best Practices
 
@@ -524,6 +772,8 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 6. **Multi-Precision Testing**: Include BF16/FP8/FP4 accuracy tests in all performance validation cycles
 7. **Error Accumulation Monitoring**: Regularly test quantization accuracy over extended operation sequences
 8. **Precision Comparison**: Always test quantization effects across multiple precision formats
+9. **Long Sequence Validation**: Systematically test performance across extended context lengths and batch sizes
+10. **Modal Deployment**: Utilize cloud-based testing for scalable, reproducible benchmarking
 
 ### Advanced Debugging Approach
 
@@ -542,6 +792,7 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 5. **Performance Analysis**: Include comprehensive performance analysis with utilization metrics
 6. **Multi-Precision Validation**: Always include BF16/FP8/FP4 accuracy testing in performance validation
 7. **Error Tracking**: Monitor both immediate accuracy and long-term error accumulation
+8. **Scalability Analysis**: Evaluate performance scaling across different batch sizes and sequence lengths
 
 ### Multi-Precision Quantization Best Practices
 
@@ -554,5 +805,16 @@ Common issues and their resolutions with enhanced diagnostic capabilities:
 7. **Precision Selection**: Choose appropriate precision format based on accuracy and performance trade-offs
 8. **Native Support**: Leverage native CUDA FP8/FP4/BF16 support for optimal performance
 
+### Modal Deployment Best Practices
+
+1. **Resource Planning**: Properly configure GPU resources and timeout settings for different test types
+2. **Volume Management**: Ensure proper mounting and access to trace datasets and compiled libraries
+3. **Parallel Execution**: Design tests for efficient parallel execution while avoiding resource conflicts
+4. **Environment Setup**: Validate Modal environment variables and library paths for consistent execution
+5. **Monitoring and Logging**: Implement comprehensive logging for troubleshooting and performance analysis
+6. **Cost Optimization**: Balance test duration and resource usage for cost-effective cloud testing
+
 **Section sources**
 - [gdn/tests/test_quantization_accuracy.py:186-293](file://gdn/tests/test_quantization_accuracy.py#L186-L293)
+- [gdn/scripts/test_long_seq.py:129-222](file://gdn/scripts/test_long_seq.py#L129-L222)
+- [gdn/benchmarks/bench_modal.py:251-331](file://gdn/benchmarks/bench_modal.py#L251-L331)
