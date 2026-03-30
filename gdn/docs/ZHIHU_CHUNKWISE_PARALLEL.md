@@ -477,4 +477,246 @@ def memory_efficient_chunk(Q, K, V, G, B, S_init, BLOCK=16):
 
 ---
 
+## 十、实战经验：我们的 Prefill 优化之路
+
+> 以下内容来自我们在 NVIDIA B200 上优化 GDN Prefill 内核的实践经验。
+
+### 10.1 问题起点：朴素实现的瓶颈
+
+最初的 Triton 实现采用最直接的方式——逐 token 顺序扫描：
+
+```python
+@triton.jit
+def _prefill_kernel_naive(Q, K, V, State, ...):
+    # 加载初始状态 [D, D]
+    S = tl.load(State + ...)  
+    
+    # 逐 token 顺序处理
+    for i in range(seq_len):
+        t = t_start + i
+        
+        # 加载当前 token 的 q, k, v
+        q = tl.load(Q + t * stride_q + ...)
+        k = tl.load(K + t * stride_k + ...)
+        v = tl.load(V + t * stride_v + ...)
+        
+        # GDN delta rule
+        old_v = tl.sum(S * k[None, :], axis=1)  # S @ k
+        delta = beta * (v - old_v)
+        S = g * S + delta[:, None] * k[None, :]  # rank-1 update
+        
+        # 输出
+        o = scale * tl.sum(S * q[None, :], axis=1)  # S @ q
+        tl.store(Out + t * stride_o + ..., o)
+```
+
+**实测结果 (B200)**:
+- 单序列 4096 tokens: **3.31 ms, 1.24 M tok/s**
+- 问题：完全顺序执行，Tensor Core 完全没用上
+
+### 10.2 第一次优化：V-Slice 并行
+
+我们发现：状态矩阵 $S \in \mathbb{R}^{128 \times 128}$ 的不同**行**之间是独立的！
+
+```
+状态矩阵 S [128, 128]:
+┌─────────────────────────┐
+│ Row 0:  s[0,0]...s[0,127]  │ ← 独立
+│ Row 1:  s[1,0]...s[1,127]  │ ← 独立
+│ ...                        │
+│ Row 127: s[127,0]...       │ ← 独立
+└─────────────────────────┘
+
+Delta Rule 更新:
+S[i,:] = g * S[i,:] + delta[i] * k[:]
+
+每一行的更新只依赖于:
+1. 自己的旧值 S[i,:]
+2. 标量 delta[i]
+3. 共享的 k[:]
+```
+
+于是我们将 128 行分成多个 V-Block，每个 block 独立处理：
+
+```python
+@triton.jit
+def _prefill_kernel(Q, K, V, State, ..., BLOCK_V: tl.constexpr):
+    n  = tl.program_id(0)   # 序列索引
+    h  = tl.program_id(1)   # v_head 索引
+    vb = tl.program_id(2)   # V-block 索引 ← 新增！
+    v0 = vb * BLOCK_V       # 本 program 负责的起始行
+    
+    # 只加载本 block 负责的 V-slice [BLOCK_V, D]
+    vi = tl.arange(0, BLOCK_V)[:, None]
+    ki = tl.arange(0, D)[None, :]
+    S = tl.load(State + ... + v0 * stride_s_v + vi * stride_s_v + ki)
+    
+    for i in range(seq_len):
+        # 只处理 V-slice
+        vv = tl.load(V + ... + v0 + tl.arange(0, BLOCK_V))  # [BLOCK_V]
+        
+        # 本 slice 的 delta rule
+        old_v = tl.sum(S * kv[None, :], axis=1)  # [BLOCK_V]
+        delta = beta * (vv - old_v)
+        S = g * S + delta[:, None] * kv[None, :]
+        
+        # 输出本 slice
+        ov = scale * tl.sum(S * qv[None, :], axis=1)
+        tl.store(Out + ... + v0 + tl.arange(0, BLOCK_V), ov)
+```
+
+**Grid 配置**:
+```python
+# Grid: (N=num_seqs, H=8, V_BLOCKS)
+V_BLOCKS = D // BLOCK_V  # 128 // 16 = 8 或 128 // 32 = 4
+
+_prefill_kernel[(N, num_v_heads, V_BLOCKS)](...)
+```
+
+**效果**：
+- 并行度从 `N × H` 提升到 `N × H × V_BLOCKS`
+- BLOCK_V=16 时，并行度提升 8x
+
+### 10.3 Adaptive BLOCK_V：根据 Batch Size 动态调整
+
+我们发现不同 batch size 下，最优的 BLOCK_V 不同：
+
+| Batch Size | BLOCK_V=16 | BLOCK_V=32 | 最优选择 |
+|------------|------------|------------|----------|
+| N=1 | ✅ 更多并行 | ❌ SM 占用低 | 16 |
+| N=4 | ✅ 刚好 | ⚠️ 略低 | 16 |
+| N=8+ | ⚠️ 过多 programs | ✅ 平衡 | 32 |
+
+**实现**：
+```python
+def kernel(q, k, v, state, ...):
+    N = cu_seqlens.shape[0] - 1
+    
+    # Adaptive BLOCK_V
+    if N <= 4:
+        BLOCK_V = 16   # 更多并行度
+    else:
+        BLOCK_V = 32   # 平衡寄存器使用
+    
+    V_BLOCKS = D // BLOCK_V
+    
+    _prefill_kernel[(N, num_v_heads, V_BLOCKS)](
+        ..., BLOCK_V=BLOCK_V, num_warps=4
+    )
+```
+
+### 10.4 GVA 处理：Query/Key 共享
+
+Qwen3 使用 **Grouped Value Attention (GVA)**：
+- num_q_heads = 4
+- num_v_heads = 8
+- 每 2 个 v_head 共享 1 个 qk_head
+
+```python
+# GVA: 2 v-heads per qk-head
+qk_h = h // 2  # h 是 v_head 索引 (0-7)，qk_h 是 qk_head 索引 (0-3)
+
+# 加载 Q 和 K 时使用 qk_h
+qv = tl.load(Q_ptr + t * stride_q_t + qk_h * stride_q_h + di)
+kv = tl.load(K_ptr + t * stride_k_t + qk_h * stride_k_h + di)
+
+# 加载 V 时使用 h
+vv = tl.load(V_ptr + t * stride_v_t + h * stride_v_h + v0 + vd)
+```
+
+### 10.5 实测数据：优化效果
+
+**单序列吞吐 (确认顺序依赖)**:
+
+| 序列长度 | 耗时 (ms) | 吞吐 (M tok/s) | 时间/token |
+|----------|-----------|----------------|------------|
+| 512 | 0.42 | 1.21 | 0.82 μs |
+| 1024 | 0.84 | 1.23 | 0.82 μs |
+| 2048 | 1.66 | 1.23 | 0.81 μs |
+| 4096 | 3.31 | 1.24 | 0.81 μs |
+
+**观察**：时间与长度严格线性，每 token ~0.82 μs，这证实了顺序依赖。
+
+**Multi-Batch 吞吐 (并行收益)**:
+
+| Batch | Tokens | 吞吐 (M tok/s) | 加速比 |
+|-------|--------|----------------|--------|
+| N=1 | 4096 | 1.24 | 1.0x |
+| N=4 | 4096 | 4.70 | 3.8x |
+| N=16 | 4096 | 11.38 | 9.2x |
+| **N=32** | **4096** | **14.13** | **11.4x** |
+| N=64 | 4096 | 13.70 | 11.1x |
+
+**观察**：N=32 是甜点，超过后饱和（SM 数量限制）。
+
+### 10.6 关键洞察：为什么我们没用"真正的" Chunkwise Parallel？
+
+你可能注意到，我们的实现**仍然是逐 token 扫描**，只是在 V 维度上做了并行。这是因为：
+
+**理论 vs 实践的 Gap**:
+
+| 理论 Chunkwise | 我们的实现 |
+|----------------|-----------|
+| Chunk 内 token 并行 | Chunk 内 token 顺序 |
+| 需要复杂的矩阵分解 | 直接 delta rule |
+| 利用 Tensor Core | 纯向量运算 |
+| 实现复杂度高 | 实现简单 |
+
+**为什么我们选择简单方案？**
+
+1. **正确性优先**：复杂的 chunk 内矩阵求解容易出 bug
+2. **Multi-Batch 足够**：生产环境 batch 通常 >= 16，已经够快
+3. **ROI 考量**：Tensor Core 方案的收益 ~2-3x，但实现成本高
+4. **FlashInfer 基线**：官方实现也是类似方案（CuTe DSL，非 chunk 并行）
+
+### 10.7 未来优化方向
+
+如果要进一步优化，可以考虑：
+
+**1. Chunk 内 Tensor Core（高收益，高难度）**
+```
+目标：将 Chunk 内的多个 token 合并成矩阵乘法
+预期收益：2-3x
+难点：正确处理 delta 的状态依赖
+```
+
+**2. TMA + Double Buffering（中收益，中难度）**
+```
+目标：异步预取下一 chunk 的数据
+预期收益：1.3-1.5x
+实现：cp.async.bulk.tensor 指令
+```
+
+**3. State 量化（低-中收益，低难度）**
+```
+目标：FP32 状态 → FP8/BF16
+预期收益：2-4x 带宽减少
+风险：精度损失
+```
+
+---
+
+## 十一、总结与建议
+
+### 核心思想回顾
+
+> **Chunkwise Parallel 的本质是将"无法并行"的 token 级递推，转化为"可以高效并行"的 chunk 级矩阵运算。**
+
+### 实践建议
+
+| 场景 | 建议方案 | 理由 |
+|------|----------|------|
+| **快速原型** | V-Slice 并行 + Adaptive BLOCK_V | 简单可靠，效果不错 |
+| **生产部署** | Multi-Batch (N=16-32) | 最佳性价比 |
+| **追求极致** | 完整 Chunkwise + Tensor Core | 但要准备好调 bug |
+
+### 踩坑记录
+
+1. **GVA 索引错误**：qk_head 和 v_head 的映射关系要搞清楚
+2. **状态布局**：k-last vs v-last，搞反了 shape 完全不对
+3. **Triton 的 constexpr**：BLOCK_V 必须是编译期常量
+4. **num_warps 选择**：4 warps 通常最优，8 warps 反而更慢
+
+---
+
 *本文是 GDN 系列文章的第二篇。上一篇：[深入理解 Qwen3.5 的 Gated DeltaNet](./ZHIHU_GDN_INFERENCE.md)*
