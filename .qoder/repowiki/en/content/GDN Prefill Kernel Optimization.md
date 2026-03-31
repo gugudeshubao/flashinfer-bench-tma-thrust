@@ -11,18 +11,22 @@
 - [gdn/kernels/cuda/gdn_prefill_v8.cuh](file://gdn/kernels/cuda/gdn_prefill_v8.cuh)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh)
 - [gdn/kernels/cute_cpp/gdn_prefill_v10.cuh](file://gdn/kernels/cute_cpp/gdn_prefill_v10.cuh)
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh)
 - [gdn/kernels/cute_dsl/gdn_prefill_dsl.py](file://gdn/kernels/cute_dsl/gdn_prefill_dsl.py)
+- [gdn/kernels/triton/README.md](file://gdn/kernels/triton/README.md)
+- [gdn/prefill/baseline/triton/kernel.py](file://gdn/prefill/baseline/triton/kernel.py)
+- [gdn/prefill/solution/triton/kernel.py](file://gdn/prefill/solution/triton/kernel.py)
 - [gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md](file://gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md)
 - [gdn/docs/ZHIHU_GDN_TENSOR_CORE.md](file://gdn/docs/ZHIHU_GDN_TENSOR_CORE.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive mathematical derivations of chunkwise parallel algorithm from ZHIHU_CHUNKWISE_PARALLEL.md
-- Enhanced chunked processing analysis with detailed matrix operations and tensor core integration
-- Updated performance considerations with new arithmetic intensity calculations
-- Expanded troubleshooting guide with chunk size optimization guidance
-- Added practical implementation examples and optimization strategies
+- Added comprehensive analysis of Triton v5 kernel with software pipelining and token-level double-buffering
+- Integrated new CuTe C++ v11 kernel featuring cp.async primitives and warp-parallel V-tile processing
+- Enhanced performance comparison between Triton and CuTe implementations
+- Updated optimization strategies with token-level software pipelining techniques
+- Expanded hardware-specific optimizations including cp.async PTX primitives
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -31,15 +35,18 @@
 4. [Architecture Overview](#architecture-overview)
 5. [Detailed Component Analysis](#detailed-component-analysis)
 6. [Mathematical Foundations of Chunkwise Parallel](#mathematical-foundations-of-chunkwise-parallel)
-7. [Dependency Analysis](#dependency-analysis)
-8. [Performance Considerations](#performance-considerations)
-9. [Troubleshooting Guide](#troubleshooting-guide)
-10. [Conclusion](#conclusion)
+7. [Software Pipelining Innovations](#software-pipelining-innovations)
+8. [Hardware-Specific Optimizations](#hardware-specific-optimizations)
+9. [Performance Comparison Framework](#performance-comparison-framework)
+10. [Dependency Analysis](#dependency-analysis)
+11. [Performance Considerations](#performance-considerations)
+12. [Troubleshooting Guide](#troubleshooting-guide)
+13. [Conclusion](#conclusion)
 
 ## Introduction
-This document analyzes the GDN (Gated Delta Net) Prefill Kernel Optimization project, focusing on the evolution and optimization strategies across multiple kernel versions. The project targets NVIDIA B200 (sm_100) and demonstrates a progression from baseline sequential processing to advanced techniques including chunking, shared memory swizzling, quantization, and TiledMMA integration for Tensor Cores. The optimization journey emphasizes increasing arithmetic intensity through chunk-based processing, reducing memory-bound bottlenecks, and leveraging hardware-specific features for maximum throughput.
+This document analyzes the GDN (Gated Delta Net) Prefill Kernel Optimization project, focusing on the evolution and optimization strategies across multiple kernel versions. The project targets NVIDIA B200 (sm_100) and demonstrates a progression from baseline sequential processing to advanced techniques including chunking, shared memory swizzling, quantization, TiledMMA integration for Tensor Cores, and most recently, token-level software pipelining with cp.async primitives. The optimization journey emphasizes increasing arithmetic intensity through chunk-based processing, reducing memory-bound bottlenecks, and leveraging hardware-specific features for maximum throughput.
 
-**Updated** Enhanced with comprehensive mathematical analysis of chunkwise parallel algorithms from ZHIHU_CHUNKWISE_PARALLEL.md, providing detailed derivations of how GDN's delta rule can be transformed from O(L) sequential computation to O(L/C) chunk-based parallel processing.
+**Updated** Enhanced with comprehensive analysis of Triton v5 software pipelining implementation and the new CuTe C++ v11 kernel featuring token-level double-buffering and cp.async PTX primitives, providing detailed insights into how these innovations achieve 1.5-1.7x speedup for single-sequence long context scenarios.
 
 ## Project Structure
 The GDN kernels are organized by framework and version, showcasing a clear evolution toward higher performance and more sophisticated optimizations:
@@ -48,10 +55,10 @@ The GDN kernels are organized by framework and version, showcasing a clear evolu
 graph TB
 subgraph "GDN Kernels"
 A["CUDA v5-v8<br/>Raw CUDA"]
-B["CuTe C++ v9-v10<br/>Structured Layout"]
+B["CuTe C++ v9-v11<br/>Structured Layout"]
 C["CuTe DSL<br/>Python → MLIR"]
 D["PTX Assembly<br/>Inline Assembly"]
-E["Triton<br/>Baseline"]
+E["Triton<br/>v5 Software Pipelining"]
 end
 subgraph "Prefill Optimizations"
 F["Sequential Scan<br/>v5"]
@@ -59,7 +66,10 @@ G["TMA Async Loading<br/>v6"]
 H["Chunked Processing<br/>v6+"]
 I["Quantization<br/>v7+"]
 J["Tensor Core Integration<br/>v10"]
-K["Chunkwise Parallel<br/>Mathematical Foundation"]
+K["Token-Level Pipelining<br/>v11"]
+L["Software Pipelining<br/>v5"]
+M["Double-Buffering<br/>v5"]
+N["cp.async Primitives<br/>v11"]
 end
 A --> F
 A --> G
@@ -67,16 +77,26 @@ A --> H
 B --> H
 B --> I
 B --> J
+B --> K
+B --> N
 C --> H
 D --> J
-E --> F
+E --> L
+E --> M
+F --> L
+G --> M
 H --> K
 J --> K
+L --> K
+M --> K
+N --> K
 ```
 
 **Diagram sources**
 - [gdn/kernels/README.md:1-170](file://gdn/kernels/README.md#L1-L170)
 - [gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md:1-725](file://gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md#L1-L725)
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:1-421](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L1-L421)
+- [gdn/prefill/solution/triton/kernel.py:23-51](file://gdn/prefill/solution/triton/kernel.py#L23-L51)
 
 **Section sources**
 - [gdn/README.md:1-65](file://gdn/README.md#L1-L65)
@@ -98,18 +118,21 @@ All versions implement the delta rule with consistent mathematical operations:
 - **v7+**: Vectorized loads using float4, double buffering, and register blocking
 - **v9+**: SMEM swizzle for bank conflict avoidance
 - **v10**: TiledMMA-ready layouts enabling matrix-matrix operations
+- **v11**: Token-level software pipelining with cp.async primitives
 
 ### Hardware-Specific Optimizations
 - **v6**: Tensor Memory Accelerator (TMA) for async state loading
 - **v7**: Warp shuffles for reductions, FP4 quantization
 - **v8**: Multi-stage pipelining, persistent kernel for long sequences
 - **v10**: Tensor Core integration via tcgen05.mma on sm_100
+- **v11**: cp.async PTX primitives for asynchronous memory operations
 
 **Section sources**
 - [gdn/kernels/cuda/gdn_prefill_v5.cuh:38-187](file://gdn/kernels/cuda/gdn_prefill_v5.cuh#L38-L187)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh:91-274](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L91-L274)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:84-281](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L84-L281)
 - [gdn/kernels/cute_cpp/gdn_prefill_v10.cuh:93-309](file://gdn/kernels/cute_cpp/gdn_prefill_v10.cuh#L93-L309)
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:42-77](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L42-L77)
 
 ## Architecture Overview
 The optimization progression follows a systematic approach to address computational and memory bottlenecks:
@@ -117,21 +140,25 @@ The optimization progression follows a systematic approach to address computatio
 ```mermaid
 flowchart TD
 Start(["Token Processing Start"]) --> SeqScan["Sequential Token Scan<br/>v5"]
-SeqScan --> Chunking{"Chunk Size > 1?"}
-Chunking --> |No| MemoryBound["Memory-Bound<br/>AI = 1 FLOP/byte"]
-Chunking --> |Yes| ComputeBound["Compute-Bound<br/>AI = C FLOP/byte"]
+SeqScan --> Pipelining{"Software Pipelining?"}
+Pipelining --> |No| MemoryBound["Memory-Bound<br/>AI = 1 FLOP/byte"]
+Pipelining --> |Yes| ComputeBound["Compute-Bound<br/>AI = C FLOP/byte"]
 MemoryBound --> TMA["TMA Async Loading<br/>v6"]
-ComputeBound --> Quant["State Quantization<br/>v7+"]
+ComputeBound --> TritonV5["Triton v5 Pipelining<br/>Token-level Double-Buffering"]
 TMA --> Swizzle["SMEM Swizzle<br/>v9"]
+TritonV5 --> CuTeV11["CuTe v11 Pipelining<br/>cp.async Primitives"]
+Swizzle --> Quant["State Quantization<br/>v7+"]
 Quant --> TensorCore["Tensor Core Integration<br/>v10"]
-Swizzle --> Pipeline["Multi-Stage Pipelining<br/>v8"]
-TensorCore --> Pipeline
+TensorCore --> Pipeline["Multi-Stage Pipelining<br/>v8"]
+CuTeV11 --> Pipeline
 Pipeline --> End(["Optimized Output"])
 ```
 
 **Diagram sources**
 - [gdn/kernels/README.md:115-142](file://gdn/kernels/README.md#L115-L142)
 - [gdn/kernels/cuda/gdn_prefill_v6_chunked.cuh:39-55](file://gdn/kernels/cuda/gdn_prefill_v6_chunked.cuh#L39-L55)
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:106-114](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L106-L114)
+- [gdn/prefill/solution/triton/kernel.py:40-46](file://gdn/prefill/solution/triton/kernel.py#L40-L46)
 
 ### Version Evolution Timeline
 The kernel evolution demonstrates targeted improvements addressing specific performance limitations:
@@ -144,11 +171,13 @@ participant V7 as "v7 : Vectorization"
 participant V8 as "v8 : Pipelining"
 participant V9 as "v9 : Swizzle"
 participant V10 as "v10 : Tensor Cores"
+participant V11 as "v11 : Token Pipelining"
 V5->>V6 : Add TMA for state loading
 V6->>V7 : Introduce vectorized loads and quantization
 V7->>V8 : Implement multi-stage pipeline
 V8->>V9 : Apply SMEM swizzle for conflicts
 V9->>V10 : Enable TiledMMA integration
+V10->>V11 : Add token-level software pipelining
 ```
 
 **Diagram sources**
@@ -158,6 +187,7 @@ V9->>V10 : Enable TiledMMA integration
 - [gdn/kernels/cuda/gdn_prefill_v8.cuh:81-271](file://gdn/kernels/cuda/gdn_prefill_v8.cuh#L81-L271)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:84-281](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L84-L281)
 - [gdn/kernels/cute_cpp/gdn_prefill_v10.cuh:93-309](file://gdn/kernels/cute_cpp/gdn_prefill_v10.cuh#L93-L309)
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:106-114](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L106-L114)
 
 ## Detailed Component Analysis
 
@@ -205,7 +235,6 @@ class V6Kernel {
 +CuSeqlens : int32[N+1]
 +Out : bf16[T,8,D]
 +NewState : float[N,8,D,D]
-+scale : float
 +process_tokens() void
 +load_state_async() void
 +apply_decay() void
@@ -369,6 +398,58 @@ Tensor Core advantages:
 
 **Section sources**
 - [gdn/kernels/cute_cpp/gdn_prefill_v10.cuh:93-390](file://gdn/kernels/cute_cpp/gdn_prefill_v10.cuh#L93-L390)
+
+### v11: Token-Level Software Pipelining with cp.async
+The newest kernel introduces token-level software pipelining with comprehensive optimizations:
+
+```mermaid
+flowchart TD
+A["Token-Level Software Pipelining"] --> B["Stage 0: Prefetch Next Token<br/>Async Loading"]
+B --> C["Stage 1: Compute Current Token<br/>Using Buffered Data"]
+C --> D["Buffer Rotation<br/>Double-Buffering"]
+D --> E["Warp-Parallel V-tile Processing"]
+E --> F["cp.async PTX Primitives<br/>Asynchronous Memory Ops"]
+F --> G["Shared Memory Double-Buffering<br/>Overlap Load and Compute"]
+```
+
+**Diagram sources**
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:252-287](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L252-L287)
+
+Key innovations:
+- Token-level software pipelining with stage-based execution
+- Double-buffered shared memory for overlapping load and compute
+- cp.async PTX primitives for asynchronous memory operations
+- Warp-parallel processing across V-dimension tiles
+- Expected 1.5-1.7x speedup for single-sequence long context
+
+**Section sources**
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:1-421](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L1-L421)
+
+### Triton v5: Software Pipelining Baseline
+The Triton implementation provides a high-level baseline with software pipelining:
+
+```mermaid
+flowchart TD
+A["Triton v5 Software Pipelining"] --> B["Stage 0: Load Token i+1<br/>Prefetch Data"]
+B --> C["Stage 1: Compute Token i<br/>Using Buffered Data"]
+C --> D["Automatic Double-Buffering<br/>Token-Level"]
+D --> E["Auto-tuning<br/>Tile and Warp Selection"]
+E --> F["Cross-Platform<br/>NVIDIA/AMD Support"]
+```
+
+**Diagram sources**
+- [gdn/prefill/solution/triton/kernel.py:40-46](file://gdn/prefill/solution/triton/kernel.py#L40-L46)
+- [gdn/kernels/triton/README.md:46-64](file://gdn/kernels/triton/README.md#L46-L64)
+
+Triton advantages:
+- Automatic tile and warp size optimization
+- Double-buffered token-level loading
+- Cross-platform compatibility
+- Fast development iteration cycle
+
+**Section sources**
+- [gdn/prefill/solution/triton/kernel.py:23-51](file://gdn/prefill/solution/triton/kernel.py#L23-L51)
+- [gdn/kernels/triton/README.md:16-109](file://gdn/kernels/triton/README.md#L16-L109)
 
 ### CuTe DSL Implementation
 The CuTe DSL provides a high-level Python interface with automatic optimization:
@@ -624,22 +705,282 @@ Typically **C=64 or C=128** provides the best balance.
 3. **Multi-Batch effectiveness**: Production batches typically ≥ 16, already fast
 4. **Baseline alignment**: Official implementation uses similar approach (CuTe DSL, non-chunk parallel)
 
-### 6.1 Future Optimization Directions
+## Software Pipelining Innovations
 
-#### 1. Complete Chunkwise with Tensor Cores (High ROI, High Difficulty)
-**Goal**: Transform chunk internal tokens into matrix-matrix operations
-**Expected benefit**: 2-3x speedup
-**Challenge**: Correctly handling delta's state dependencies
+**Updated** Comprehensive analysis of software pipelining techniques implemented in Triton v5 and CuTe C++ v11 kernels.
 
-#### 2. TMA + Double Buffering (Medium ROI, Medium Difficulty)
-**Goal**: Asynchronous prefetching of next chunk data
-**Expected benefit**: 1.3-1.5x improvement
-**Implementation**: cp.async.bulk.tensor instructions
+### Token-Level Software Pipelining Architecture
 
-#### 3. State Quantization (Low-Medium ROI, Low Difficulty)
-**Goal**: FP32 state → FP8/BF16
-**Expected benefit**: 2-4x bandwidth reduction
-**Risk**: Potential precision loss
+#### Triton v5 Implementation
+The Triton kernel implements a two-stage software pipeline:
+
+```mermaid
+sequenceDiagram
+participant Stage0 as "Stage 0 : Token i+1 Load"
+participant Stage1 as "Stage 1 : Token i Compute"
+participant SMEM as "Shared Memory"
+Stage0->>SMEM : Load Q[i+1], K[i+1], V[i+1]
+Stage0->>SMEM : Compute gates for token i+1
+Stage1->>SMEM : Use buffered data for token i
+Stage1->>SMEM : Compute decay, old_v, updates
+Stage1->>SMEM : Store outputs for token i
+Stage0->>SMEM : Rotate buffers
+Stage1->>SMEM : Continue to next token
+```
+
+**Diagram sources**
+- [gdn/prefill/solution/triton/kernel.py:40-46](file://gdn/prefill/solution/triton/kernel.py#L40-L46)
+
+#### CuTe C++ v11 Implementation
+The C++ implementation extends this concept with advanced optimizations:
+
+```mermaid
+flowchart TD
+A["Token-Level Pipeline"] --> B["Stage 0: Async Prefetch<br/>cp.async ca.cg"]
+B --> C["Stage 1: Warp-Parallel Compute<br/>Double-Buffered SMEM"]
+C --> D["Buffer Rotation<br/>Token-level Coordination"]
+D --> E["Warp-Parallel V-tile<br/>Per-warp state processing"]
+E --> F["cp.async Commit/Waits<br/>Synchronization"]
+```
+
+**Diagram sources**
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:252-342](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L252-L342)
+
+### cp.async PTX Primitive Implementation
+
+#### Memory Operation Primitives
+The v11 kernel implements several cp.async primitives for optimized memory operations:
+
+```cpp
+// 16-byte cp.async.ca.shared.global (cache allocate)
+__device__ __forceinline__ void cp_async_ca_16(void* smem_ptr, const void* gmem_ptr) {
+    uint32_t smem_addr = __cvta_generic_to_shared(smem_ptr);
+    asm volatile(
+        "cp.async.ca.shared.global [%0], [%1], 16;"
+        :: "r"(smem_addr), "l"(gmem_ptr) : "memory"
+    );
+}
+
+// 16-byte cp.async.cg.shared.global (cache global)
+__device__ __forceinline__ void cp_async_cg_16(void* smem_ptr, const void* gmem_ptr) {
+    uint32_t smem_addr = __cvta_generic_to_shared(smem_ptr);
+    asm volatile(
+        "cp.async.cg.shared.global [%0], [%1], 16;"
+        :: "r"(smem_addr), "l"(gmem_ptr) : "memory"
+    );
+}
+
+// Group synchronization
+__device__ __forceinline__ void cp_async_commit() {
+    asm volatile("cp.async.commit_group;");
+}
+
+// Wait operations
+template<int N>
+__device__ __forceinline__ void cp_async_wait() {
+    asm volatile("cp.async.wait_group %0;" :: "n"(N));
+}
+
+__device__ __forceinline__ void cp_async_wait_all() {
+    asm volatile("cp.async.wait_all;");
+}
+```
+
+**Section sources**
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:42-77](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L42-L77)
+- [gdn/prefill/solution/triton/kernel.py:23-51](file://gdn/prefill/solution/triton/kernel.py#L23-L51)
+
+### Warp-Parallel V-Tile Processing
+
+#### V-Dimension Parallelism
+Both implementations leverage warp-level parallelism across the V-dimension:
+
+```mermaid
+flowchart TD
+A["Warp-Parallel Processing"] --> B["Warp ID Distribution<br/>v_idx = warp_id + i*NUM_WARPS"]
+B --> C["Lane ID Reduction<br/>warp_reduce_sum()"]
+C --> D["State Element Processing<br/>Per-dimension computation"]
+D --> E["Output Accumulation<br/>Per-token output"]
+```
+
+**Diagram sources**
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:296-336](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L296-L336)
+
+#### Performance Characteristics
+- **Triton v5**: Automatic warp distribution with manual buffer management
+- **CuTe v11**: Explicit warp coordination with cp.async synchronization
+- **Expected Speedup**: 1.5-1.7x for single-sequence long context scenarios
+- **Memory Overlap**: Prefetch vs compute overlap achieves near-ideal pipeline utilization
+
+**Section sources**
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:296-336](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L296-L336)
+- [gdn/prefill/solution/triton/kernel.py:40-46](file://gdn/prefill/solution/triton/kernel.py#L40-L46)
+
+## Hardware-Specific Optimizations
+
+**Updated** Enhanced analysis of hardware-specific optimizations including cp.async primitives and token-level pipelining.
+
+### NVIDIA B200 (sm_100) Architecture Considerations
+
+#### Memory Hierarchy Exploitation
+The optimizations are specifically tuned for the B200 architecture:
+
+```mermaid
+flowchart TD
+A["B200 Memory Hierarchy"] --> B["L1 Cache<br/>48 KB"]
+B --> C["L2 Cache<br/>4 MB"]
+C --> D["SMEM<br/>96 KB"]
+D --> E["Global Memory<br/>Throughput"]
+B --> F["Register File<br/>32 KB"]
+F --> G["Tensor Cores<br/>sm_100"]
+```
+
+**Diagram sources**
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:116-143](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L116-L143)
+
+#### cp.async Memory Optimization
+The cp.async primitives exploit the memory hierarchy efficiently:
+
+| Operation | Memory Level | Bandwidth | Latency |
+|-----------|--------------|-----------|---------|
+| cp.async.ca_16 | L2 Cache | High | Low |
+| cp.async.cg_16 | Global Memory | High | Low |
+| Regular Load | Global Memory | High | Medium |
+| Warp Shuffle | Register | Very High | Very Low |
+
+#### Token-Level vs Sequence-Level Pipelining
+- **Sequence-level**: Prefetch entire sequence (complex coordination)
+- **Token-level**: Prefetch next token (simple coordination, better scaling)
+- **v11 advantage**: Handles variable-length sequences naturally
+- **Scalability**: Maintains efficiency across different sequence lengths
+
+**Section sources**
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:42-77](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L42-L77)
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:252-342](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L252-L342)
+
+### Double-Buffering Strategies
+
+#### Shared Memory Double-Buffering
+Both Triton and C++ implementations use double-buffering for optimal overlap:
+
+```mermaid
+sequenceDiagram
+participant Load as "Memory Load"
+participant Compute as "Computation"
+Load->>SMEM : Buffer 0 : Load token i+1
+Compute->>SMEM : Buffer 1 : Compute token i
+Load->>SMEM : Buffer 1 : Load token i+2
+Compute->>SMEM : Buffer 0 : Compute token i+1
+Note over Load,Compute : Continuous overlap achieved
+```
+
+**Diagram sources**
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:172-187](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L172-L187)
+- [gdn/prefill/solution/triton/kernel.py:40-46](file://gdn/prefill/solution/triton/kernel.py#L40-L46)
+
+#### Buffer Management
+- **v11**: Explicit buffer rotation with compile-time BLOCK_V selection
+- **Triton**: Automatic buffer management with runtime optimization
+- **Memory Footprint**: Minimal overhead with significant performance gain
+- **Synchronization**: Careful coordination to avoid race conditions
+
+**Section sources**
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:172-187](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L172-L187)
+- [gdn/prefill/solution/triton/kernel.py:40-46](file://gdn/prefill/solution/triton/kernel.py#L40-L46)
+
+## Performance Comparison Framework
+
+**Updated** Comprehensive performance comparison between Triton v5 and CuTe C++ v11 implementations.
+
+### Benchmark Methodology
+
+#### Test Configurations
+The kernels are evaluated across multiple batch sizes and sequence lengths:
+
+| Batch Size | Sequence Length | Total Tokens | Purpose |
+|------------|-----------------|--------------|---------|
+| 1 | 256 | 256 | Single-sequence testing |
+| 1 | 512 | 512 | Long context validation |
+| 1 | 1024 | 1024 | Performance ceiling |
+| 4 | 256 | 1024 | Multi-sequence |
+| 4 | 512 | 2048 | Larger workload |
+| 8 | 256 | 2048 | Throughput testing |
+| 16 | 128 | 2048 | Balanced testing |
+| 32 | 64 | 2048 | High batch |
+
+#### Performance Metrics
+- **Throughput**: GB/s (bandwidth utilization)
+- **Latency**: ms per forward pass
+- **Speedup**: vs baseline v5 implementation
+- **Efficiency**: % of peak performance
+
+### Triton v5 vs CuTe v11 Performance Analysis
+
+#### Auto-tuning Advantages
+Triton's auto-tuning provides optimal configuration selection:
+
+```mermaid
+graph TB
+A["Triton Auto-tuning"] --> B["Tile Size Optimization"]
+B --> C["Warp Count Selection"]
+C --> D["Shared Memory Layout"]
+D --> E["Performance Optimization"]
+A --> F["Cross-platform Portability"]
+F --> G["Development Speed"]
+```
+
+**Diagram sources**
+- [gdn/kernels/triton/README.md:75-86](file://gdn/kernels/triton/README.md#L75-L86)
+
+#### Manual Optimization Benefits
+CuTe's explicit control enables deeper optimizations:
+
+```mermaid
+graph TB
+A["CuTe Manual Control"] --> B["cp.async Primitives"]
+B --> C["Warp-Parallel V-tiles"]
+C --> D["Token-level Pipelining"]
+D --> E["Hardware-Specific Tuning"]
+A --> F["Maximum Performance"]
+F --> G["Production Deployment"]
+```
+
+**Diagram sources**
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:5-14](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L5-L14)
+
+### Performance Characteristics
+
+#### Throughput Comparison Results
+Based on the benchmark methodology:
+
+| Configuration | Triton v5 | CuTe v11 | Winner | Notes |
+|---------------|-----------|----------|--------|-------|
+| Batch 1, Len 256 | 24 GB/s | 27 GB/s | CuTe | Launch overhead |
+| Batch 1, Len 512 | 24 GB/s | 27 GB/s | CuTe | Similar |
+| Batch 1, Len 1024 | 24 GB/s | 27 GB/s | CuTe | Launch overhead |
+| Batch 4, Len 256 | 386 GB/s | 405 GB/s | CuTe | Better SMEM |
+| Batch 4, Len 512 | 386 GB/s | 405 GB/s | CuTe | Better SMEM |
+| Batch 8, Len 256 | 386 GB/s | 405 GB/s | CuTe | Better SMEM |
+| Batch 16, Len 128 | 386 GB/s | 405 GB/s | CuTe | Better SMEM |
+| Batch 32, Len 64 | 1,518 GB/s | 1,302 GB/s | Triton | Auto-tuning |
+| Batch 64, Len 32 | 1,518 GB/s | 1,302 GB/s | Triton | Auto-tuning |
+| Batch 256, Len 16 | 2,834 GB/s | 7,585 GB/s | CuTe | Swizzle advantage |
+
+#### Why Triton Excels at Small Batches
+- **Auto-tuning**: Automatically finds optimal tile sizes
+- **Adaptive BLOCK_V**: Chooses optimal V-tile size
+- **L2 Cache Optimization**: Small batches fit L2 cache perfectly
+- **Launch Overhead**: Minimal impact for small workloads
+
+#### Why CuTe Dominates at Large Batches
+- **SMEM Swizzle**: Bank conflict elimination
+- **Advanced Pipelining**: Token-level cp.async overlap
+- **Hardware Control**: Direct PTX instruction usage
+- **Memory Optimization**: Efficient shared memory utilization
+
+**Section sources**
+- [gdn/kernels/triton/README.md:66-109](file://gdn/kernels/triton/README.md#L66-L109)
+- [gdn/scripts/bench_cuda_prefill.py:156-191](file://gdn/scripts/bench_cuda_prefill.py#L156-L191)
 
 ## Dependency Analysis
 The kernel implementations demonstrate clear dependency relationships and optimization progression:
@@ -649,11 +990,13 @@ graph TB
 subgraph "Foundation"
 V5["v5: Sequential"]
 V6["v6: TMA"]
+TritonV5["Triton v5: Software Pipelining"]
 end
 subgraph "Optimization Layer"
 V7["v7: Vectorization"]
 V8["v8: Pipelining"]
 V9["v9: Swizzle"]
+CuTeV11["CuTe v11: Token Pipelining"]
 end
 subgraph "Advanced"
 V10["v10: Tensor Cores"]
@@ -669,14 +1012,19 @@ V8 --> V9
 V9 --> V10
 V7 --> DSL
 V9 --> DSL
+TritonV5 --> V5
+CuTeV11 --> TritonV5
 CP --> V6
 CP --> V9
 CP --> V10
+CP --> TritonV5
+CP --> CuTeV11
 ```
 
 **Diagram sources**
 - [gdn/kernels/README.md:53-66](file://gdn/kernels/README.md#L53-L66)
 - [gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md:1-725](file://gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md#L1-L725)
+- [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:106-114](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L106-L114)
 
 Key dependency patterns:
 - Each version builds upon previous optimizations
@@ -684,6 +1032,8 @@ Key dependency patterns:
 - Software abstractions enable rapid development
 - Shared mathematical foundation across all versions
 - Chunkwise parallel theory underpins modern optimizations
+- Triton provides baseline performance for comparison
+- CuTe v11 represents the current performance ceiling
 
 **Section sources**
 - [gdn/kernels/README.md:53-102](file://gdn/kernels/README.md#L53-L102)
@@ -700,20 +1050,26 @@ The optimization journey demonstrates systematic improvements in computational e
 | v8 | Pipelining | 1 FLOP/byte | Memory-bound |
 | v9 | Chunked + Swizzle | 8 FLOP/byte | Compute-bound |
 | v10 | Tensor Cores | 8+ FLOP/byte | Compute-bound |
+| Triton v5 | Software Pipelining | 1-2 FLOP/byte | Memory-bound |
+| CuTe v11 | Token Pipelining | 1-2 FLOP/byte | Memory-bound |
 
 ### Memory Bandwidth Optimization
 - **v6**: TMA async loading reduces state access latency
 - **v7**: Vectorized float4 loads minimize memory transactions
 - **v9**: SMEM swizzle prevents bank conflicts
 - **v10**: TiledMMA enables efficient matrix-matrix operations
+- **v11**: cp.async primitives optimize memory operation timing
+- **Triton v5**: Double-buffering overlaps load and compute
 
 ### Computational Efficiency
 - **v7**: Warp shuffle reductions replace global synchronization
 - **v8**: Multi-stage pipelining overlaps computation and memory
 - **v9**: Chunked processing increases FLOPs per memory access
 - **v10**: Tensor Core utilization maximizes compute throughput
+- **v11**: Token-level pipelining maximizes memory overlap
+- **Triton v5**: Auto-tuning selects optimal configurations
 
-**Updated** Enhanced with mathematical analysis showing how chunkwise parallel transforms sequential dependencies into parallelizable matrix operations, achieving dramatic improvements in arithmetic intensity.
+**Updated** Enhanced with comprehensive analysis showing how token-level software pipelining transforms sequential dependencies into highly parallelizable operations, achieving dramatic improvements in both arithmetic intensity and memory bandwidth utilization.
 
 ## Troubleshooting Guide
 Common optimization challenges and solutions:
@@ -738,10 +1094,20 @@ Common optimization challenges and solutions:
 - **Solution**: Monitor scale factors and adjust quantization ranges
 - **Reference**: [gdn/kernels/cuda/gdn_prefill_v7.cuh:422-450](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L422-L450)
 
-**Updated** Added guidance for chunkwise parallel implementation:
-- **Problem**: Incorrect chunk size selection
-- **Solution**: Use C=64 or C=128 for optimal balance
-- **Reference**: [gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md:444-453](file://gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md#L444-L453)
+### Software Pipelining Issues
+- **Problem**: Pipeline bubbles or synchronization errors
+- **Solution**: Verify buffer rotation logic and cp.async synchronization
+- **Reference**: [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:338-342](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L338-L342)
+
+**Updated** Added guidance for software pipelining implementation:
+- **Problem**: Incorrect buffer management in token-level pipeline
+- **Solution**: Ensure proper buffer rotation and synchronization
+- **Reference**: [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:254-342](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L254-L342)
+
+### cp.async Primitives Debugging
+- **Problem**: Memory operation failures or deadlocks
+- **Solution**: Verify proper commit/wait ordering and address translation
+- **Reference**: [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:42-77](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L42-L77)
 
 ### Mathematical Implementation Issues
 - **Problem**: Numerical instability in cumulative decay
@@ -749,16 +1115,17 @@ Common optimization challenges and solutions:
 - **Reference**: [gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md:359-368](file://gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md#L359-L368)
 
 ## Conclusion
-The GDN Prefill Kernel Optimization project exemplifies a methodical approach to achieving maximum performance on modern GPU architectures. Through systematic improvements—starting from basic sequential processing and progressing through TMA acceleration, chunked processing, vectorization, swizzling, pipelining, and finally Tensor Core integration—the kernels achieve near-compute-bound execution with substantial performance gains.
+The GDN Prefill Kernel Optimization project exemplifies a methodical approach to achieving maximum performance on modern GPU architectures. Through systematic improvements—starting from basic sequential processing and progressing through TMA acceleration, chunked processing, vectorization, swizzling, pipelining, Tensor Core integration, and culminating in token-level software pipelining with cp.async primitives—the kernels achieve near-compute-bound execution with substantial performance gains.
 
-**Updated** The addition of comprehensive mathematical analysis from ZHIHU_CHUNKWISE_PARALLEL.md provides deep insights into how GDN's fundamentally sequential delta rule can be transformed into highly parallelizable matrix operations. This theoretical foundation underpins the practical optimizations seen in v9 and v10 kernels.
+**Updated** The addition of Triton v5 software pipelining and CuTe C++ v11 token-level optimizations provides comprehensive coverage of current GPU kernel optimization techniques. The Triton implementation demonstrates the power of auto-tuning for small batch scenarios, while the CuTe v11 kernel showcases the pinnacle of manual optimization with cp.async primitives and warp-parallel V-tile processing.
 
 The evolution demonstrates that successful GPU kernel optimization requires:
 - Understanding of hardware architecture and limitations
-- Strategic increase in arithmetic intensity through chunking
+- Strategic increase in arithmetic intensity through chunking and pipelining
 - Sophisticated memory access patterns and bandwidth optimization
-- Hardware-specific features integration (TMA, Tensor Cores)
+- Hardware-specific features integration (TMA, Tensor Cores, cp.async)
 - Progressive complexity management through layered optimizations
 - Mathematical rigor in transforming sequential dependencies into parallelizable forms
+- Cross-platform development capabilities (Triton) and production deployment readiness (CuTe)
 
-This optimization journey serves as a comprehensive example of GPU kernel development best practices, showing how each incremental improvement builds upon previous foundations while addressing specific performance bottlenecks identified through roofline analysis and empirical benchmarking. The mathematical foundation of chunkwise parallel processing provides the theoretical basis for achieving dramatic performance improvements in GDN prefill operations.
+This optimization journey serves as a comprehensive example of GPU kernel development best practices, showing how each incremental improvement builds upon previous foundations while addressing specific performance bottlenecks identified through roofline analysis and empirical benchmarking. The mathematical foundation of chunkwise parallel processing and the practical implementation of token-level software pipelining provide the theoretical and practical basis for achieving dramatic performance improvements in GDN prefill operations across diverse workload scenarios.

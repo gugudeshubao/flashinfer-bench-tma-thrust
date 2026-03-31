@@ -9,34 +9,15 @@ This compiles the CUDA kernels with nvcc and uploads
 the shared library to the Modal volume.
 """
 
-import modal
-
-app = modal.App("gdn-cuda-build")
-
-# Image with CUDA 12.8 + nvcc for B200 (sm_100)
-# sm_100 (Blackwell) requires CUDA 12.6+, using 12.8 for best compatibility
-cuda_image = (
-    modal.Image.debian_slim(python_version="3.11")
-    .apt_install("cmake", "ninja-build", "git", "wget")
-    .pip_install("torch>=2.4.0")
-    .run_commands(
-        # CUDA 12.8 for sm_100 (Blackwell) support
-        "wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb",
-        "dpkg -i cuda-keyring_1.1-1_all.deb",
-        "apt-get update",
-        "apt-get install -y cuda-toolkit-12-8",
-        # Clone CUTLASS for CuTe headers
-        "git clone --depth 1 --branch v3.5.1 https://github.com/NVIDIA/cutlass.git /opt/cutlass",
-    )
-    .env({"PATH": "/usr/local/cuda-12.8/bin:$PATH"})
-    .env({"LD_LIBRARY_PATH": "/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH"})
-    .env({"CUTLASS_PATH": "/opt/cutlass"})
-)
-
-volume = modal.Volume.from_name("flashinfer-bench", create_if_missing=True)
-
-# Get the project root and read kernel source files
+import os
+import sys
 import pathlib
+
+# Add scripts directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from modal_config import app, cuda_image, volume, B200_GPU, BUILD_TIMEOUT, SHORT_TIMEOUT
+
 PROJECT_ROOT = pathlib.Path(__file__).parent.parent
 
 def get_kernel_sources():
@@ -62,8 +43,8 @@ KERNEL_SOURCES = get_kernel_sources()
 
 @app.function(
     image=cuda_image,
-    gpu="B200",
-    timeout=600,
+    gpu=B200_GPU,
+    timeout=BUILD_TIMEOUT,
     volumes={"/data": volume},
 )
 def build_cuda_kernels(kernel_sources: dict = None):
@@ -375,8 +356,8 @@ void gdn_decode_v10_tma(
 
 @app.function(
     image=cuda_image,
-    gpu="B200",
-    timeout=60,
+    gpu=B200_GPU,
+    timeout=SHORT_TIMEOUT,
     volumes={"/data": volume},
 )
 def test_cuda_library():

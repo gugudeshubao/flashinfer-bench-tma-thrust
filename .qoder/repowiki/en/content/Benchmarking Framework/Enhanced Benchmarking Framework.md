@@ -2,13 +2,19 @@
 
 <cite>
 **Referenced Files in This Document**
-- [README.md](file://README.md)
-- [benchmarks/bench_modal.py](file://benchmarks/bench_modal.py)
-- [scripts/bench_all_versions.py](file://scripts/bench_all_versions.py)
-- [scripts/bench_kernels.py](file://scripts/bench_kernels.py)
-- [scripts/bench_cuda_real.py](file://scripts/bench_cuda_real.py)
-- [scripts/build_cuda.py](file://scripts/build_cuda.py)
-- [scripts/setup_volume.py](file://scripts/setup_volume.py)
+- [benchmarks/bench_modal.py](file://gdn/benchmarks/bench_modal.py)
+- [benchmarks/bench_quantization_perf.py](file://gdn/benchmarks/bench_quantization_perf.py)
+- [scripts/bench_all_versions.py](file://gdn/scripts/bench_all_versions.py)
+- [scripts/bench_kernels.py](file://gdn/scripts/bench_kernels.py)
+- [scripts/bench_cuda_real.py](file://gdn/scripts/bench_cuda_real.py)
+- [scripts/bench_prefill_all.py](file://gdn/scripts/bench_prefill_all.py)
+- [scripts/bench_prefill_v5.py](file://gdn/scripts/bench_prefill_v5.py)
+- [scripts/build_cuda.py](file://gdn/scripts/build_cuda.py)
+- [scripts/setup_volume.py](file://gdn/scripts/setup_volume.py)
+- [moe/benchmarks/bench_modal.py](file://moe/benchmarks/bench_modal.py)
+- [moe/solution/v2/kernel.py](file://moe/solution/v2/kernel.py)
+- [moe/solution/v3/kernel.py](file://moe/solution/v3/kernel.py)
+- [moe/solution/v4/kernel.py](file://moe/solution/v4/kernel.py)
 - [CMakeLists.txt](file://CMakeLists.txt)
 - [src/gdn_kernels.cu](file://src/gdn_kernels.cu)
 - [src/kernels/cuda/gdn_decode_v8.cuh](file://src/kernels/cuda/gdn_decode_v8.cuh)
@@ -17,19 +23,16 @@
 - [docs/ROADMAP.md](file://docs/ROADMAP.md)
 - [flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json](file://flashinfer_trace/definitions/gdn/gdn_decode_qk4_v8_d128_k_last.json)
 - [flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json](file://flashinfer_trace/definitions/gdn/gdn_prefill_qk4_v8_d128_k_last.json)
-- [moe/solution/v4/kernel.py](file://moe/solution/v4/kernel.py)
-- [moe/benchmarks/bench_modal.py](file://moe/benchmarks/bench_modal.py)
-- [moe/solution/v2/kernel.py](file://moe/solution/v2/kernel.py)
-- [moe/solution/v3/kernel.py](file://moe/solution/v3/kernel.py)
-- [moe/solution/triton/kernel.py](file://moe/solution/triton/kernel.py)
+- [flashinfer_trace/definitions/moe/moe_fp8_block_scale_ds_routing_topk8_ng8_kg4_e32_h7168_i2048.json](file://flashinfer_trace/definitions/moe/moe_fp8_block_scale_ds_routing_topk8_ng8_kg4_e32_h7168_i2048.json)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive documentation for the new MoE v4 variant implementation
-- Updated kernel implementation suite to include the systematic v4 optimization
+- Added comprehensive documentation for the new MoE v4 variant implementation with bf16 matmul optimizations
+- Updated kernel implementation suite to include systematic v4 optimization with performance improvements
 - Enhanced benchmark configuration documentation to reflect iterative optimization approach
 - Added detailed analysis of MoE v4's bf16 matmul optimizations and performance improvements
+- Expanded benchmarking framework to include comprehensive performance metrics, correctness verification, and statistical analysis
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -48,7 +51,7 @@ The Enhanced Benchmarking Framework is a comprehensive system designed for evalu
 
 The framework now supports both GDN decode and prefill operations for the GDN algorithm, along with comprehensive MoE kernel benchmarking, with automatic correctness validation, performance measurement, and detailed reporting. It leverages Modal AI infrastructure for distributed benchmarking and includes sophisticated memory bandwidth optimization techniques optimized for the Blackwell architecture.
 
-**Updated** The framework now demonstrates a systematic approach to iterative optimization evaluation through the addition of the MoE v4 variant, showcasing how each iteration builds upon previous optimizations to achieve incremental performance improvements.
+**Updated** The framework now demonstrates a systematic approach to iterative optimization evaluation through the addition of the MoE v4 variant, showcasing how each iteration builds upon previous optimizations to achieve incremental performance improvements. The MoE v4 implementation delivers approximately 2.00x speedup over the baseline through strategic bf16 matmul utilization while maintaining numerical precision.
 
 ## Project Structure
 
@@ -57,12 +60,15 @@ The project follows a modular structure organized around three main areas:
 ```mermaid
 graph TB
 subgraph "Benchmarking Layer"
-A[benchmarks/] --> A1[bench_modal.py]
-B[scripts/] --> B1[bench_all_versions.py]
+A[gdn/benchmarks/] --> A1[bench_modal.py]
+A --> A2[bench_quantization_perf.py]
+B[gdn/scripts/] --> B1[bench_all_versions.py]
 B --> B2[bench_kernels.py]
 B --> B3[bench_cuda_real.py]
-B --> B4[build_cuda.py]
-B --> B5[setup_volume.py]
+B --> B4[bench_prefill_all.py]
+B --> B5[bench_prefill_v5.py]
+B --> B6[build_cuda.py]
+B --> B7[setup_volume.py]
 end
 subgraph "Kernel Implementations"
 C[src/kernels/] --> C1[CUDA kernels]
@@ -80,14 +86,16 @@ E[docs/] --> E1[PERFORMANCE.md]
 E --> E2[ROADMAP.md]
 end
 subgraph "Trace Definitions"
-F[flashinfer_trace/] --> F1[JSON definitions]
+F[flashinfer_trace/] --> F1[GDN definitions]
+F --> F2[MoE definitions]
 end
 subgraph "Core"
 G[CMakeLists.txt]
 H[src/gdn_kernels.cu]
 end
 A1 --> F1
-B5 --> F1
+B7 --> F1
+B7 --> F2
 C1 --> H
 C2 --> H
 D1 --> H
@@ -96,14 +104,14 @@ D3 --> H
 ```
 
 **Diagram sources**
-- [README.md:63-92](file://README.md#L63-L92)
-- [scripts/setup_volume.py:23-24](file://scripts/setup_volume.py#L23-L24)
-- [moe/benchmarks/bench_modal.py:32-57](file://moe/benchmarks/bench_modal.py#L32-L57)
+- [benchmarks/bench_modal.py:36-81](file://gdn/benchmarks/bench_modal.py#L36-L81)
+- [scripts/setup_volume.py:32-57](file://gdn/scripts/setup_volume.py#L32-L57)
+- [moe/benchmarks/bench_modal.py:32-65](file://moe/benchmarks/bench_modal.py#L32-L65)
 
 **Section sources**
-- [README.md:63-92](file://README.md#L63-L92)
+- [benchmarks/bench_modal.py:36-81](file://gdn/benchmarks/bench_modal.py#L36-L81)
 - [CMakeLists.txt:1-68](file://CMakeLists.txt#L1-L68)
-- [moe/benchmarks/bench_modal.py:32-57](file://moe/benchmarks/bench_modal.py#L32-L57)
+- [moe/benchmarks/bench_modal.py:32-65](file://moe/benchmarks/bench_modal.py#L32-L65)
 
 ## Core Components
 
@@ -148,9 +156,9 @@ The framework includes sophisticated volume management for persistent storage of
 - **Cross-platform compatibility**: Works with both synthetic and real-world datasets
 
 **Section sources**
-- [benchmarks/bench_modal.py:15-80](file://benchmarks/bench_modal.py#L15-L80)
-- [scripts/bench_all_versions.py:32-44](file://scripts/bench_all_versions.py#L32-L44)
-- [scripts/setup_volume.py:32-57](file://scripts/setup_volume.py#L32-L57)
+- [benchmarks/bench_modal.py:15-80](file://gdn/benchmarks/bench_modal.py#L15-L80)
+- [scripts/bench_all_versions.py:32-44](file://gdn/scripts/bench_all_versions.py#L32-L44)
+- [scripts/setup_volume.py:32-57](file://gdn/scripts/setup_volume.py#L32-L57)
 - [moe/benchmarks/bench_modal.py:32-57](file://moe/benchmarks/bench_modal.py#L32-L57)
 
 ## Architecture Overview
@@ -191,9 +199,9 @@ MoE --> Results
 ```
 
 **Diagram sources**
-- [benchmarks/bench_modal.py:23-33](file://benchmarks/bench_modal.py#L23-L33)
-- [scripts/build_cuda.py:63-68](file://scripts/build_cuda.py#L63-L68)
-- [scripts/setup_volume.py:141-145](file://scripts/setup_volume.py#L141-L145)
+- [benchmarks/bench_modal.py:23-33](file://gdn/benchmarks/bench_modal.py#L23-L33)
+- [scripts/build_cuda.py:63-68](file://gdn/scripts/build_cuda.py#L63-L68)
+- [scripts/setup_volume.py:141-145](file://gdn/scripts/setup_volume.py#L141-L145)
 - [moe/benchmarks/bench_modal.py:101-106](file://moe/benchmarks/bench_modal.py#L101-L106)
 
 The architecture supports both synchronous and asynchronous execution patterns, enabling efficient resource utilization across multiple GPU instances while maintaining consistent benchmarking standards.
@@ -211,7 +219,7 @@ participant Runner as "Benchmark Runner"
 participant Modal as "Modal Runtime"
 participant GPU as "GPU Instance"
 participant Volume as "Modal Volume"
-User->>Runner : modal run benchmarks/bench_modal.py
+User->>Runner : modal run gdn/benchmarks/bench_modal.py
 Runner->>Runner : Parse command line args
 Runner->>Runner : Build solution dictionaries
 Runner->>Modal : Spawn benchmark jobs
@@ -224,8 +232,8 @@ Runner-->>User : Print comparative analysis
 ```
 
 **Diagram sources**
-- [benchmarks/bench_modal.py:250-330](file://benchmarks/bench_modal.py#L250-L330)
-- [benchmarks/bench_modal.py:115-176](file://benchmarks/bench_modal.py#L115-L176)
+- [benchmarks/bench_modal.py:250-330](file://gdn/benchmarks/bench_modal.py#L250-L330)
+- [benchmarks/bench_modal.py:115-176](file://gdn/benchmarks/bench_modal.py#L115-L176)
 
 The orchestrator implements several key optimization strategies:
 - **Parallel job execution**: Multiple kernel variants run concurrently for improved throughput
@@ -255,7 +263,7 @@ ErrorHandling --> End
 ```
 
 **Diagram sources**
-- [scripts/build_cuda.py:69-373](file://scripts/build_cuda.py#L69-L373)
+- [scripts/build_cuda.py:69-373](file://gdn/scripts/build_cuda.py#L69-L373)
 - [CMakeLists.txt:14-30](file://CMakeLists.txt#L14-L30)
 
 The compilation system includes advanced features:
@@ -307,8 +315,8 @@ BenchmarkEngine --> TraceSet : "consumes"
 ```
 
 **Diagram sources**
-- [scripts/bench_all_versions.py:32-44](file://scripts/bench_all_versions.py#L32-L44)
-- [scripts/bench_cuda_real.py:28-50](file://scripts/bench_cuda_real.py#L28-L50)
+- [scripts/bench_all_versions.py:32-44](file://gdn/scripts/bench_all_versions.py#L32-L44)
+- [scripts/bench_cuda_real.py:28-50](file://gdn/scripts/bench_cuda_real.py#L28-L50)
 
 ### Volume Management System
 
@@ -339,13 +347,9 @@ E1 --> J
 ```
 
 **Diagram sources**
-- [scripts/setup_volume.py:32-57](file://scripts/setup_volume.py#L32-L57)
-- [scripts/setup_volume.py:60-81](file://scripts/setup_volume.py#L60-L81)
-- [scripts/setup_volume.py:141-168](file://scripts/setup_volume.py#L141-L168)
-
-**Section sources**
-- [scripts/setup_volume.py:32-57](file://scripts/setup_volume.py#L32-L57)
-- [scripts/setup_volume.py:141-168](file://scripts/setup_volume.py#L141-L168)
+- [scripts/setup_volume.py:32-57](file://gdn/scripts/setup_volume.py#L32-L57)
+- [scripts/setup_volume.py:60-81](file://gdn/scripts/setup_volume.py#L60-L81)
+- [scripts/setup_volume.py:141-168](file://gdn/scripts/setup_volume.py#L141-L168)
 
 ### MoE Kernel Optimization Evolution
 
@@ -435,8 +439,8 @@ M --> G
 ```
 
 **Diagram sources**
-- [benchmarks/bench_modal.py:28-32](file://benchmarks/bench_modal.py#L28-L32)
-- [scripts/build_cuda.py:18-34](file://scripts/build_cuda.py#L18-L34)
+- [benchmarks/bench_modal.py:28-32](file://gdn/benchmarks/bench_modal.py#L28-L32)
+- [scripts/build_cuda.py:18-34](file://gdn/scripts/build_cuda.py#L18-L34)
 - [CMakeLists.txt:10-17](file://CMakeLists.txt#L10-L17)
 - [moe/benchmarks/bench_modal.py:25-28](file://moe/benchmarks/bench_modal.py#L25-28)
 
@@ -448,8 +452,8 @@ The dependency analysis reveals several key characteristics:
 - **Systematic optimization**: MoE variants demonstrate clear evolutionary progression
 
 **Section sources**
-- [benchmarks/bench_modal.py:28-32](file://benchmarks/bench_modal.py#L28-L32)
-- [scripts/build_cuda.py:18-34](file://scripts/build_cuda.py#L18-L34)
+- [benchmarks/bench_modal.py:28-32](file://gdn/benchmarks/bench_modal.py#L28-L32)
+- [scripts/build_cuda.py:18-34](file://gdn/scripts/build_cuda.py#L18-L34)
 - [CMakeLists.txt:10-17](file://CMakeLists.txt#L10-L17)
 - [moe/benchmarks/bench_modal.py:25-28](file://moe/benchmarks/bench_modal.py#L25-28)
 
@@ -539,9 +543,9 @@ Common issues and their resolution strategies:
 - **Verification**: Check bf16 Tensor Core utilization and numerical stability
 
 **Section sources**
-- [scripts/build_cuda.py:352-356](file://scripts/build_cuda.py#L352-L356)
-- [scripts/bench_cuda_real.py:52-54](file://scripts/bench_cuda_real.py#L52-L54)
-- [scripts/setup_volume.py:168-169](file://scripts/setup_volume.py#L168-L169)
+- [scripts/build_cuda.py:352-356](file://gdn/scripts/build_cuda.py#L352-L356)
+- [scripts/bench_cuda_real.py:52-54](file://gdn/scripts/bench_cuda_real.py#L52-L54)
+- [scripts/setup_volume.py:168-169](file://gdn/scripts/setup_volume.py#L168-L169)
 - [moe/solution/v4/kernel.py:117-165](file://moe/solution/v4/kernel.py#L117-L165)
 
 ## Conclusion

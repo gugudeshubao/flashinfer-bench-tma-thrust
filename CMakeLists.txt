@@ -32,12 +32,12 @@ set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} -Xcompiler -fPIC")
 set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --extended-lambda")
 
 # Include directories
-include_directories(${CMAKE_SOURCE_DIR}/src/kernels)
+include_directories(${CMAKE_SOURCE_DIR}/gdn/kernels)
 include_directories(${CUDAToolkit_INCLUDE_DIRS})
 
 # Source files
 set(KERNEL_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/gdn_kernels.cu
+    ${CMAKE_SOURCE_DIR}/gdn/gdn_kernels.cu
 )
 
 # Build shared library
@@ -49,17 +49,17 @@ target_link_libraries(gdn_kernels CUDA::cudart)
 # Install
 install(TARGETS gdn_kernels LIBRARY DESTINATION lib)
 install(FILES
-    ${CMAKE_SOURCE_DIR}/src/kernels/gdn_decode_v7.cuh
-    ${CMAKE_SOURCE_DIR}/src/kernels/gdn_prefill_v7.cuh
+    ${CMAKE_SOURCE_DIR}/gdn/kernels/cuda/gdn_decode_v7.cuh
+    ${CMAKE_SOURCE_DIR}/gdn/kernels/cuda/gdn_prefill_v7.cuh
     DESTINATION include/gdn
 )
 
 # Python bindings (optional, using pybind11)
-find_package(pybind11 QUIET)
-if(pybind11_FOUND)
-    pybind11_add_module(gdn_kernels_py ${CMAKE_SOURCE_DIR}/src/gdn_bindings.cu)
-    target_link_libraries(gdn_kernels_py PRIVATE gdn_kernels)
-endif()
+# find_package(pybind11 QUIET)
+# if(pybind11_FOUND)
+#     pybind11_add_module(gdn_kernels_py ${CMAKE_SOURCE_DIR}/gdn/gdn_bindings.cu)
+#     target_link_libraries(gdn_kernels_py PRIVATE gdn_kernels)
+# endif()
 
 # Print configuration
 message(STATUS "CUDA Version: ${CUDAToolkit_VERSION}")

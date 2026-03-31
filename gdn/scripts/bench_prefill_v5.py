@@ -4,20 +4,23 @@ Benchmark: Compare Prefill v4 (original) vs v5 (software pipelining)
 Tests on Modal B200 with various configurations.
 Uses Modal mount to include kernel files properly.
 """
-import modal
+import os
+import sys
 from pathlib import Path
 
-app = modal.App("gdn-prefill-v5-benchmark")
+# Add scripts directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-# Get kernel directory path
+from modal_config import app, triton_image, B200_GPU, MEDIUM_TIMEOUT
+
+# Get kernel directory path - mount Triton kernels
 kernel_dir = Path(__file__).parent.parent / "prefill" / "solution" / "triton"
 
-image = modal.Image.debian_slim(python_version="3.11").pip_install(
-    "torch", "triton"
-).add_local_dir(kernel_dir, remote_path="/kernel")
+# Use triton_image with local kernel mount
+image = triton_image.add_local_dir(kernel_dir, remote_path="/kernel")
 
 
-@app.function(image=image, gpu="B200")
+@app.function(image=image, gpu=B200_GPU, timeout=MEDIUM_TIMEOUT)
 def benchmark_prefill_versions():
     """Compare v4 vs v5 kernel performance"""
     import sys
