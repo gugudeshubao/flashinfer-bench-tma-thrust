@@ -1,7 +1,7 @@
 """
 GDN Decode v5 — Python wrapper for CUDA kernel
 
-CUDA source: src/kernels/gdn_decode_v5.cuh
+CUDA source embedded inline for Modal compatibility.
 Fallback: Triton (if JIT compilation fails in sandbox)
 """
 
@@ -12,11 +12,234 @@ from pathlib import Path
 import torch
 
 # ============================================================
-# CUDA KERNEL LOADING
+# CUDA KERNEL SOURCE (EMBEDDED)
 # ============================================================
 
-# Path to CUDA source file
-CUDA_SOURCE_PATH = Path(__file__).parent.parent.parent / "kernels" / "cuda" / "gdn_decode_v5.cuh"
+CUDA_SOURCE = r'''
+/*
+ * GDN Decode v5 — CUDA kernel for B200 (sm100)
+ */
+
+#pragma once
+
+#include <cuda_runtime.h>
+#include <cuda_bf16.h>
+#include <cuda_fp16.h>
+#include <cstdint>
+#include <cmath>
+
+namespace gdn {
+
+constexpr int D = 128;
+constexpr int WARP_SIZE = 32;
+
+__device__ __forceinline__ float softplus(float x) {
+    return (x > 20.0f) ? x : logf(1.0f + expf(x));
+}
+
+__device__ __forceinline__ float warp_reduce_sum(float val) {
+    #pragma unroll
+    for (int offset = WARP_SIZE / 2; offset > 0; offset /= 2) {
+        val += __shfl_xor_sync(0xffffffff, val, offset);
+    }
+    return val;
+}
+
+template<int BLOCK_V>
+__global__ void gdn_decode_kernel_v5(
+    const __nv_bfloat16* __restrict__ Q,
+    const __nv_bfloat16* __restrict__ K,
+    const __nv_bfloat16* __restrict__ V,
+    const float* __restrict__ State,
+    const float* __restrict__ A_log,
+    const __nv_bfloat16* __restrict__ A,
+    const __nv_bfloat16* __restrict__ DtBias,
+    const __nv_bfloat16* __restrict__ B_gate,
+    __nv_bfloat16* __restrict__ Out,
+    float* __restrict__ NewState,
+    float scale,
+    int stride_q_b, int stride_q_h,
+    int stride_k_b, int stride_k_h,
+    int stride_v_b, int stride_v_h,
+    int stride_s_b, int stride_s_h, int stride_s_v,
+    int stride_a_b, int stride_b_b,
+    int stride_o_b, int stride_o_h,
+    int stride_ns_b, int stride_ns_h, int stride_ns_v
+) {
+    const int b = blockIdx.x;
+    const int h = blockIdx.y;
+    const int vb = blockIdx.z;
+    const int v0 = vb * BLOCK_V;
+    const int qk_h = h / 2;
+    
+    const int tid = threadIdx.x;
+    const int num_threads = blockDim.x;
+    
+    extern __shared__ float smem[];
+    float* reduce_smem = smem;
+    float* q_smem = smem + 4;
+    float* k_smem = q_smem + D;
+    float* v_smem = k_smem + D;
+    float* state_smem = v_smem + BLOCK_V;
+    
+    __shared__ float g_shared, beta_shared;
+    if (tid == 0) {
+        float a_val = __bfloat162float(A[b * stride_a_b + h]);
+        float dt_val = __bfloat162float(DtBias[h]);
+        float alog = A_log[h];
+        float b_val = __bfloat162float(B_gate[b * stride_b_b + h]);
+        
+        float sp = softplus(a_val + dt_val);
+        g_shared = expf(-expf(alog) * sp);
+        beta_shared = 1.0f / (1.0f + expf(-b_val));
+    }
+    __syncthreads();
+    
+    float g = g_shared;
+    float beta = beta_shared;
+    
+    if (tid < D) {
+        q_smem[tid] = __bfloat162float(Q[b * stride_q_b + qk_h * stride_q_h + tid]);
+        k_smem[tid] = __bfloat162float(K[b * stride_k_b + qk_h * stride_k_h + tid]);
+    }
+    
+    for (int i = tid; i < BLOCK_V; i += num_threads) {
+        v_smem[i] = __bfloat162float(V[b * stride_v_b + h * stride_v_h + v0 + i]);
+    }
+    __syncthreads();
+    
+    const float* state_ptr = State + b * stride_s_b + h * stride_s_h + v0 * stride_s_v;
+    
+    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+        int vi = i / D;
+        int ki = i % D;
+        state_smem[vi * D + ki] = state_ptr[vi * stride_s_v + ki];
+    }
+    __syncthreads();
+    
+    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+        state_smem[i] *= g;
+    }
+    __syncthreads();
+    
+    __shared__ float old_v_smem[64];
+    
+    if (tid < BLOCK_V) {
+        float sum = 0.0f;
+        #pragma unroll 4
+        for (int ki = 0; ki < D; ki++) {
+            sum += state_smem[tid * D + ki] * k_smem[ki];
+        }
+        old_v_smem[tid] = sum;
+    }
+    __syncthreads();
+    
+    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+        int vi = i / D;
+        int ki = i % D;
+        float delta = beta * (v_smem[vi] - old_v_smem[vi]);
+        state_smem[vi * D + ki] += delta * k_smem[ki];
+    }
+    __syncthreads();
+    
+    __shared__ float out_smem[64];
+    
+    if (tid < BLOCK_V) {
+        float sum = 0.0f;
+        #pragma unroll 4
+        for (int ki = 0; ki < D; ki++) {
+            sum += state_smem[tid * D + ki] * q_smem[ki];
+        }
+        out_smem[tid] = scale * sum;
+    }
+    __syncthreads();
+    
+    for (int i = tid; i < BLOCK_V; i += num_threads) {
+        Out[b * stride_o_b + h * stride_o_h + v0 + i] = __float2bfloat16(out_smem[i]);
+    }
+    
+    float* new_state_ptr = NewState + b * stride_ns_b + h * stride_ns_h + v0 * stride_ns_v;
+    
+    for (int i = tid; i < BLOCK_V * D; i += num_threads) {
+        int vi = i / D;
+        int ki = i % D;
+        new_state_ptr[vi * stride_ns_v + ki] = state_smem[vi * D + ki];
+    }
+}
+
+void gdn_decode_v5_launch(
+    const void* Q, const void* K, const void* V, const void* State,
+    const void* A_log, const void* A, const void* DtBias, const void* B_gate,
+    void* Out, void* NewState,
+    float scale,
+    int B, int num_v_heads, int D,
+    int stride_q_b, int stride_q_h,
+    int stride_k_b, int stride_k_h,
+    int stride_v_b, int stride_v_h,
+    int stride_s_b, int stride_s_h, int stride_s_v,
+    int stride_a_b, int stride_b_b,
+    int stride_o_b, int stride_o_h,
+    int stride_ns_b, int stride_ns_h, int stride_ns_v,
+    int BLOCK_V,
+    cudaStream_t stream
+) {
+    int V_BLOCKS = D / BLOCK_V;
+    dim3 grid(B, num_v_heads, V_BLOCKS);
+    dim3 block(128);
+    
+    size_t smem_size = (4 + D + D + BLOCK_V + BLOCK_V * D) * sizeof(float);
+    smem_size += 128 * sizeof(float);
+    
+    if (BLOCK_V == 16) {
+        gdn_decode_kernel_v5<16><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const float*)State,
+            (const float*)A_log, (const __nv_bfloat16*)A, (const __nv_bfloat16*)DtBias,
+            (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (float*)NewState,
+            scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h,
+            stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b,
+            stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v
+        );
+    } else if (BLOCK_V == 32) {
+        gdn_decode_kernel_v5<32><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const float*)State,
+            (const float*)A_log, (const __nv_bfloat16*)A, (const __nv_bfloat16*)DtBias,
+            (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (float*)NewState,
+            scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h,
+            stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b,
+            stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v
+        );
+    } else {
+        gdn_decode_kernel_v5<64><<<grid, block, smem_size, stream>>>(
+            (const __nv_bfloat16*)Q, (const __nv_bfloat16*)K, (const __nv_bfloat16*)V,
+            (const float*)State,
+            (const float*)A_log, (const __nv_bfloat16*)A, (const __nv_bfloat16*)DtBias,
+            (const __nv_bfloat16*)B_gate,
+            (__nv_bfloat16*)Out, (float*)NewState,
+            scale,
+            stride_q_b, stride_q_h, stride_k_b, stride_k_h,
+            stride_v_b, stride_v_h,
+            stride_s_b, stride_s_h, stride_s_v,
+            stride_a_b, stride_b_b,
+            stride_o_b, stride_o_h,
+            stride_ns_b, stride_ns_h, stride_ns_v
+        );
+    }
+}
+
+}  // namespace gdn
+'''
 
 _cuda_module = None
 _use_triton_fallback = False
@@ -35,10 +258,6 @@ def _try_load_cuda_module():
     try:
         from torch.utils.cpp_extension import load_inline
         
-        # Read CUDA source
-        cuda_source = CUDA_SOURCE_PATH.read_text()
-        
-        # Wrapper code to expose Python binding
         wrapper = r'''
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -77,7 +296,7 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
         _cuda_module = load_inline(
             name='gdn_decode_v5_cuda',
             cpp_sources='',
-            cuda_sources=cuda_source + wrapper,
+            cuda_sources=CUDA_SOURCE + wrapper,
             functions=['gdn_decode_v5'],
             extra_cuda_cflags=['-O3', '--use_fast_math'],
             verbose=False,
