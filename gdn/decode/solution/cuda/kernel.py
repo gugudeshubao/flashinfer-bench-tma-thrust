@@ -16,7 +16,7 @@ import torch
 # ============================================================
 
 # Path to CUDA source file
-CUDA_SOURCE_PATH = Path(__file__).parent.parent.parent.parent / "src" / "kernels" / "gdn_decode_v5.cuh"
+CUDA_SOURCE_PATH = Path(__file__).parent.parent.parent / "kernels" / "cuda" / "gdn_decode_v5.cuh"
 
 _cuda_module = None
 _use_triton_fallback = False
