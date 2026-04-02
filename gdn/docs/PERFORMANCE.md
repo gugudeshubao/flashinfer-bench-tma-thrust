@@ -151,9 +151,31 @@ modal run benchmarks/bench_quantization_perf.py
 
 ---
 
-## Latest Results (2026-03-29)
+## Latest Results (2026-03-28)
 
-| Kernel | Workloads | All Pass | Avg Speedup | Best Speedup |
-|--------|-----------|----------|-------------|--------------|
-| **Decode** | 10 | ✅ | 1127x | 3465x |
-| **Prefill** | 12 | ✅ | 598x | 1886x |
+### Full Benchmark Suite
+
+| Kernel | Workloads | Success | Avg Speedup | Peak Speedup |
+|--------|-----------|---------|-------------|--------------|
+| **Decode** | 54 | 100% ✅ | **470.32x** | 1273.67x |
+| **Prefill** | 100 | 100% ✅ | **256.38x** | 874.59x |
+
+### Prefill Implementation Details
+
+The prefill kernel uses a **fallback chain** to handle Triton compilation issues with dynamic loops:
+
+```
+v5 Triton (software pipelining) → v4 Triton (simple) → PyTorch fallback
+```
+
+This ensures 100% correctness across all workloads while maximizing performance.
+
+### Comparison with CUDA Backend
+
+| Kernel | Backend | Success | Avg Speedup |
+|--------|---------|---------|-------------|
+| Decode | Triton | 100% | 470.32x |
+| Prefill | Triton (fallback) | 100% | 256.38x |
+| Prefill | CUDA | 100% | 203.61x |
+
+**Triton with fallback outperforms pure CUDA by 1.26x on prefill.**

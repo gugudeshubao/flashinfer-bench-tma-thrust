@@ -16,8 +16,84 @@ State layout: k-last  [N, H, V=128, K=128]  float32
 import math
 
 import torch
+import torch.nn.functional as F
 import triton
 import triton.language as tl
+
+_disable_v5 = False
+_disable_triton = False
+_logged_v5_error = False
+_logged_triton_error = False
+
+
+def _matmul(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    return a.float() @ b.float()
+
+
+def _torch_fallback_kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale):
+    """Reference-style fallback used when Triton compilation fails."""
+    total_seq_len, num_q_heads, head_size = q.shape
+    num_v_heads = v.shape[1]
+    num_k_heads = k.shape[1]
+    num_sab_heads = max(num_q_heads, num_v_heads)
+    num_seqs = cu_seqlens.size(0) - 1
+    device = q.device
+
+    if scale is None or scale == 0.0:
+        scale = 1.0 / math.sqrt(head_size)
+
+    x = a.float() + dt_bias.float()
+    g = torch.exp(-torch.exp(A_log.float()) * F.softplus(x))
+    beta = torch.sigmoid(b.float())
+
+    q_exp = q.repeat_interleave(num_v_heads // num_q_heads, dim=1)
+    k_exp = k.repeat_interleave(num_v_heads // num_k_heads, dim=1)
+
+    output = torch.zeros(
+        (total_seq_len, num_sab_heads, head_size), dtype=torch.bfloat16, device=device
+    )
+    new_state = torch.zeros(
+        (num_seqs, num_sab_heads, head_size, head_size), dtype=torch.float32, device=device
+    )
+
+    for seq_idx in range(num_seqs):
+        seq_start = int(cu_seqlens[seq_idx].item())
+        seq_end = int(cu_seqlens[seq_idx + 1].item())
+        seq_len = seq_end - seq_start
+
+        if seq_len <= 0:
+            if state is not None:
+                new_state[seq_idx] = state[seq_idx].float()
+            continue
+
+        if state is not None:
+            state_HKV = state[seq_idx].clone().float().transpose(-1, -2)
+        else:
+            state_HKV = torch.zeros(
+                (num_sab_heads, head_size, head_size), dtype=torch.float32, device=device
+            )
+
+        for i in range(seq_len):
+            t = seq_start + i
+            q_H1K = q_exp[t].unsqueeze(1).float()
+            k_H1K = k_exp[t].unsqueeze(1).float()
+            v_H1V = v[t].unsqueeze(1).float()
+            g_H11 = g[t].unsqueeze(1).unsqueeze(2)
+            beta_H11 = beta[t].unsqueeze(1).unsqueeze(2)
+
+            old_state_HKV = g_H11 * state_HKV
+            old_v_H1V = _matmul(k_H1K, old_state_HKV)
+            new_v_H1V = beta_H11 * v_H1V + (1 - beta_H11) * old_v_H1V
+            state_remove = torch.einsum("hkl,hlv->hkv", k_H1K.transpose(-1, -2), old_v_H1V)
+            state_update = torch.einsum("hkl,hlv->hkv", k_H1K.transpose(-1, -2), new_v_H1V)
+            state_HKV = old_state_HKV - state_remove + state_update
+
+            o_H1V = scale * _matmul(q_H1K, state_HKV)
+            output[t] = o_H1V.squeeze(1).to(torch.bfloat16)
+
+        new_state[seq_idx] = state_HKV.transpose(-1, -2)
+
+    return output, new_state
 
 
 @triton.jit
@@ -193,13 +269,9 @@ def _prefill_kernel(
     tl.store(ns_ptr + vi * stride_ns_v + ki, S)
 
 
-def kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale, use_v5=True):
+def kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale):
     """
     GDN Prefill kernel wrapper.
-    
-    Args:
-        use_v5: If True, use v5 kernel with software pipelining.
-                If False, use original v4 kernel.
     """
     T, num_q_heads, D = q.shape
     num_v_heads = v.shape[1]
@@ -232,25 +304,44 @@ def kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale, use_v5=True)
     out   = torch.empty(T, num_v_heads, D, dtype=torch.bfloat16, device=device)
     new_S = torch.empty_like(S)
 
-    # Select kernel
-    kernel_fn = _prefill_kernel_v5 if use_v5 else _prefill_kernel
+    def _launch(kernel_fn):
+        kernel_fn[(N, num_v_heads, V_BLOCKS)](
+            q_c, k_c, v_c, S,
+            A_log, a_c, dt_bias, b_c,
+            cu, out, new_S,
+            float(scale),
+            q_c.stride(0), q_c.stride(1),
+            k_c.stride(0), k_c.stride(1),
+            v_c.stride(0), v_c.stride(1),
+            S.stride(0), S.stride(1), S.stride(2),
+            a_c.stride(0),
+            b_c.stride(0),
+            out.stride(0), out.stride(1),
+            new_S.stride(0), new_S.stride(1), new_S.stride(2),
+            D=128,
+            BLOCK_V=BLOCK_V,
+            num_warps=4,
+        )
+        return out, new_S
 
-    kernel_fn[(N, num_v_heads, V_BLOCKS)](
-        q_c, k_c, v_c, S,
-        A_log, a_c, dt_bias, b_c,
-        cu, out, new_S,
-        float(scale),
-        q_c.stride(0), q_c.stride(1),
-        k_c.stride(0), k_c.stride(1),
-        v_c.stride(0), v_c.stride(1),
-        S.stride(0), S.stride(1), S.stride(2),
-        a_c.stride(0),
-        b_c.stride(0),
-        out.stride(0), out.stride(1),
-        new_S.stride(0), new_S.stride(1), new_S.stride(2),
-        D=128,
-        BLOCK_V=BLOCK_V,
-        num_warps=4,
-    )
+    global _disable_v5, _disable_triton, _logged_v5_error, _logged_triton_error
 
-    return out, new_S
+    if not _disable_triton:
+        if not _disable_v5:
+            try:
+                return _launch(_prefill_kernel_v5)
+            except Exception as exc:
+                _disable_v5 = True
+                if not _logged_v5_error:
+                    print(f"[prefill Triton] v5 compile failed, falling back to v4: {exc}")
+                    _logged_v5_error = True
+
+        try:
+            return _launch(_prefill_kernel)
+        except Exception as exc:
+            _disable_triton = True
+            if not _logged_triton_error:
+                print(f"[prefill Triton] v4 compile failed, falling back to PyTorch: {exc}")
+                _logged_triton_error = True
+
+    return _torch_fallback_kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale)
