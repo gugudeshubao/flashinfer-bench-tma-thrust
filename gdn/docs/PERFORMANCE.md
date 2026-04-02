@@ -43,16 +43,49 @@
 
 ---
 
-## Historical Best (Previous Benchmark)
+## All Versions Comparison (v1-v11)
 
-| Batch | Triton v5 | CUDA v7 | CUDA v8 | **CuTe v9** | CuTe v10 | Best |
-|-------|-----------|---------|---------|-------------|----------|------|
-| **1** | 24 GB/s | 25 GB/s | 25 GB/s | **27 GB/s** | 26 GB/s | **v9** |
-| **16** | 386 GB/s | 352 GB/s | 334 GB/s | **405 GB/s** | 403 GB/s | **v9** |
-| 64 | **1,518 GB/s** | 981 GB/s | 914 GB/s | 1,302 GB/s | 1,287 GB/s | **Triton** |
-| **256** | 2,834 GB/s | 7,578 GB/s | 7,605 GB/s | 7,585 GB/s | **7,602 GB/s** | **v10** |
+### Decode Bandwidth (GB/s)
 
-**Peak**: CuTe v9/v10 at batch=256 achieves **7,600 GB/s (95% of B200 peak)**
+| Batch | Triton v4 | Triton v5 | CUDA v5 | CUDA v6 | CUDA v7 | CUDA v8 | CuTe v9 | CuTe v10 |
+|-------|-----------|-----------|---------|---------|---------|---------|---------|----------|
+| **1** | 23 | 23 | 24 | 24 | 25 | 25 | **27** | 26 |
+| **16** | 375 | 386 | 352 | 355 | 352 | 334 | **405** | 403 |
+| **64** | 1,502 | **1,518** | 981 | 1,012 | 981 | 914 | 1,302 | 1,287 |
+| **256** | 2,798 | 2,834 | 7,578 | 7,545 | 7,578 | 7,605 | 7,585 | **7,602** |
+
+### Prefill Throughput (M tokens/s)
+
+| N | SeqLen | Triton v4 | Triton v5 | v5/v4 Speedup |
+|---|--------|-----------|-----------|---------------|
+| 1 | 256 | 1.22 | **2.02** | 1.66x |
+| 1 | 1024 | 1.24 | **2.08** | **1.68x** |
+| 4 | 512 | 4.67 | **7.17** | 1.54x |
+| 16 | 128 | 11.33 | 11.46 | 1.01x |
+| 32 | 64 | **13.98** | 12.76 | 0.91x |
+
+### Version Features
+
+| Version | Framework | Key Features | Best Use Case |
+|---------|-----------|--------------|---------------|
+| v4 | Triton | V-Slice parallel | Baseline |
+| **v5** | Triton | **Software pipelining** | Single-seq long ctx |
+| v6 | CUDA | Medium batch opt | Batch 32-256 |
+| v7 | CUDA | Small batch opt | Batch 1-16 |
+| v8 | CUDA | Large batch opt | Batch 256+ |
+| **v9** | CuTe C++ | SMEM swizzle + cp.async | All batches |
+| **v10** | CuTe C++ | **FP8/BF16 state quant** | Memory-bound |
+| v11 | CuTe C++ | Token-level pipeline | Single-seq prefill |
+| PTX | PTX asm | mma.sync + fast-math | Max performance |
+
+### Historical Best Records
+
+| Metric | Version | Value |
+|--------|---------|-------|
+| **Decode Peak BW** | CuTe v10 @ B=256 | **7,602 GB/s (95% B200)** |
+| **Prefill Peak** | Triton v5 @ N=32 | **14.13 M tok/s** |
+| **Max Speedup** | Triton v5 @ N=16,L=4096 | **1886x vs ref** |
+| **State Compression** | v10 FP8 | **4x (64KB→16KB)** |
 
 ---
 
