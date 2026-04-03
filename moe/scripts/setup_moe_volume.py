@@ -12,20 +12,10 @@ from pathlib import Path
 
 import modal
 
+from moe.modal_common import DEFINITION_NAME, MOE_ROOT, TRACE_SET_PATH, image, trace_volume
+
 app = modal.App("tma-thrust-moe-setup")
-
-trace_volume = modal.Volume.from_name("flashinfer-trace", create_if_missing=True)
-TRACE_SET_PATH = "/data"
-
-MOE_ROOT = Path(__file__).parent.parent
 MOE_DEF_FILE = MOE_ROOT / "trace_definitions" / "moe_fp8_block_scale_ds_routing_topk8_ng8_kg4_e32_h7168_i2048.json"
-
-image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .pip_install("flashinfer-bench", "torch", "numpy", "huggingface-hub")
-)
-
-DEFINITION_NAME = "moe_fp8_block_scale_ds_routing_topk8_ng8_kg4_e32_h7168_i2048"
 
 
 def make_moe_workloads(seq_lens=(1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096)):

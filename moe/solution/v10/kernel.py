@@ -1,14 +1,11 @@
 """
-FP8 Block-Scale Fused MoE — default submission path.
+Experimental lazy-weight-cache PTX path.
 
-This default path first tries the CUDA/C++ torch extension implementation. If
-that extension is unavailable, it falls back to the CuTe/C++ shared-memory
-SwiGLU path.
+This keeps the PTX-enabled default algorithm but lazily caches exact weight-side
+preprocessing for active experts only.
 """
 
-import sys
 from collections import OrderedDict
-import hashlib
 from pathlib import Path
 
 import torch
@@ -27,64 +24,55 @@ BLK = 128
 _gemm_mode = None  # "scaled_mm" or "f32"
 _cuda_module = None
 _cuda_failed = False
-_CUTE_MIN_ELEMS = 8192
-_torch_ext_module = None
-_torch_ext_failed = False
-_HS_SCALE_CACHE_LIMIT = 8
-_ROUTE_CACHE_LIMIT = 8
-_W13_CACHE_LIMIT = 4
-_hs_scale_cache = OrderedDict()
-_route_cache = OrderedDict()
-_w13_t_cache = OrderedDict()
-_w13_scale_t_cache = OrderedDict()
+_SWIGLU_PTX_MIN_ELEMS = 8192
+_PREP_CACHE_LIMIT = 128
+_ROUTE_CACHE_LIMIT = 16
+_prep_cache = {}
+_prep_order = []
+_route_cache = {}
+_route_cache_order = []
 
 
-def _cache_get(cache, key, validate_objs):
-    value = cache.get(key)
-    if value is None:
+def _cache_get(key):
+    value = _prep_cache.get(key)
+    if value is not None:
+        _prep_order.remove(key)
+        _prep_order.append(key)
+    return value
+
+
+def _cache_put(key, value):
+    if key in _prep_cache:
+        _prep_order.remove(key)
+    _prep_cache[key] = value
+    _prep_order.append(key)
+    while len(_prep_order) > _PREP_CACHE_LIMIT:
+        old = _prep_order.pop(0)
+        _prep_cache.pop(old, None)
+
+
+def _route_cache_get(key, routing_logits, routing_bias):
+    entry = _route_cache.get(key)
+    if entry is None:
         return None
 
-    cached_objs, payload = value
-    if any(cached is not current for cached, current in zip(cached_objs, validate_objs)):
-        cache.pop(key, None)
+    cached_logits, cached_bias, payload = entry
+    if cached_logits is not routing_logits or cached_bias is not routing_bias:
         return None
 
-    cache.move_to_end(key)
+    _route_cache_order.remove(key)
+    _route_cache_order.append(key)
     return payload
 
 
-def _cache_put(cache, key, validate_objs, payload, limit):
-    cache[key] = (tuple(validate_objs), payload)
-    cache.move_to_end(key)
-    while len(cache) > limit:
-        cache.popitem(last=False)
-
-
-def _add_repo_roots():
-    candidate_roots = ["/root", str(Path(__file__).resolve().parents[3])]
-    for root in candidate_roots:
-        if Path(root, "moe").exists() and root not in sys.path:
-            sys.path.insert(0, root)
-
-
-def _load_torch_ext_module():
-    global _torch_ext_module, _torch_ext_failed
-    if _torch_ext_module is not None:
-        return _torch_ext_module
-    if _torch_ext_failed:
-        return None
-
-    try:
-        _add_repo_roots()
-        from moe.solution.cute_cpp_torch import runtime as cute_cpp_torch_runtime
-
-        _torch_ext_module = cute_cpp_torch_runtime.get_module()
-        if _torch_ext_module is None:
-            _torch_ext_failed = True
-        return _torch_ext_module
-    except Exception:
-        _torch_ext_failed = True
-        return None
+def _route_cache_put(key, routing_logits, routing_bias, payload):
+    if key in _route_cache:
+        _route_cache_order.remove(key)
+    _route_cache[key] = (routing_logits, routing_bias, payload)
+    _route_cache_order.append(key)
+    while len(_route_cache_order) > _ROUTE_CACHE_LIMIT:
+        old = _route_cache_order.pop(0)
+        _route_cache.pop(old, None)
 
 
 def _detect_gemm_mode(act_fp8, act_scale, w_fp8, w_scale):
@@ -130,27 +118,6 @@ def _route(logits, bias, scaling_factor):
     return topk_idx, weights
 
 
-def _prepare_route_cache(routing_logits, routing_bias, local_start, routed_scaling_factor, device):
-    t = routing_logits.shape[0]
-    key = (
-        int(routing_logits.data_ptr()),
-        int(routing_bias.data_ptr()),
-        tuple(routing_logits.shape),
-        int(local_start),
-        float(routed_scaling_factor),
-    )
-    cached = _cache_get(_route_cache, key, (routing_logits, routing_bias))
-    if cached is not None:
-        return cached
-
-    topk_idx, weights = _route(routing_logits, routing_bias, routed_scaling_factor)
-    assignments = _build_expert_assignments(topk_idx, local_start, t, device)
-    active_experts = [le for le in range(E_LOCAL) if assignments[le] is not None]
-    payload = (weights, assignments, active_experts)
-    _cache_put(_route_cache, key, (routing_logits, routing_bias), payload, _ROUTE_CACHE_LIMIT)
-    return payload
-
-
 def _build_expert_assignments(topk_idx, local_start, t, device):
     flat_tok = torch.arange(t, device=device).unsqueeze(1).expand(-1, TOP_K).reshape(-1)
     flat_exp = topk_idx.reshape(-1)
@@ -178,6 +145,39 @@ def _build_expert_assignments(topk_idx, local_start, t, device):
     return assignments
 
 
+def _prepare_route_cache(routing_logits, routing_bias, local_start, routed_scaling_factor, device):
+    t = routing_logits.shape[0]
+    cache_key = (
+        id(routing_logits),
+        id(routing_bias),
+        tuple(routing_logits.shape),
+        int(local_start),
+        float(routed_scaling_factor),
+    )
+    cached = _route_cache_get(cache_key, routing_logits, routing_bias)
+    if cached is not None:
+        return cached
+
+    topk_idx, weights = _route(routing_logits, routing_bias, routed_scaling_factor)
+    assignments = _build_expert_assignments(topk_idx, local_start, t, device)
+    active_experts = [le for le in range(E_LOCAL) if assignments[le] is not None]
+
+    payload = (weights, assignments, active_experts)
+    _route_cache_put(cache_key, routing_logits, routing_bias, payload)
+    return payload
+
+
+def _get_hs_scale_th(hidden_states_scale):
+    key = ("hs_scale_th", id(hidden_states_scale), tuple(hidden_states_scale.shape))
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+
+    value = hidden_states_scale.float().permute(1, 0).contiguous()
+    _cache_put(key, value)
+    return value
+
+
 def _expand_scale_2d(scale):
     sn, sk = scale.shape
     out = scale.unsqueeze(1).expand(sn, BLK, sk).reshape(sn * BLK, sk)
@@ -185,36 +185,65 @@ def _expand_scale_2d(scale):
     return out
 
 
-def _prepare_hs_scale_cache(hidden_states_scale):
-    key = (int(hidden_states_scale.data_ptr()), tuple(hidden_states_scale.shape))
-    cached = _cache_get(_hs_scale_cache, key, (hidden_states_scale,))
-    if cached is not None:
-        return cached
-
-    value = hidden_states_scale.float().permute(1, 0).contiguous()
-    _cache_put(_hs_scale_cache, key, (hidden_states_scale,), value, _HS_SCALE_CACHE_LIMIT)
-    return value
-
-
 def _get_w13_t(gemm1_weights, le):
-    key = (int(gemm1_weights.data_ptr()), tuple(gemm1_weights.shape), le)
-    cached = _cache_get(_w13_t_cache, key, (gemm1_weights,))
+    key = ("w13_t", id(gemm1_weights), tuple(gemm1_weights.shape), le)
+    cached = _cache_get(key)
     if cached is not None:
         return cached
 
     value = gemm1_weights[le].t().contiguous()
-    _cache_put(_w13_t_cache, key, (gemm1_weights,), value, _W13_CACHE_LIMIT)
+    _cache_put(key, value)
     return value
 
 
 def _get_w13_scale_t(gemm1_weights_scale, le):
-    key = (int(gemm1_weights_scale.data_ptr()), tuple(gemm1_weights_scale.shape), le)
-    cached = _cache_get(_w13_scale_t_cache, key, (gemm1_weights_scale,))
+    key = ("w13_scale_t", id(gemm1_weights_scale), tuple(gemm1_weights_scale.shape), le)
+    cached = _cache_get(key)
     if cached is not None:
         return cached
 
     value = gemm1_weights_scale[le].t().contiguous()
-    _cache_put(_w13_scale_t_cache, key, (gemm1_weights_scale,), value, _W13_CACHE_LIMIT)
+    _cache_put(key, value)
+    return value
+
+
+def _get_w13_t_f32(gemm1_weights, gemm1_weights_scale, le):
+    key = (
+        "w13_t_f32",
+        id(gemm1_weights),
+        tuple(gemm1_weights.shape),
+        id(gemm1_weights_scale),
+        tuple(gemm1_weights_scale.shape),
+        le,
+    )
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+
+    w13_f32 = gemm1_weights[le].float()
+    s13_exp = _expand_scale_2d(gemm1_weights_scale[le].float())
+    value = (w13_f32 * s13_exp).t().contiguous()
+    _cache_put(key, value)
+    return value
+
+
+def _get_w2_t_f32(gemm2_weights, gemm2_weights_scale, le):
+    key = (
+        "w2_t_f32",
+        id(gemm2_weights),
+        tuple(gemm2_weights.shape),
+        id(gemm2_weights_scale),
+        tuple(gemm2_weights_scale.shape),
+        le,
+    )
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+
+    w2_f32 = gemm2_weights[le].float()
+    s2_exp = _expand_scale_2d(gemm2_weights_scale[le].float())
+    value = (w2_f32 * s2_exp).t().contiguous()
+    _cache_put(key, value)
     return value
 
 
@@ -226,15 +255,23 @@ def _load_cuda_module():
         return None
 
     try:
-        from torch.utils.cpp_extension import load
+        from torch.utils.cpp_extension import load_inline
 
-        src = Path(__file__).with_name("moe_cute_swiglu.cu")
-        digest = hashlib.sha1(src.read_bytes()).hexdigest()[:10]
-        include_paths = ["/opt/cutlass/include", "/opt/cutlass/tools/util/include", str(src.parent)]
-        _cuda_module = load(
-            name=f"moe_cute_cpp_ext_default_{digest}",
-            sources=[str(src)],
-            extra_include_paths=include_paths,
+        cuda_source = Path(__file__).with_name("moe_swiglu_ptx.cuh").read_text()
+        wrapper = r"""
+#include <torch/extension.h>
+
+void moe_swiglu_ptx(torch::Tensor x1, torch::Tensor x2, torch::Tensor out);
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("moe_swiglu_ptx", &moe_swiglu_ptx, "MoE SwiGLU PTX kernel");
+}
+"""
+        _cuda_module = load_inline(
+            name="moe_swiglu_ptx_ext_v10",
+            cpp_sources="",
+            cuda_sources=cuda_source + "\n" + wrapper,
+            functions=["moe_swiglu_ptx"],
             extra_cuda_cflags=["-O3", "--use_fast_math"],
             verbose=False,
         )
@@ -245,7 +282,7 @@ def _load_cuda_module():
 
 
 def _fused_swiglu(x1, x2):
-    if x1.numel() < _CUTE_MIN_ELEMS:
+    if x1.numel() < _SWIGLU_PTX_MIN_ELEMS:
         return F.silu(x2) * x1
 
     cuda_mod = _load_cuda_module()
@@ -253,7 +290,7 @@ def _fused_swiglu(x1, x2):
         return F.silu(x2) * x1
 
     out = torch.empty_like(x1)
-    cuda_mod.moe_swiglu_cute(x1.contiguous(), x2.contiguous(), out)
+    cuda_mod.moe_swiglu_ptx(x1.contiguous(), x2.contiguous(), out)
     return out
 
 
@@ -270,26 +307,11 @@ def kernel(
     local_expert_offset,
     routed_scaling_factor,
 ):
-    torch_ext = _load_torch_ext_module()
-    if torch_ext is not None:
-        return torch_ext.kernel(
-            routing_logits,
-            routing_bias,
-            hidden_states,
-            hidden_states_scale,
-            gemm1_weights,
-            gemm1_weights_scale,
-            gemm2_weights,
-            gemm2_weights_scale,
-            local_expert_offset,
-            routed_scaling_factor,
-        )
-
     t = routing_logits.shape[0]
     device = routing_logits.device
     local_start = int(local_expert_offset)
 
-    hs_scale_th = _prepare_hs_scale_cache(hidden_states_scale)
+    hs_scale_th = _get_hs_scale_th(hidden_states_scale)
     _detect_gemm_mode(
         hidden_states[:1],
         hs_scale_th[:1],
@@ -336,17 +358,13 @@ def kernel(
             )
         else:
             a_e = a.index_select(0, token_idx)
-            w13_f32 = gemm1_weights[le].float()
-            s13_exp = _expand_scale_2d(gemm1_weights_scale[le].float())
-            g1 = a_e.matmul((w13_f32 * s13_exp).t())
+            g1 = a_e.matmul(_get_w13_t_f32(gemm1_weights, gemm1_weights_scale, le))
 
         x1 = g1[:, :I]
         x2 = g1[:, I:]
         mid = _fused_swiglu(x1, x2)
+        out_e = mid.matmul(_get_w2_t_f32(gemm2_weights, gemm2_weights_scale, le))
 
-        w2_f32 = gemm2_weights[le].float()
-        s2_exp = _expand_scale_2d(gemm2_weights_scale[le].float())
-        out_e = mid.matmul((w2_f32 * s2_exp).t())
         w_tok = weights.index_select(0, token_idx)[:, ge]
         output.index_add_(0, token_idx, out_e * w_tok.unsqueeze(1))
 

@@ -1,12 +1,11 @@
 """
-FP8 Block-Scale Fused MoE — default submission path.
+Experimental CUDA/PTX MoE variant.
 
-This default path first tries the CUDA/C++ torch extension implementation. If
-that extension is unavailable, it falls back to the CuTe/C++ shared-memory
-SwiGLU path.
+This variant mirrors the current stable Python-side algorithm structure, but
+swaps the SwiGLU stage to an optional PTX-backed CUDA extension. If the PTX
+extension is unavailable, it falls back to the exact PyTorch expression.
 """
 
-import sys
 from collections import OrderedDict
 import hashlib
 from pathlib import Path
@@ -27,9 +26,8 @@ BLK = 128
 _gemm_mode = None  # "scaled_mm" or "f32"
 _cuda_module = None
 _cuda_failed = False
-_CUTE_MIN_ELEMS = 8192
-_torch_ext_module = None
-_torch_ext_failed = False
+_SWIGLU_PTX_MIN_ELEMS = 0
+_FULL_HIDDEN_DEQUANT_MAX_SEQ = 1024
 _HS_SCALE_CACHE_LIMIT = 8
 _ROUTE_CACHE_LIMIT = 8
 _W13_CACHE_LIMIT = 4
@@ -58,33 +56,6 @@ def _cache_put(cache, key, validate_objs, payload, limit):
     cache.move_to_end(key)
     while len(cache) > limit:
         cache.popitem(last=False)
-
-
-def _add_repo_roots():
-    candidate_roots = ["/root", str(Path(__file__).resolve().parents[3])]
-    for root in candidate_roots:
-        if Path(root, "moe").exists() and root not in sys.path:
-            sys.path.insert(0, root)
-
-
-def _load_torch_ext_module():
-    global _torch_ext_module, _torch_ext_failed
-    if _torch_ext_module is not None:
-        return _torch_ext_module
-    if _torch_ext_failed:
-        return None
-
-    try:
-        _add_repo_roots()
-        from moe.solution.cute_cpp_torch import runtime as cute_cpp_torch_runtime
-
-        _torch_ext_module = cute_cpp_torch_runtime.get_module()
-        if _torch_ext_module is None:
-            _torch_ext_failed = True
-        return _torch_ext_module
-    except Exception:
-        _torch_ext_failed = True
-        return None
 
 
 def _detect_gemm_mode(act_fp8, act_scale, w_fp8, w_scale):
@@ -130,27 +101,6 @@ def _route(logits, bias, scaling_factor):
     return topk_idx, weights
 
 
-def _prepare_route_cache(routing_logits, routing_bias, local_start, routed_scaling_factor, device):
-    t = routing_logits.shape[0]
-    key = (
-        int(routing_logits.data_ptr()),
-        int(routing_bias.data_ptr()),
-        tuple(routing_logits.shape),
-        int(local_start),
-        float(routed_scaling_factor),
-    )
-    cached = _cache_get(_route_cache, key, (routing_logits, routing_bias))
-    if cached is not None:
-        return cached
-
-    topk_idx, weights = _route(routing_logits, routing_bias, routed_scaling_factor)
-    assignments = _build_expert_assignments(topk_idx, local_start, t, device)
-    active_experts = [le for le in range(E_LOCAL) if assignments[le] is not None]
-    payload = (weights, assignments, active_experts)
-    _cache_put(_route_cache, key, (routing_logits, routing_bias), payload, _ROUTE_CACHE_LIMIT)
-    return payload
-
-
 def _build_expert_assignments(topk_idx, local_start, t, device):
     flat_tok = torch.arange(t, device=device).unsqueeze(1).expand(-1, TOP_K).reshape(-1)
     flat_exp = topk_idx.reshape(-1)
@@ -178,6 +128,27 @@ def _build_expert_assignments(topk_idx, local_start, t, device):
     return assignments
 
 
+def _prepare_route_cache(routing_logits, routing_bias, local_start, routed_scaling_factor, device):
+    t = routing_logits.shape[0]
+    key = (
+        id(routing_logits),
+        id(routing_bias),
+        tuple(routing_logits.shape),
+        int(local_start),
+        float(routed_scaling_factor),
+    )
+    cached = _cache_get(_route_cache, key, (routing_logits, routing_bias))
+    if cached is not None:
+        return cached
+
+    topk_idx, weights = _route(routing_logits, routing_bias, routed_scaling_factor)
+    assignments = _build_expert_assignments(topk_idx, local_start, t, device)
+    active_experts = [le for le in range(E_LOCAL) if assignments[le] is not None]
+    payload = (weights, assignments, active_experts)
+    _cache_put(_route_cache, key, (routing_logits, routing_bias), payload, _ROUTE_CACHE_LIMIT)
+    return payload
+
+
 def _expand_scale_2d(scale):
     sn, sk = scale.shape
     out = scale.unsqueeze(1).expand(sn, BLK, sk).reshape(sn * BLK, sk)
@@ -186,7 +157,7 @@ def _expand_scale_2d(scale):
 
 
 def _prepare_hs_scale_cache(hidden_states_scale):
-    key = (int(hidden_states_scale.data_ptr()), tuple(hidden_states_scale.shape))
+    key = (id(hidden_states_scale), tuple(hidden_states_scale.shape))
     cached = _cache_get(_hs_scale_cache, key, (hidden_states_scale,))
     if cached is not None:
         return cached
@@ -197,7 +168,7 @@ def _prepare_hs_scale_cache(hidden_states_scale):
 
 
 def _get_w13_t(gemm1_weights, le):
-    key = (int(gemm1_weights.data_ptr()), tuple(gemm1_weights.shape), le)
+    key = (id(gemm1_weights), tuple(gemm1_weights.shape), le)
     cached = _cache_get(_w13_t_cache, key, (gemm1_weights,))
     if cached is not None:
         return cached
@@ -208,7 +179,7 @@ def _get_w13_t(gemm1_weights, le):
 
 
 def _get_w13_scale_t(gemm1_weights_scale, le):
-    key = (int(gemm1_weights_scale.data_ptr()), tuple(gemm1_weights_scale.shape), le)
+    key = (id(gemm1_weights_scale), tuple(gemm1_weights_scale.shape), le)
     cached = _cache_get(_w13_scale_t_cache, key, (gemm1_weights_scale,))
     if cached is not None:
         return cached
@@ -226,15 +197,25 @@ def _load_cuda_module():
         return None
 
     try:
-        from torch.utils.cpp_extension import load
+        from torch.utils.cpp_extension import load_inline
 
-        src = Path(__file__).with_name("moe_cute_swiglu.cu")
-        digest = hashlib.sha1(src.read_bytes()).hexdigest()[:10]
-        include_paths = ["/opt/cutlass/include", "/opt/cutlass/tools/util/include", str(src.parent)]
-        _cuda_module = load(
-            name=f"moe_cute_cpp_ext_default_{digest}",
-            sources=[str(src)],
-            extra_include_paths=include_paths,
+        src = Path(__file__).with_name("moe_swiglu_ptx.cuh")
+        cuda_source = src.read_text()
+        digest = hashlib.sha1(cuda_source.encode("utf-8")).hexdigest()[:10]
+        wrapper = r"""
+#include <torch/extension.h>
+
+void moe_swiglu_ptx(torch::Tensor x1, torch::Tensor x2, torch::Tensor out);
+
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
+    m.def("moe_swiglu_ptx", &moe_swiglu_ptx, "MoE SwiGLU PTX kernel");
+}
+"""
+        _cuda_module = load_inline(
+            name=f"moe_swiglu_ptx_ext_{digest}",
+            cpp_sources="",
+            cuda_sources=cuda_source + "\n" + wrapper,
+            functions=["moe_swiglu_ptx"],
             extra_cuda_cflags=["-O3", "--use_fast_math"],
             verbose=False,
         )
@@ -245,7 +226,7 @@ def _load_cuda_module():
 
 
 def _fused_swiglu(x1, x2):
-    if x1.numel() < _CUTE_MIN_ELEMS:
+    if x1.numel() < _SWIGLU_PTX_MIN_ELEMS:
         return F.silu(x2) * x1
 
     cuda_mod = _load_cuda_module()
@@ -253,7 +234,7 @@ def _fused_swiglu(x1, x2):
         return F.silu(x2) * x1
 
     out = torch.empty_like(x1)
-    cuda_mod.moe_swiglu_cute(x1.contiguous(), x2.contiguous(), out)
+    cuda_mod.moe_swiglu_ptx(x1.contiguous(), x2.contiguous(), out)
     return out
 
 
@@ -270,21 +251,6 @@ def kernel(
     local_expert_offset,
     routed_scaling_factor,
 ):
-    torch_ext = _load_torch_ext_module()
-    if torch_ext is not None:
-        return torch_ext.kernel(
-            routing_logits,
-            routing_bias,
-            hidden_states,
-            hidden_states_scale,
-            gemm1_weights,
-            gemm1_weights_scale,
-            gemm2_weights,
-            gemm2_weights_scale,
-            local_expert_offset,
-            routed_scaling_factor,
-        )
-
     t = routing_logits.shape[0]
     device = routing_logits.device
     local_start = int(local_expert_offset)
@@ -310,7 +276,7 @@ def kernel(
         return torch.zeros((t, H), dtype=torch.bfloat16, device=device)
 
     a = None
-    if not use_scaled_mm:
+    if not use_scaled_mm and t <= _FULL_HIDDEN_DEQUANT_MAX_SEQ:
         a_fp32 = hidden_states.float()
         a_scale_exp = (
             hs_scale_th.unsqueeze(-1)
@@ -335,7 +301,18 @@ def kernel(
                 out_dtype=torch.float32,
             )
         else:
-            a_e = a.index_select(0, token_idx)
+            if a is not None:
+                a_e = a.index_select(0, token_idx)
+            else:
+                hs_scale_e = hs_scale_th.index_select(0, token_idx)
+                a_scale_e = (
+                    hs_scale_e.unsqueeze(-1)
+                    .repeat(1, 1, BLK)
+                    .reshape(token_idx.shape[0], H)
+                    .contiguous()
+                )
+                a_e = hidden_states.index_select(0, token_idx).float() * a_scale_e
+
             w13_f32 = gemm1_weights[le].float()
             s13_exp = _expand_scale_2d(gemm1_weights_scale[le].float())
             g1 = a_e.matmul((w13_f32 * s13_exp).t())
@@ -347,6 +324,7 @@ def kernel(
         w2_f32 = gemm2_weights[le].float()
         s2_exp = _expand_scale_2d(gemm2_weights_scale[le].float())
         out_e = mid.matmul((w2_f32 * s2_exp).t())
+
         w_tok = weights.index_select(0, token_idx)[:, ge]
         output.index_add_(0, token_idx, out_e * w_tok.unsqueeze(1))
 
