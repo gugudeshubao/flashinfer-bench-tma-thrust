@@ -116,7 +116,14 @@ def run_benchmarks(warmup: int = 5, iters: int = 30) -> dict:
             topk_indices=None,
         )
         baseline_ms = time_ms(prefill_baseline, inputs[:8], topk=inputs[8], attn_mask=inputs[9])
-        triton_ms = time_ms(prefill_triton, inputs[:8], topk=inputs[8], attn_mask=inputs[9], backend="auto")
+        triton_ms = time_ms(
+            prefill_triton,
+            inputs[:8],
+            topk=inputs[8],
+            attn_mask=inputs[9],
+            backend="auto",
+            causal_mask_hint=True,
+        )
         results["prefill"].append(
             {
                 "name": case["name"],
@@ -141,7 +148,13 @@ def run_benchmarks(warmup: int = 5, iters: int = 30) -> dict:
             topk_indices=None,
         )
         baseline_ms = time_ms(decode_baseline, inputs[:8], topk=inputs[8], attn_mask=inputs[9])
-        triton_ms = time_ms(decode_triton, inputs[:8], topk=inputs[8], attn_mask=inputs[9], backend="auto")
+        triton_ms = time_ms(
+            decode_triton,
+            inputs[:8],
+            topk=inputs[8],
+            attn_mask=inputs[9],
+            backend="auto",
+        )
         results["decode"].append(
             {
                 "name": case["name"],

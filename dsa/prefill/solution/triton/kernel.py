@@ -716,6 +716,7 @@ def kernel(
     softmax_scale=None,
     index_scale=None,
     backend="auto",
+    causal_mask_hint=None,
     return_metadata=False,
 ):
     batch_size, query_len, num_heads, qk_nope_head_dim = q_nope.shape
@@ -747,12 +748,15 @@ def kernel(
         )
         return fallback if return_metadata else fallback[0]
 
-    causal_mask = _is_standard_causal_mask(
-        attn_mask,
-        query_len=query_len,
-        key_len=key_len,
-        device=q_nope.device,
-    )
+    if causal_mask_hint is None:
+        causal_mask = _is_standard_causal_mask(
+            attn_mask,
+            query_len=query_len,
+            key_len=key_len,
+            device=q_nope.device,
+        )
+    else:
+        causal_mask = bool(causal_mask_hint)
     attn_mask_f = None if causal_mask else _normalize_attn_mask(
         attn_mask,
         batch_size=batch_size,

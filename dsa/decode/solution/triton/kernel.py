@@ -36,6 +36,7 @@ def kernel(
     softmax_scale=None,
     index_scale=None,
     backend="auto",
+    causal_mask_hint=None,
     return_metadata=False,
 ):
     return prefill_triton_kernel(
@@ -53,5 +54,6 @@ def kernel(
         softmax_scale=softmax_scale,
         index_scale=index_scale,
         backend=backend,
+        causal_mask_hint=causal_mask_hint,
         return_metadata=return_metadata,
     )

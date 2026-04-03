@@ -102,6 +102,7 @@ def run_smoke() -> dict:
         topk=prefill_inputs[8],
         attn_mask=prefill_inputs[9],
         backend="auto",
+        causal_mask_hint=True,
     )
     torch.testing.assert_close(prefill_sol.float(), prefill_ref.float(), atol=2e-2, rtol=2e-2)
     decode_ref = decode_kernel(
@@ -129,6 +130,7 @@ def run_smoke() -> dict:
         topk=prefill_inputs[8],
         attn_mask=prefill_inputs[9],
         backend="auto",
+        causal_mask_hint=True,
     )
     decode_latency_ms = time_ms(
         decode_kernel,

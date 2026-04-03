@@ -202,6 +202,7 @@ def run_profile(iters: int = 20) -> dict:
             topk=inputs["topk"],
             attn_mask=inputs["attn_mask"],
             backend="triton",
+            causal_mask_hint=inputs["attn_mask"] is not None and inputs["q_nope"].shape[1] == inputs["compressed_kv"].shape[1],
         )
         _sync()
 
