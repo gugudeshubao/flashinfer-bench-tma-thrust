@@ -1,0 +1,9 @@
+[solution]
+name = "tma-thrust-dsa-prefill-v1"
+definition = "deepseek_dsa_prefill_mla_core_v1"
+author = "tma-thrust"
+
+[build]
+language = "python"
+entry_point = "kernel.py::kernel"
+destination_passing_style = false

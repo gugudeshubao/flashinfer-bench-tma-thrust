@@ -1,0 +1,41 @@
+{
+  "name": "deepseek_dsa_prefill_mla_core_v1",
+  "description": "DeepSeek V3.2 sparse MLA prefill over MLA-core tensors. Token-level indexer and sparse attention are both included in the operator boundary.",
+  "op_type": "attention",
+  "tags": [
+    "model:deepseek-v3.2",
+    "stage:prefill",
+    "layout:mla-core",
+    "status:baseline"
+  ],
+  "axes": {
+    "batch_size": { "type": "var", "description": "Number of sequences in the batch." },
+    "query_len": { "type": "var", "description": "Number of query tokens." },
+    "key_len": { "type": "var", "description": "Number of key/value tokens." },
+    "num_heads": { "type": "var", "description": "Number of MLA attention heads." },
+    "qk_nope_head_dim": { "type": "var", "description": "Non-RoPE query/key head dimension." },
+    "qk_rope_head_dim": { "type": "var", "description": "RoPE query/key head dimension." },
+    "v_head_dim": { "type": "var", "description": "Value head dimension." },
+    "kv_rank": { "type": "var", "description": "Compressed MLA KV rank." },
+    "index_heads": { "type": "var", "description": "Number of indexer heads." },
+    "index_dim": { "type": "var", "description": "Indexer head dimension." },
+    "topk": { "type": "var", "description": "Number of sparse tokens selected per query." }
+  },
+  "inputs": {
+    "q_nope": { "shape": ["batch_size", "query_len", "num_heads", "qk_nope_head_dim"], "dtype": "bfloat16" },
+    "q_pe": { "shape": ["batch_size", "query_len", "num_heads", "qk_rope_head_dim"], "dtype": "bfloat16" },
+    "compressed_kv": { "shape": ["batch_size", "key_len", "kv_rank"], "dtype": "bfloat16" },
+    "k_pe": { "shape": ["batch_size", "key_len", "qk_rope_head_dim"], "dtype": "bfloat16" },
+    "wkv_b": { "shape": ["num_heads", "qk_nope_head_dim + v_head_dim", "kv_rank"], "dtype": "bfloat16" },
+    "index_q": { "shape": ["batch_size", "query_len", "index_heads", "index_dim"], "dtype": "bfloat16" },
+    "index_k": { "shape": ["batch_size", "key_len", "index_dim"], "dtype": "bfloat16" },
+    "index_weights": { "shape": ["batch_size", "query_len", "index_heads"], "dtype": "float32" },
+    "topk": { "shape": null, "dtype": "int32" },
+    "attn_mask": { "shape": ["batch_size", "query_len", "key_len"], "dtype": "float32", "optional": true },
+    "softmax_scale": { "shape": null, "dtype": "float32", "optional": true },
+    "index_scale": { "shape": null, "dtype": "float32", "optional": true }
+  },
+  "outputs": {
+    "output": { "shape": ["batch_size", "query_len", "num_heads", "v_head_dim"], "dtype": "bfloat16" }
+  }
+}
