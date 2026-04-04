@@ -230,10 +230,12 @@ def _next_power_of_two(x: int) -> int:
     return 1 << (x - 1).bit_length()
 
 
-def _pick_num_warps(topk: int) -> int:
-    if topk <= 32:
+def _pick_num_warps(topk: int, query_len: int) -> int:
+    if query_len == 1:
+        if topk <= 128:
+            return 2
         return 4
-    if topk <= 64:
+    if topk <= 128:
         return 4
     return 8
 
@@ -653,7 +655,7 @@ def _launch_triton_latent(
             BLOCK_C=block_c,
             BLOCK_R=block_r,
             MAX_TOPK=max_topk,
-            num_warps=_pick_num_warps(topk_count),
+            num_warps=_pick_num_warps(topk_count, query_len),
         )
     else:
         _sparse_prefill_latent_kernel[grid](
@@ -687,7 +689,7 @@ def _launch_triton_latent(
             BLOCK_C=block_c,
             BLOCK_R=block_r,
             MAX_TOPK=max_topk,
-            num_warps=_pick_num_warps(topk_count),
+            num_warps=_pick_num_warps(topk_count, query_len),
         )
     return latent_out.view(batch_size, query_len, num_heads, kv_rank)
 
