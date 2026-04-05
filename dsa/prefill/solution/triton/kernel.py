@@ -235,9 +235,15 @@ def _pick_num_warps(topk: int, query_len: int) -> int:
         if topk <= 128:
             return 2
         return 4
+    if topk <= 64:
+        return 4
     if topk <= 128:
         return 4
     return 8
+
+
+def _pick_num_stages(query_len: int) -> int:
+    return 2
 
 
 def _get_weight_parts(
@@ -656,6 +662,7 @@ def _launch_triton_latent(
             BLOCK_R=block_r,
             MAX_TOPK=max_topk,
             num_warps=_pick_num_warps(topk_count, query_len),
+            num_stages=_pick_num_stages(query_len),
         )
     else:
         _sparse_prefill_latent_kernel[grid](
@@ -690,6 +697,7 @@ def _launch_triton_latent(
             BLOCK_R=block_r,
             MAX_TOPK=max_topk,
             num_warps=_pick_num_warps(topk_count, query_len),
+            num_stages=_pick_num_stages(query_len),
         )
     return latent_out.view(batch_size, query_len, num_heads, kv_rank)
 
