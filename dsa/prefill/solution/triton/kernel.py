@@ -46,7 +46,7 @@ except Exception:
 _MAX_KV_RANK = 512
 _MAX_ROPE_DIM = 128
 _MAX_TOPK = 128
-_MIN_PREFILL_TRITON_WORK = 262144
+_MIN_PREFILL_TRITON_WORK = 131072
 _WEIGHT_CACHE: dict[
     tuple[int, tuple[int, ...], torch.device, int],
     tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -57,6 +57,81 @@ _CAUSAL_BOOL_CACHE: dict[tuple[int, int, torch.device], torch.Tensor] = {}
 
 
 if _TRITON_AVAILABLE:
+
+    @triton.jit
+    def _sparse_prefill_latent_kernel_nomask(
+        QN_ptr,
+        QR_ptr,
+        KV_ptr,
+        KPE_ptr,
+        Latent_ptr,
+        scale,
+        stride_qn_n,
+        stride_qn_h,
+        stride_qn_c,
+        stride_qr_n,
+        stride_qr_h,
+        stride_qr_r,
+        stride_kv_n,
+        stride_kv_t,
+        stride_kv_c,
+        stride_kpe_n,
+        stride_kpe_t,
+        stride_kpe_r,
+        stride_lat_n,
+        stride_lat_h,
+        stride_lat_c,
+        kv_rank,
+        rope_dim,
+        topk,
+        BLOCK_C: tl.constexpr,
+        BLOCK_R: tl.constexpr,
+        MAX_TOPK: tl.constexpr,
+    ):
+        n_idx = tl.program_id(0)
+        h_idx = tl.program_id(1)
+        c_block = tl.program_id(2)
+
+        offs_c = c_block * BLOCK_C + tl.arange(0, BLOCK_C)
+        offs_r = tl.arange(0, BLOCK_R)
+        offs_t = tl.arange(0, MAX_TOPK)
+
+        qn_ptrs = QN_ptr + n_idx * stride_qn_n + h_idx * stride_qn_h + offs_c * stride_qn_c
+        qn = tl.load(qn_ptrs, mask=offs_c < kv_rank, other=0.0).to(tl.float32)
+
+        qr_ptrs = QR_ptr + n_idx * stride_qr_n + h_idx * stride_qr_h + offs_r * stride_qr_r
+        qr = tl.load(qr_ptrs, mask=offs_r < rope_dim, other=0.0).to(tl.float32)
+
+        kv_ptrs = (
+            KV_ptr
+            + n_idx * stride_kv_n
+            + offs_t[:, None] * stride_kv_t
+            + offs_c[None, :] * stride_kv_c
+        )
+        kv_mask = (offs_t[:, None] < topk) & (offs_c[None, :] < kv_rank)
+        kv = tl.load(kv_ptrs, mask=kv_mask, other=0.0).to(tl.float32)
+
+        kpe_ptrs = (
+            KPE_ptr
+            + n_idx * stride_kpe_n
+            + offs_t[:, None] * stride_kpe_t
+            + offs_r[None, :] * stride_kpe_r
+        )
+        kpe_mask = (offs_t[:, None] < topk) & (offs_r[None, :] < rope_dim)
+        kpe = tl.load(kpe_ptrs, mask=kpe_mask, other=0.0).to(tl.float32)
+
+        logits = tl.sum(kv * qn[None, :], axis=1)
+        logits += tl.sum(kpe * qr[None, :], axis=1)
+        logits = tl.where(offs_t < topk, logits * scale, float("-inf"))
+
+        max_logit = tl.max(logits, axis=0)
+        weights = tl.exp(logits - max_logit)
+        denom = tl.sum(weights, axis=0)
+        weights = weights / tl.maximum(denom, 1e-20)
+        latent = tl.sum(weights[:, None] * kv, axis=0)
+
+        lat_ptrs = Latent_ptr + n_idx * stride_lat_n + h_idx * stride_lat_h + offs_c * stride_lat_c
+        tl.store(lat_ptrs, latent, mask=offs_c < kv_rank)
 
     @triton.jit
     def _sparse_prefill_latent_kernel(
@@ -427,7 +502,7 @@ def _select_sparse_metadata(
     elif attn_mask_f is not None:
         selected_mask = torch.gather(attn_mask_f, dim=-1, index=topk_indices)
     else:
-        selected_mask = torch.zeros(topk_indices.shape, device=topk_indices.device, dtype=torch.float32)
+        selected_mask = None
     return index_scores, topk_indices, sparse_mask, selected_mask
 
 
@@ -655,6 +730,38 @@ def _launch_triton_latent(
             latent_out.stride(1),
             latent_out.stride(2),
             query_len,
+            kv_rank,
+            rope_dim,
+            topk_count,
+            BLOCK_C=block_c,
+            BLOCK_R=block_r,
+            MAX_TOPK=max_topk,
+            num_warps=_pick_num_warps(topk_count, query_len),
+            num_stages=_pick_num_stages(query_len),
+        )
+    elif m_flat is None:
+        _sparse_prefill_latent_kernel_nomask[grid](
+            qn_flat,
+            qr_flat,
+            kv_flat,
+            kpe_flat,
+            latent_out,
+            float(scale),
+            qn_flat.stride(0),
+            qn_flat.stride(1),
+            qn_flat.stride(2),
+            qr_flat.stride(0),
+            qr_flat.stride(1),
+            qr_flat.stride(2),
+            kv_flat.stride(0),
+            kv_flat.stride(1),
+            kv_flat.stride(2),
+            kpe_flat.stride(0),
+            kpe_flat.stride(1),
+            kpe_flat.stride(2),
+            latent_out.stride(0),
+            latent_out.stride(1),
+            latent_out.stride(2),
             kv_rank,
             rope_dim,
             topk_count,

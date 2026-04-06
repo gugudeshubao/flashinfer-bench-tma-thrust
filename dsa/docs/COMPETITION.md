@@ -23,15 +23,15 @@ modal run dsa/benchmarks/profile_modal.py --iters 20
 ## Current Modal B200 Snapshot
 
 - Prefill benchmark:
-  - `p256`: backend=`reference`, `1.075x`
-  - `p512`: backend=`reference`, `1.023x`
-  - `p1024`: backend=`reference`, `1.018x`
-  - `p2048`: backend=`triton`, `2.351x`
-  - `p4096`: backend=`triton`, `4.937x`
+  - `p256`: backend=`reference`, `1.081x`
+  - `p512`: backend=`reference`, `1.042x`
+  - `p1024`: backend=`triton`, `1.005x`
+  - `p2048`: backend=`triton`, `2.452x`
+  - `p4096`: backend=`triton`, `5.050x`
 - Decode benchmark:
-  - `d2048`: backend=`triton`, `1.120x`
-  - `d4096`: backend=`triton`, `1.279x`
-  - `d8192`: backend=`triton`, `1.093x`
+  - `d2048`: backend=`triton`, `1.214x`
+  - `d4096`: backend=`triton`, `1.152x`
+  - `d8192`: backend=`triton`, `1.243x`
 
 ## Remaining Risk
 
