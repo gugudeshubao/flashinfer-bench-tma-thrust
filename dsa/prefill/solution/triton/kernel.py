@@ -307,18 +307,38 @@ def _next_power_of_two(x: int) -> int:
 
 def _pick_num_warps(topk: int, query_len: int) -> int:
     if query_len == 1:
+        if topk <= 64:
+            return 4
         if topk <= 128:
             return 2
         return 4
     if topk <= 64:
         return 4
     if topk <= 128:
-        return 4
+        return 4 if query_len <= 1024 else 2
     return 8
 
 
-def _pick_num_stages(query_len: int) -> int:
+def _pick_num_stages(topk: int, query_len: int) -> int:
+    if query_len == 1:
+        if topk <= 64:
+            return 1
+        return 2
+    if topk <= 128 and query_len <= 1024:
+        return 1
     return 2
+
+
+def _resolve_launch_config(
+    *,
+    topk: int,
+    query_len: int,
+    num_warps_override: int | None,
+    num_stages_override: int | None,
+) -> tuple[int, int]:
+    num_warps = _pick_num_warps(topk, query_len) if num_warps_override is None else int(num_warps_override)
+    num_stages = _pick_num_stages(topk, query_len) if num_stages_override is None else int(num_stages_override)
+    return num_warps, num_stages
 
 
 def _get_weight_parts(
@@ -672,6 +692,8 @@ def _launch_triton_latent(
     selected_mask: torch.Tensor | None,
     scale: float,
     causal_mask: bool,
+    num_warps_override: int | None,
+    num_stages_override: int | None,
 ) -> torch.Tensor:
     batch_size, query_len, num_heads, kv_rank = q_nope_proj.shape
     rope_dim = q_rope.shape[-1]
@@ -701,6 +723,12 @@ def _launch_triton_latent(
         qn_flat.shape[0],
         num_heads,
         1,
+    )
+    num_warps, num_stages = _resolve_launch_config(
+        topk=topk_count,
+        query_len=query_len,
+        num_warps_override=num_warps_override,
+        num_stages_override=num_stages_override,
     )
 
     if causal_mask:
@@ -736,8 +764,8 @@ def _launch_triton_latent(
             BLOCK_C=block_c,
             BLOCK_R=block_r,
             MAX_TOPK=max_topk,
-            num_warps=_pick_num_warps(topk_count, query_len),
-            num_stages=_pick_num_stages(query_len),
+            num_warps=num_warps,
+            num_stages=num_stages,
         )
     elif m_flat is None:
         _sparse_prefill_latent_kernel_nomask[grid](
@@ -768,8 +796,8 @@ def _launch_triton_latent(
             BLOCK_C=block_c,
             BLOCK_R=block_r,
             MAX_TOPK=max_topk,
-            num_warps=_pick_num_warps(topk_count, query_len),
-            num_stages=_pick_num_stages(query_len),
+            num_warps=num_warps,
+            num_stages=num_stages,
         )
     else:
         _sparse_prefill_latent_kernel[grid](
@@ -803,8 +831,8 @@ def _launch_triton_latent(
             BLOCK_C=block_c,
             BLOCK_R=block_r,
             MAX_TOPK=max_topk,
-            num_warps=_pick_num_warps(topk_count, query_len),
-            num_stages=_pick_num_stages(query_len),
+            num_warps=num_warps,
+            num_stages=num_stages,
         )
     return latent_out.view(batch_size, query_len, num_heads, kv_rank)
 
@@ -834,6 +862,8 @@ def kernel(
     index_scale=None,
     backend="auto",
     causal_mask_hint=None,
+    num_warps_override=None,
+    num_stages_override=None,
     return_metadata=False,
 ):
     batch_size, query_len, num_heads, qk_nope_head_dim = q_nope.shape
@@ -915,6 +945,8 @@ def kernel(
         selected_mask=selected_mask,
         scale=float(scale),
         causal_mask=causal_mask,
+        num_warps_override=num_warps_override,
+        num_stages_override=num_stages_override,
     )
     output = _project_output(latent_view, value_proj, q_nope.dtype)
     metadata = SparseAttentionMetadata(

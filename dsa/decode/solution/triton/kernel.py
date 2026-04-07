@@ -37,6 +37,8 @@ def kernel(
     index_scale=None,
     backend="auto",
     causal_mask_hint=None,
+    num_warps_override=None,
+    num_stages_override=None,
     return_metadata=False,
 ):
     return prefill_triton_kernel(
@@ -55,5 +57,7 @@ def kernel(
         index_scale=index_scale,
         backend=backend,
         causal_mask_hint=causal_mask_hint,
+        num_warps_override=num_warps_override,
+        num_stages_override=num_stages_override,
         return_metadata=return_metadata,
     )

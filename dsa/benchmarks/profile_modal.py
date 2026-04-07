@@ -111,6 +111,8 @@ def run_profile(iters: int = 20) -> dict:
             selected_mask=selected_mask,
             scale=float((inputs["qk_nope_head_dim"] + inputs["rope_dim"]) ** -0.5),
             causal_mask=inputs["attn_mask"] is not None and inputs["q_nope"].shape[1] == inputs["compressed_kv"].shape[1],
+            num_warps_override=None,
+            num_stages_override=None,
         )
         _ = _project_output(latent, value_proj, inputs["q_nope"].dtype)
         _sync()
@@ -166,6 +168,8 @@ def run_profile(iters: int = 20) -> dict:
                 selected_mask=selected_mask,
                 scale=float((inputs["qk_nope_head_dim"] + inputs["rope_dim"]) ** -0.5),
                 causal_mask=inputs["attn_mask"] is not None and inputs["q_nope"].shape[1] == inputs["compressed_kv"].shape[1],
+                num_warps_override=None,
+                num_stages_override=None,
             )
             _sync()
             t3 = time.perf_counter()
