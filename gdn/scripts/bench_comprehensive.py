@@ -14,14 +14,77 @@ Usage:
 
 import os
 import sys
+from pathlib import Path
 
-# Add scripts directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import modal
 
-from modal_config import (
-    app, cuda_image, volume, B200_GPU, LONG_TIMEOUT,
-    read_kernel_sources, get_kernel_base_path
+SCRIPT_DIR = Path(__file__).resolve().parent
+GDN_ROOT = SCRIPT_DIR.parent
+
+app = modal.App("gdn-kernels")
+
+cuda_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("wget", "git")
+    .pip_install(
+        "torch>=2.4.0",
+        "triton>=3.0.0",
+        "tabulate",
+        "numpy",
+    )
+    .run_commands(
+        "wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb",
+        "dpkg -i cuda-keyring_1.1-1_all.deb",
+        "apt-get update",
+        "apt-get install -y cuda-toolkit-12-8",
+        "git clone --depth 1 --branch v3.5.1 https://github.com/NVIDIA/cutlass.git /opt/cutlass",
+    )
+    .env({
+        "PATH": "/usr/local/cuda-12.8/bin:$PATH",
+        "LD_LIBRARY_PATH": "/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH",
+        "CUTLASS_PATH": "/opt/cutlass",
+        "CUDA_HOME": "/usr/local/cuda-12.8",
+    })
 )
+
+volume = modal.Volume.from_name("flashinfer-bench", create_if_missing=True)
+B200_GPU = "B200"
+LONG_TIMEOUT = 1800
+
+
+def read_kernel_sources(kernel_base_path: str) -> dict:
+    sources = {}
+    cuda_dir = os.path.join(kernel_base_path, "cuda")
+    if os.path.exists(cuda_dir):
+        for v in ["v5", "v6", "v7", "v8"]:
+            for kernel_type in ["decode", "prefill"]:
+                path = os.path.join(cuda_dir, f"gdn_{kernel_type}_{v}.cuh")
+                if os.path.exists(path):
+                    with open(path, "r") as f:
+                        sources[f"gdn_{kernel_type}_{v}.cuh"] = f.read()
+
+    cute_dir = os.path.join(kernel_base_path, "cute_cpp")
+    if os.path.exists(cute_dir):
+        for v in ["v9", "v10", "v11"]:
+            for kernel_type in ["decode", "prefill"]:
+                path = os.path.join(cute_dir, f"gdn_{kernel_type}_{v}.cuh")
+                if os.path.exists(path):
+                    with open(path, "r") as f:
+                        sources[f"gdn_{kernel_type}_{v}.cuh"] = f.read()
+
+    ptx_dir = os.path.join(kernel_base_path, "ptx")
+    if os.path.exists(ptx_dir):
+        for kernel_type in ["decode", "prefill"]:
+            path = os.path.join(ptx_dir, f"gdn_{kernel_type}_ptx.cuh")
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    sources[f"gdn_{kernel_type}_ptx.cuh"] = f.read()
+
+    return sources
+
+
+def get_kernel_base_path() -> str:
+    return str(GDN_ROOT / "kernels")
 
 
 @app.function(
@@ -314,7 +377,7 @@ void gdn_decode_ptx(
     ], capture_output=True, text=True, timeout=300)
     
     if result.returncode != 0:
-        print(f"  ERROR compiling PTX: {result.stderr[:500]}")
+        print(f"  ERROR compiling PTX: {result.stderr[:4000]}")
         lib_ptx = None
     else:
         print("  PTX compiled successfully!")

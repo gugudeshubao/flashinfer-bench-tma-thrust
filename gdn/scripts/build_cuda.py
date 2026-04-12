@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Build GDN CUDA kernels on Modal B200.
+Build the real decode CUDA kernels on Modal B200.
 
 Usage:
     modal run scripts/build_cuda.py
@@ -11,30 +11,58 @@ the shared library to the Modal volume.
 
 import os
 import sys
-import pathlib
-
 # Add scripts directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from modal_config import app, cuda_image, volume, B200_GPU, BUILD_TIMEOUT, SHORT_TIMEOUT
+from modal_config import (
+    app,
+    cuda_image,
+    volume,
+    B200_GPU,
+    BUILD_TIMEOUT,
+    SHORT_TIMEOUT,
+    read_kernel_sources,
+    get_kernel_base_path,
+)
 
-PROJECT_ROOT = pathlib.Path(__file__).parent.parent
+# Current source of truth for the real decode CUDA benchmark path.
+DECODE_KERNEL_HEADERS = (
+    "gdn_decode_v5.cuh",
+    "gdn_decode_v6.cuh",
+    "gdn_decode_v7.cuh",
+    "gdn_decode_v8.cuh",
+    "gdn_decode_v9.cuh",
+    "gdn_decode_v10.cuh",
+)
+
+EXPECTED_EXPORTS = (
+    "gdn_decode_v7_fp32",
+    "gdn_decode_v8_fp32",
+    "gdn_decode_v7_graph_launch",
+    "gdn_decode_v7_graph_destroy",
+    "gdn_decode_v9_fp32",
+    "gdn_decode_v9_tma",
+    "gdn_decode_v10_cute",
+    "gdn_decode_v10_tma",
+)
 
 def get_kernel_sources():
-    """Read all kernel source files from subdirectories."""
+    """Read the decode kernel headers used by the real CUDA benchmark path."""
+    available_sources = read_kernel_sources(get_kernel_base_path())
     sources = {}
-    kernels_dir = PROJECT_ROOT / "src" / "kernels"
-    
-    # Read CUDA kernels (v5, v6, v7, v8)
-    cuda_dir = kernels_dir / "cuda"
-    for cuh in cuda_dir.glob("gdn_*.cuh"):
-        sources[cuh.name] = cuh.read_text()
-    
-    # Read CuTe kernels (v9, v10)
-    cute_dir = kernels_dir / "cute"
-    for cuh in cute_dir.glob("gdn_*.cuh"):
-        sources[cuh.name] = cuh.read_text()
-    
+    missing = []
+
+    for header in DECODE_KERNEL_HEADERS:
+        content = available_sources.get(header)
+        if content is None:
+            missing.append(header)
+            continue
+        sources[header] = content
+
+    if missing:
+        missing_str = ", ".join(missing)
+        raise FileNotFoundError(f"Missing required decode kernel headers: {missing_str}")
+
     return sources
 
 # Pre-read kernel sources (executed locally)
@@ -48,7 +76,7 @@ KERNEL_SOURCES = get_kernel_sources()
     volumes={"/data": volume},
 )
 def build_cuda_kernels(kernel_sources: dict = None):
-    """Compile GDN CUDA kernels for B200 (sm_100)."""
+    """Compile the decode CUDA kernels used by the real benchmark path."""
     import subprocess
     from pathlib import Path
     
@@ -79,14 +107,14 @@ def build_cuda_kernels(kernel_sources: dict = None):
         f.write('#include <cuda_fp16.h>\n')
         f.write('#include <cuda_fp8.h>\n\n')
         
-        # Include all headers (v5-v10)
-        for version in ["v5", "v6", "v7", "v8", "v9", "v10"]:
-            for name in sorted(kernel_sources.keys()):
-                if f"_{version}.cuh" in name:
-                    print(f"Including: {name}")
-                    f.write(f"// ====== {name} ======\n")
-                    f.write(kernel_sources[name])
-                    f.write("\n\n")
+        # Include headers in a deterministic order so wrappers always match source.
+        for name in DECODE_KERNEL_HEADERS:
+            if name not in kernel_sources:
+                raise RuntimeError(f"Required header not provided: {name}")
+            print(f"Including: {name}")
+            f.write(f"// ====== {name} ======\n")
+            f.write(kernel_sources[name])
+            f.write("\n\n")
         
         # Add extern "C" wrappers for ctypes access
         f.write('''
@@ -351,6 +379,7 @@ void gdn_decode_v10_tma(
         "status": "success",
         "output": str(output_so),
         "size_kb": output_so.stat().st_size / 1024,
+        "exports": list(EXPECTED_EXPORTS),
     }
 
 
@@ -374,20 +403,21 @@ def test_cuda_library():
         lib = ctypes.CDLL(str(lib_path))
         print(f"Loaded: {lib_path}")
         
-        # Check for exported functions
-        functions = [
-            "gdn_decode_v7_fp32",
-            "gdn_decode_v7_fp4",
-            "gdn_prefill_v7_fp32",
-            "gdn_prefill_v7_fp4",
-        ]
-        
         found = []
-        for func in functions:
+        missing = []
+        for func in EXPECTED_EXPORTS:
             if hasattr(lib, func):
                 found.append(func)
                 print(f"  Found: {func}")
-        
+            else:
+                missing.append(func)
+
+        if missing:
+            print("  Missing exports:")
+            for func in missing:
+                print(f"    {func}")
+            return {"status": "error", "found": found, "missing": missing}
+
         return {"status": "success", "functions": found}
         
     except Exception as e:

@@ -1,32 +1,70 @@
 #!/usr/bin/env python3
 """
-Benchmark REAL CUDA kernels (v7, v8) vs Triton (v5)
+Benchmark real decode CUDA kernels vs Triton baseline.
 
 Usage:
     modal run scripts/bench_cuda_real.py
 """
 
+import os
+import sys
+from pathlib import Path
+
 import modal
 
-app = modal.App("gdn-bench-cuda-real")
+SCRIPT_DIR = Path(__file__).resolve().parent
+GDN_ROOT = SCRIPT_DIR.parent
+
+app = modal.App("gdn-kernels")
 
 cuda_image = (
     modal.Image.debian_slim(python_version="3.11")
-    .pip_install("torch>=2.4.0", "numpy", "tabulate")
-    .run_commands("pip install triton>=3.0.0")
+    .apt_install("wget", "git")
+    .pip_install(
+        "torch>=2.4.0",
+        "triton>=3.0.0",
+        "tabulate",
+        "numpy",
+    )
+    .run_commands(
+        "wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb",
+        "dpkg -i cuda-keyring_1.1-1_all.deb",
+        "apt-get update",
+        "apt-get install -y cuda-toolkit-12-8",
+        "git clone --depth 1 --branch v3.5.1 https://github.com/NVIDIA/cutlass.git /opt/cutlass",
+    )
+    .env({
+        "PATH": "/usr/local/cuda-12.8/bin:$PATH",
+        "LD_LIBRARY_PATH": "/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH",
+        "CUTLASS_PATH": "/opt/cutlass",
+        "CUDA_HOME": "/usr/local/cuda-12.8",
+    })
 )
 
 volume = modal.Volume.from_name("flashinfer-bench", create_if_missing=True)
 
+B200_GPU = "B200"
+MEDIUM_TIMEOUT = 600
+
+REQUIRED_EXPORTS = (
+    "gdn_decode_v7_fp32",
+    "gdn_decode_v8_fp32",
+    "gdn_decode_v7_graph_launch",
+    "gdn_decode_v9_fp32",
+    "gdn_decode_v9_tma",
+    "gdn_decode_v10_cute",
+    "gdn_decode_v10_tma",
+)
+
 
 @app.function(
     image=cuda_image,
-    gpu="B200",
-    timeout=600,
+    gpu=B200_GPU,
+    timeout=MEDIUM_TIMEOUT,
     volumes={"/data": volume},
 )
 def benchmark_cuda_real():
-    """Benchmark real CUDA v7/v8 kernels vs Triton v5."""
+    """Benchmark the real decode CUDA kernels against the Triton baseline."""
     import torch
     import triton
     import triton.language as tl
@@ -54,6 +92,18 @@ def benchmark_cuda_real():
     
     lib = ctypes.CDLL(str(lib_path))
     print(f"Loaded: {lib_path}")
+
+    missing_symbols = [name for name in REQUIRED_EXPORTS if not hasattr(lib, name)]
+    if missing_symbols:
+        print("ERROR: compiled library is missing required decode exports:")
+        for name in missing_symbols:
+            print(f"  {name}")
+        print("Rebuild with scripts/build_cuda.py so the library matches this benchmark.")
+        return {
+            "status": "error",
+            "error": "Missing required exports",
+            "missing_symbols": missing_symbols,
+        }
     
     # Setup function signatures
     # void gdn_decode_v7_fp32(
@@ -63,7 +113,7 @@ def benchmark_cuda_real():
     #     int strides... (16 ints),
     #     int BLOCK_V, void* stream)
     
-    lib.gdn_decode_v7_fp32.argtypes = [
+    decode_argtypes = [
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # Q, K, V, State
         ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p,  # A_log, A, DtBias, B_gate
         ctypes.c_void_p, ctypes.c_void_p,  # Out, NewState
@@ -75,28 +125,10 @@ def benchmark_cuda_real():
         ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
         ctypes.c_int, ctypes.c_void_p  # BLOCK_V, stream
     ]
-    lib.gdn_decode_v7_fp32.restype = None
-    
-    lib.gdn_decode_v8_fp32.argtypes = lib.gdn_decode_v7_fp32.argtypes
-    lib.gdn_decode_v8_fp32.restype = None
-    
-    # CUDA Graph version for low-latency
-    lib.gdn_decode_v7_graph_launch.argtypes = lib.gdn_decode_v7_fp32.argtypes
-    lib.gdn_decode_v7_graph_launch.restype = None
-    
-    # v9 CuTe/Swizzle versions
-    lib.gdn_decode_v9_fp32.argtypes = lib.gdn_decode_v7_fp32.argtypes
-    lib.gdn_decode_v9_fp32.restype = None
-    
-    lib.gdn_decode_v9_tma.argtypes = lib.gdn_decode_v7_fp32.argtypes
-    lib.gdn_decode_v9_tma.restype = None
-    
-    # v10 CuTe DSL + Library versions
-    lib.gdn_decode_v10_cute.argtypes = lib.gdn_decode_v7_fp32.argtypes
-    lib.gdn_decode_v10_cute.restype = None
-    
-    lib.gdn_decode_v10_tma.argtypes = lib.gdn_decode_v7_fp32.argtypes
-    lib.gdn_decode_v10_tma.restype = None
+
+    for export in REQUIRED_EXPORTS:
+        getattr(lib, export).argtypes = decode_argtypes
+        getattr(lib, export).restype = None
     
     print("CUDA functions loaded: v7, v8, v9, v10 (cute, tma)")
 
@@ -531,6 +563,7 @@ def benchmark_cuda_real():
             ("CUDA v8", lambda: run_cuda_v8(q, k, v, state, A_log, a, dt_bias, b_gate, scale, BLOCK_V)),
             ("CUDA v9", lambda: run_cuda_v9_fp32(q, k, v, state, A_log, a, dt_bias, b_gate, scale, BLOCK_V)),
             ("v10 CuTe", lambda: run_cuda_v10_cute(q, k, v, state, A_log, a, dt_bias, b_gate, scale, BLOCK_V)),
+            ("v10 TMA", lambda: run_cuda_v10_tma(q, k, v, state, A_log, a, dt_bias, b_gate, scale, BLOCK_V)),
         ]
         
         for name, run_fn in kernels:
@@ -552,8 +585,8 @@ def benchmark_cuda_real():
                     torch.cuda.synchronize()
                     times.append(start_event.elapsed_time(end_event))
                 
-                median_ms = np.median(times)
-                bandwidth = (state_bytes * 2) / (median_ms * 1e-3) / 1e9
+                median_ms = float(np.median(times))
+                bandwidth = float((state_bytes * 2) / (median_ms * 1e-3) / 1e9)
                 
                 results.append({
                     'kernel': name,

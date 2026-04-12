@@ -44,6 +44,7 @@ cuda_image = (
         "PATH": "/usr/local/cuda-12.8/bin:$PATH",
         "LD_LIBRARY_PATH": "/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH",
         "CUTLASS_PATH": "/opt/cutlass",
+        "CUDA_HOME": "/usr/local/cuda-12.8",
     })
 )
 

@@ -179,13 +179,7 @@ __device__ __forceinline__ void ptx_st_wb_v4(float* ptr, float4 val) {
 
 // Predicated move (conditional assignment)
 __device__ __forceinline__ float ptx_selp(float a, float b, bool pred) {
-    float result;
-    asm volatile(
-        "selp.f32 %0, %1, %2, %3;"
-        : "=f"(result)
-        : "f"(a), "f"(b), "r"((int)pred)
-    );
-    return result;
+    return pred ? a : b;
 }
 
 // Bar.sync with explicit barrier ID
@@ -427,8 +421,8 @@ __global__ void gdn_decode_kernel_ptx(
     const int num_threads = blockDim.x;
     
     // Shared memory
-    extern __shared__ float smem[];
-    float* q_smem = smem;                      // [D]
+    extern __shared__ float smem_fp32[];
+    float* q_smem = smem_fp32;                 // [D]
     float* k_smem = q_smem + D;                // [D]
     float* v_smem = k_smem + D;                // [BLOCK_V]
     float* state_smem = v_smem + BLOCK_V;      // [BLOCK_V * D]
@@ -594,8 +588,8 @@ __global__ void gdn_decode_kernel_ptx_bf16(
     const int num_threads = blockDim.x;
     
     // Shared memory - FP32 for computation
-    extern __shared__ float smem[];
-    float* q_smem = smem;
+    extern __shared__ float smem_bf16[];
+    float* q_smem = smem_bf16;
     float* k_smem = q_smem + D;
     float* v_smem = k_smem + D;
     float* state_smem = v_smem + BLOCK_V;
@@ -752,8 +746,8 @@ __global__ void gdn_decode_kernel_ptx_fp8(
     const int num_threads = blockDim.x;
     
     // Shared memory
-    extern __shared__ float smem[];
-    float* q_smem = smem;
+    extern __shared__ float smem_fp8[];
+    float* q_smem = smem_fp8;
     float* k_smem = q_smem + D;
     float* v_smem = k_smem + D;
     float* state_smem = v_smem + BLOCK_V;
@@ -954,8 +948,8 @@ __global__ void gdn_decode_kernel_ptx_fp4(
     const int warp_id = tid / WARP_SIZE;
     const int lane_id = tid % WARP_SIZE;
     
-    extern __shared__ char smem[];
-    float* q_smem = reinterpret_cast<float*>(smem);
+    extern __shared__ char smem_fp4[];
+    float* q_smem = reinterpret_cast<float*>(smem_fp4);
     float* k_smem = q_smem + D;
     float* v_smem = k_smem + D;
     float* state_smem = v_smem + BLOCK_V;

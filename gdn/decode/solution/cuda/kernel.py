@@ -1,8 +1,8 @@
 """
-GDN Decode v5 — Python wrapper for CUDA kernel
+GDN Decode CUDA wrapper.
 
-CUDA source embedded inline for Modal compatibility.
-Fallback: Triton (if JIT compilation fails in sandbox)
+Current packaged CUDA candidate is the v10 CuTe/TMA family.
+Fallback: Triton if CUDA JIT compilation fails.
 """
 
 import math
@@ -10,6 +10,14 @@ import os
 from pathlib import Path
 
 import torch
+
+try:
+    from .backend import BACKEND as _PACKAGED_BACKEND
+except Exception:
+    try:
+        from backend import BACKEND as _PACKAGED_BACKEND
+    except Exception:
+        _PACKAGED_BACKEND = "cute"
 
 # ============================================================
 # CUDA KERNEL SOURCE (EMBEDDED)
@@ -245,8 +253,31 @@ _cuda_module = None
 _use_triton_fallback = False
 
 
+def _ensure_cuda_home():
+    """Point PyTorch's JIT extension loader at a real CUDA toolkit when available."""
+    if os.environ.get("CUDA_HOME"):
+        return
+
+    for candidate in ("/usr/local/cuda", "/usr/local/cuda-12.8"):
+        if os.path.exists(candidate):
+            os.environ["CUDA_HOME"] = candidate
+            return
+
+
+def _read_v10_header_source() -> str:
+    bundled = Path(__file__).with_name("gdn_decode_v10.cuh")
+    if bundled.exists():
+        return bundled.read_text()
+
+    repo_copy = Path(__file__).resolve().parents[3] / "kernels" / "cute_cpp" / "gdn_decode_v10.cuh"
+    if repo_copy.exists():
+        return repo_copy.read_text()
+
+    raise FileNotFoundError("Could not locate gdn_decode_v10.cuh for decode CUDA packaging.")
+
+
 def _try_load_cuda_module():
-    """Attempt to load CUDA kernel via JIT compilation."""
+    """Attempt to load v10 CuTe/TMA CUDA kernel via JIT compilation."""
     global _cuda_module, _use_triton_fallback
     
     if _cuda_module is not None:
@@ -256,13 +287,16 @@ def _try_load_cuda_module():
         return None
     
     try:
+        _ensure_cuda_home()
         from torch.utils.cpp_extension import load_inline
-        
+
+        v10_header = _read_v10_header_source()
+
         wrapper = r'''
 #include <torch/extension.h>
 #include <ATen/cuda/CUDAContext.h>
 
-void gdn_decode_v5_wrapper(
+void gdn_decode_v10_cute_wrapper(
     torch::Tensor Q, torch::Tensor K, torch::Tensor V, torch::Tensor State,
     torch::Tensor A_log, torch::Tensor A, torch::Tensor DtBias, torch::Tensor B_gate,
     torch::Tensor Out, torch::Tensor NewState,
@@ -270,8 +304,34 @@ void gdn_decode_v5_wrapper(
 ) {
     int B = Q.size(0);
     int num_v_heads = V.size(1);
-    
-    gdn::gdn_decode_v5_launch(
+
+    gdn::gdn_decode_v10_launch_cute(
+        Q.data_ptr(), K.data_ptr(), V.data_ptr(), State.data_ptr(),
+        A_log.data_ptr(), A.data_ptr(), DtBias.data_ptr(), B_gate.data_ptr(),
+        Out.data_ptr(), NewState.data_ptr(),
+        scale, B, num_v_heads, 128,
+        Q.stride(0), Q.stride(1),
+        K.stride(0), K.stride(1),
+        V.stride(0), V.stride(1),
+        State.stride(0), State.stride(1), State.stride(2),
+        A.stride(0), B_gate.stride(0),
+        Out.stride(0), Out.stride(1),
+        NewState.stride(0), NewState.stride(1), NewState.stride(2),
+        BLOCK_V,
+        at::cuda::getCurrentCUDAStream()
+    );
+}
+
+void gdn_decode_v10_tma_wrapper(
+    torch::Tensor Q, torch::Tensor K, torch::Tensor V, torch::Tensor State,
+    torch::Tensor A_log, torch::Tensor A, torch::Tensor DtBias, torch::Tensor B_gate,
+    torch::Tensor Out, torch::Tensor NewState,
+    float scale, int BLOCK_V
+) {
+    int B = Q.size(0);
+    int num_v_heads = V.size(1);
+
+    gdn::gdn_decode_v10_launch_tma(
         Q.data_ptr(), K.data_ptr(), V.data_ptr(), State.data_ptr(),
         A_log.data_ptr(), A.data_ptr(), DtBias.data_ptr(), B_gate.data_ptr(),
         Out.data_ptr(), NewState.data_ptr(),
@@ -289,16 +349,17 @@ void gdn_decode_v5_wrapper(
 }
 
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-    m.def("gdn_decode_v5", &gdn_decode_v5_wrapper, "GDN Decode v5 CUDA kernel");
+    m.def("gdn_decode_v10_cute", &gdn_decode_v10_cute_wrapper, "GDN Decode v10 CuTe CUDA kernel");
+    m.def("gdn_decode_v10_tma", &gdn_decode_v10_tma_wrapper, "GDN Decode v10 TMA CUDA kernel");
 }
 '''
-        
+
         _cuda_module = load_inline(
-            name='gdn_decode_v5_cuda',
+            name='gdn_decode_v10_cuda',
             cpp_sources='',
-            cuda_sources=CUDA_SOURCE + wrapper,
-            functions=['gdn_decode_v5'],
-            extra_cuda_cflags=['-O3', '--use_fast_math'],
+            cuda_sources=v10_header + "\n" + wrapper,
+            functions=['gdn_decode_v10_cute', 'gdn_decode_v10_tma'],
+            extra_cuda_cflags=['-O3', '--use_fast_math', '-std=c++17', '-I/opt/cutlass/include'],
             verbose=False,
         )
         return _cuda_module
@@ -417,9 +478,9 @@ def _triton_kernel(q, k, v, state, A_log, a, dt_bias, b, scale, BLOCK_V):
 
 def kernel(q, k, v, state, A_log, a, dt_bias, b, scale):
     """
-    GDN Decode v5 kernel.
+    GDN Decode CUDA packaged kernel.
     
-    Attempts CUDA JIT compilation, falls back to Triton if sandbox blocks it.
+    Attempts v10 CuTe/TMA CUDA JIT compilation, falls back to Triton if needed.
     """
     B, _, num_q_heads, D = q.shape
     num_v_heads = v.shape[2]
@@ -457,8 +518,12 @@ def kernel(q, k, v, state, A_log, a, dt_bias, b, scale):
         
         out = torch.empty(B, num_v_heads, D, dtype=torch.bfloat16, device=device)
         new_S = torch.empty_like(S)
-        
-        cuda_mod.gdn_decode_v5(q_c, k_c, v_c, S, A_log, a_c, dt_bias, b_c, out, new_S, float(scale), BLOCK_V)
+
+        backend = (_PACKAGED_BACKEND or "cute").lower()
+        if backend == "tma":
+            cuda_mod.gdn_decode_v10_tma(q_c, k_c, v_c, S, A_log, a_c, dt_bias, b_c, out, new_S, float(scale), BLOCK_V)
+        else:
+            cuda_mod.gdn_decode_v10_cute(q_c, k_c, v_c, S, A_log, a_c, dt_bias, b_c, out, new_S, float(scale), BLOCK_V)
         return out.unsqueeze(1), new_S
     
     else:

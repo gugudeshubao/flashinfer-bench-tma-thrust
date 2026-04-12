@@ -8,10 +8,23 @@ import os
 import sys
 from pathlib import Path
 
-# Add scripts directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import modal
 
-from modal_config import app, triton_image, B200_GPU, MEDIUM_TIMEOUT
+SCRIPT_DIR = Path(__file__).resolve().parent
+
+app = modal.App("gdn-kernels")
+
+triton_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .pip_install(
+        "torch>=2.4.0",
+        "triton>=3.0.0",
+        "tabulate",
+    )
+)
+
+B200_GPU = "B200"
+MEDIUM_TIMEOUT = 600
 
 # Get kernel directory path - mount Triton kernels
 kernel_dir = Path(__file__).parent.parent / "prefill" / "solution" / "triton"
@@ -33,7 +46,49 @@ def benchmark_prefill_versions():
     import triton.language as tl
     
     # Import the kernel module
-    from kernel import _prefill_kernel, _prefill_kernel_v5, kernel as prefill_kernel
+    from kernel import _prefill_kernel, _prefill_kernel_v5
+
+    def run_prefill_kernel(kernel_fn, q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale):
+        T, num_q_heads, D = q.shape
+        num_v_heads = v.shape[1]
+        N = cu_seqlens.shape[0] - 1
+        device = q.device
+
+        BLOCK_V = 16 if N <= 4 else 32
+        V_BLOCKS = D // BLOCK_V
+
+        if scale is None or scale == 0.0:
+            scale = 1.0 / math.sqrt(D)
+
+        q_c = q.contiguous()
+        k_c = k.contiguous()
+        v_c = v.contiguous()
+        a_c = a.contiguous()
+        b_c = b.contiguous()
+        cu = cu_seqlens.contiguous()
+        S = state.contiguous() if state is not None else torch.zeros(N, num_v_heads, D, D, dtype=torch.float32, device=device)
+
+        out = torch.empty(T, num_v_heads, D, dtype=torch.bfloat16, device=device)
+        new_S = torch.empty_like(S)
+
+        kernel_fn[(N, num_v_heads, V_BLOCKS)](
+            q_c, k_c, v_c, S,
+            A_log, a_c, dt_bias, b_c,
+            cu, out, new_S,
+            float(scale),
+            q_c.stride(0), q_c.stride(1),
+            k_c.stride(0), k_c.stride(1),
+            v_c.stride(0), v_c.stride(1),
+            S.stride(0), S.stride(1), S.stride(2),
+            a_c.stride(0),
+            b_c.stride(0),
+            out.stride(0), out.stride(1),
+            new_S.stride(0), new_S.stride(1), new_S.stride(2),
+            D=128,
+            BLOCK_V=BLOCK_V,
+            num_warps=4,
+        )
+        return out, new_S
 
     D, num_q_heads, num_v_heads = 128, 4, 8
     
@@ -69,8 +124,8 @@ def benchmark_prefill_versions():
         
         # Warmup
         for _ in range(3):
-            prefill_kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale, use_v5=False)
-            prefill_kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale, use_v5=True)
+            run_prefill_kernel(_prefill_kernel, q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale)
+            run_prefill_kernel(_prefill_kernel_v5, q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale)
         torch.cuda.synchronize()
         
         # Benchmark v4 (original)
@@ -78,7 +133,7 @@ def benchmark_prefill_versions():
         torch.cuda.synchronize()
         t0 = time.perf_counter()
         for _ in range(iters):
-            prefill_kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale, use_v5=False)
+            run_prefill_kernel(_prefill_kernel, q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale)
         torch.cuda.synchronize()
         v4_time = (time.perf_counter() - t0) / iters * 1000
         
@@ -86,7 +141,7 @@ def benchmark_prefill_versions():
         torch.cuda.synchronize()
         t0 = time.perf_counter()
         for _ in range(iters):
-            prefill_kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale, use_v5=True)
+            run_prefill_kernel(_prefill_kernel_v5, q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale)
         torch.cuda.synchronize()
         v5_time = (time.perf_counter() - t0) / iters * 1000
         
@@ -137,8 +192,8 @@ def benchmark_prefill_versions():
     b = torch.randn(256, num_v_heads, dtype=torch.float32, device=device) * 0.1
     cu_seqlens = torch.tensor([0, 256], dtype=torch.int32, device=device)
     
-    out_v4, state_v4 = prefill_kernel(q, k, v, state.clone(), A_log, a, dt_bias, b, cu_seqlens, scale, use_v5=False)
-    out_v5, state_v5 = prefill_kernel(q, k, v, state.clone(), A_log, a, dt_bias, b, cu_seqlens, scale, use_v5=True)
+    out_v4, state_v4 = run_prefill_kernel(_prefill_kernel, q, k, v, state.clone(), A_log, a, dt_bias, b, cu_seqlens, scale)
+    out_v5, state_v5 = run_prefill_kernel(_prefill_kernel_v5, q, k, v, state.clone(), A_log, a, dt_bias, b, cu_seqlens, scale)
     
     # Check for nan
     v4_has_nan = torch.isnan(out_v4).any().item() or torch.isnan(state_v4).any().item()

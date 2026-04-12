@@ -13,7 +13,6 @@ Setup (one-time):
 """
 
 import json
-import sys
 from pathlib import Path
 
 # GDN directory is the parent of benchmarks/
@@ -27,9 +26,25 @@ trace_volume = modal.Volume.from_name("flashinfer-trace", create_if_missing=True
 TRACE_SET_PATH = "/data"
 
 image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .apt_install("ninja-build", "build-essential")  # For CUDA JIT compilation
-    .pip_install("flashinfer-bench", "torch", "triton", "numpy", "ninja", "numba")
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("wget", "git", "ninja-build", "build-essential")
+    .pip_install("torch>=2.4.0", "triton>=3.0.0", "numpy", "tabulate")
+    .run_commands(
+        "wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb",
+        "dpkg -i cuda-keyring_1.1-1_all.deb",
+        "apt-get update",
+        "apt-get install -y cuda-toolkit-12-8",
+        "git clone --depth 1 --branch v3.5.1 https://github.com/NVIDIA/cutlass.git /opt/cutlass",
+    )
+    .env(
+        {
+            "PATH": "/usr/local/cuda-12.8/bin:$PATH",
+            "LD_LIBRARY_PATH": "/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH",
+            "CUTLASS_PATH": "/opt/cutlass",
+            "CUDA_HOME": "/usr/local/cuda-12.8",
+        }
+    )
+    .pip_install("flashinfer-bench", "ninja", "numba")
 )
 
 
@@ -46,7 +61,7 @@ KERNEL_CONFIGS = {
             "subdir": "solution/triton",
         },
         "cuda": {
-            "name": "tma-thrust-gdn-decode-cuda-v5",
+            "name": "tma-thrust-gdn-decode-cuda-v10",
             "subdir": "solution/cuda",
         },
         "baseline": {
@@ -65,7 +80,7 @@ KERNEL_CONFIGS = {
             "subdir": "solution/triton",
         },
         "cuda": {
-            "name": "tma-thrust-gdn-prefill-cuda-v5",
+            "name": "tma-thrust-gdn-prefill-cuda-v6",
             "subdir": "solution/cuda",
         },
         "baseline": {
@@ -81,7 +96,7 @@ KERNEL_CONFIGS = {
 }
 
 
-def build_solution_dict(kernel_dir_name: str, variant: str = "solution") -> dict:
+def build_solution_dict(kernel_dir_name: str, variant: str = "solution", cuda_backend: str = "cute") -> dict:
     """Build Solution JSON dict locally (no flashinfer_bench needed).
 
     variant: 'solution' (optimized) or 'baseline' (Python reference)
@@ -94,12 +109,28 @@ def build_solution_dict(kernel_dir_name: str, variant: str = "solution") -> dict
     for py_file in sorted(source_dir.glob("*.py")):
         sources.append({"path": py_file.name, "content": py_file.read_text()})
 
+    if kernel_dir_name == "decode" and variant == "cuda":
+        backend = cuda_backend.lower()
+        if backend not in {"cute", "tma"}:
+            raise ValueError(f"Unsupported decode cuda backend: {cuda_backend}")
+        sources = [s for s in sources if s["path"] != "backend.py"]
+        sources.append({"path": "backend.py", "content": f'BACKEND = "{backend}"\n'})
+
+        v10_header = GDN_ROOT / "kernels" / "cute_cpp" / "gdn_decode_v10.cuh"
+        if not v10_header.exists():
+            raise FileNotFoundError(f"Missing decode v10 header: {v10_header}")
+        sources.append({"path": "gdn_decode_v10.cuh", "content": v10_header.read_text()})
+
     entry_file = cfg["entry_point"].split("::")[0]
     assert any(s["path"] == entry_file for s in sources), \
         f"Entry file {entry_file!r} not found in {[s['path'] for s in sources]}"
 
+    solution_name = cfg[variant]["name"]
+    if kernel_dir_name == "decode" and variant == "cuda":
+        solution_name = f"{solution_name}-{cuda_backend.lower()}"
+
     return {
-        "name": cfg[variant]["name"],
+        "name": solution_name,
         "definition": cfg["definition"],
         "author": cfg["author"],
         "spec": {
@@ -157,6 +188,7 @@ def run_benchmark(solution_dict: dict, config_dict: dict = None) -> dict:
     traces = result_trace_set.traces.get(definition.name, [])
 
     results = {}
+    debug_failures = 0
     for trace in traces:
         if trace.evaluation:
             entry = {
@@ -172,6 +204,15 @@ def run_benchmark(solution_dict: dict, config_dict: dict = None) -> dict:
                 c = trace.evaluation.correctness
                 entry["max_abs_error"] = c.max_absolute_error
                 entry["max_rel_error"] = c.max_relative_error
+
+            if entry["status"] != "PASSED" and debug_failures < 3:
+                debug_failures += 1
+                print("\n[debug] Non-passed evaluation details")
+                print(f"  workload={trace.workload.uuid}")
+                try:
+                    print(json.dumps(trace.evaluation.model_dump(exclude_none=True), indent=2, default=str))
+                except Exception:
+                    print(repr(trace.evaluation))
             results[trace.workload.uuid] = entry
 
     return {solution.definition: results}
@@ -256,13 +297,15 @@ def main(
     trials: int = 5,
     compare: bool = False,
     cuda: bool = False,
+    cuda_backend: str = "cute",
 ):
     """
     Run GDN kernel benchmarks on Modal B200.
 
     --kernel:  decode | prefill | both  (default: both)
     --compare: also run Python baseline and show side-by-side latency comparison
-    --cuda:    run CUDA v5 kernel instead of Triton v4
+    --cuda:    run packaged CUDA kernel instead of Triton solution
+    --cuda-backend: for decode CUDA packaging, choose `cute` or `tma`
     """
     config_dict = {"warmup_runs": warmup, "iterations": iters, "num_trials": trials}
 
@@ -290,7 +333,7 @@ def main(
             use_variant = "solution"
         
         print(f"Packing {k} {use_variant} ({dir_name})...")
-        sol_dict = build_solution_dict(dir_name, variant=use_variant)
+        sol_dict = build_solution_dict(dir_name, variant=use_variant, cuda_backend=cuda_backend)
         print(f"  -> {sol_dict['name']}")
         sol_futures[k] = run_benchmark.spawn(sol_dict, config_dict)
 

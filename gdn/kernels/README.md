@@ -1,169 +1,36 @@
-# GDN Kernels
+# Kernel Sources
 
-Gated Delta Net (GDN) kernel implementations organized by framework.
+This directory contains raw kernel source experiments.
 
-## Directory Structure
+It is not the production source of truth by itself.
+For current measured status, use:
 
-```
-src/kernels/
-├── cuda/          # Raw CUDA C++ (v5-v8) — 低级控制，手动优化
-├── cute_cpp/      # CuTe C++ (v9-v10) — CUTLASS 3.x 模板，NVCC 编译
-├── cute_dsl/      # CuTe DSL (MLIR) — CUTLASS 4.0+，Python → MLIR → PTX
-├── cutile/        # cuTile Python — CUDA 13.1，NVIDIA Tile-based API
-├── ptx/           # PTX Inline Assembly — 极致底层控制，内嵌汇编
-└── triton/        # Triton (baseline) — OpenAI 高级 DSL
-```
+- [docs/PERFORMANCE.md](../docs/PERFORMANCE.md)
+- [benchmarks/bench_modal.py](../benchmarks/bench_modal.py)
 
-## CuTe C++ vs CuTe DSL (重要区分!)
+## Directory Roles
 
-| 方面 | CuTe C++ (cute_cpp/) | CuTe DSL (cute_dsl/) |
-|------|----------------------|----------------------|
-| **语言** | C++ 模板 | Python |
-| **编译** | NVCC → PTX | **MLIR → LLVM → PTX** |
-| **库版本** | CUTLASS 3.x | CUTLASS 4.0+ |
-| **开发效率** | 中 (需懂模板元编程) | 高 (Python 语法) |
-| **编译时间** | 分钟级 (AOT) | 秒级 (JIT) |
-| **性能** | 100% | ~100% (理论) |
-| **典型应用** | 通用 CUDA | **FlashAttention-4** |
-
-```
-CuTe C++:   C++ Templates  →  NVCC  →  PTX  →  SASS
-                ↑
-           手动控制 Layout/Swizzle
-
-CuTe DSL:   Python DSL  →  MLIR  →  LLVM  →  PTX  →  SASS
-                              ↑
-                        自动优化 Pass
+```text
+kernels/
+├── cuda/       # Raw CUDA kernels
+├── cute_cpp/   # CuTe C++ / CUTLASS kernels
+├── cute_dsl/   # CuTe DSL experiments
+├── cutile/     # cuTile experiments
+├── ptx/        # Inline PTX experiments
+└── triton/     # Older Triton-side experiments
 ```
 
-## Technology Stack Comparison
+## Current Interpretation
 
-| 维度 | Raw CUDA | PTX Inline | CuTe C++ | CuTe DSL | cuTile | Triton |
-|------|----------|------------|----------|----------|--------|--------|
-| **语言** | C++ | C++ + ASM | C++ | **Python** | Python | Python |
-| **编译器** | NVCC | NVCC | NVCC | **MLIR** | cuTile JIT | Triton |
-| **抽象级别** | 低 | **最低** | 中 | 中 | 高 | 高 |
-| **SMEM 控制** | 手动 | 手动 | 声明式 | 声明式 | 自动 | 自动 |
-| **Tensor Core** | 手动 PTX | 手动 PTX | `TiledMMA` | `TiledMMA` | 自动 | 自动 |
-| **性能上限** | 最高 | **最高** | 最高 | **最高** | 受限* | 略低 |
-| **典型应用** | v7/v8 | 极致优化 | v9/v10 | **FlashAttn-4** | N/A | v5 |
+- Decode:
+  raw kernel peak currently comes from the `v9/v10` family, especially `v10 CuTe` at large batch.
+- Prefill:
+  the source files in this directory are useful research material, but the current CuTe/tcgen chase path is mainly driven by
+  [prefill/solution/cuda/chunked_proto.py](../prefill/solution/cuda/chunked_proto.py),
+  not by a standalone kernel in `kernels/cute_cpp/`.
 
-*cuTile 受限于 tile-based 索引，不适合 4D strided 访问模式
+## What To Trust
 
-## Version Summary
-
-| Version | Framework | Language | Compiler | Key Feature | Status |
-|---------|-----------|----------|----------|-------------|--------|
-| v5 | Raw CUDA | C++ | NVCC | Baseline | ✅ |
-| v6 | Raw CUDA | C++ | NVCC | TMA async | ✅ |
-| v7 | Raw CUDA | C++ | NVCC | float4 + FP4 | ✅ |
-| v8 | Raw CUDA | C++ | NVCC | Warp specialization | ✅ |
-| **v9** | **CuTe C++** | C++ | NVCC | **SMEM swizzle** | ✅ |
-| v10 | CuTe C++ | C++ | NVCC | TiledMMA | ✅ |
-| PTX | PTX Inline | C++ + ASM | NVCC | Inline assembly | ✅ |
-| DSL | **CuTe DSL** | Python | **MLIR** | FlashAttn-4 style | ✅ |
-| cuTile | cuTile | Python | cuTile JIT | Tile-based | ⚠️ 受限 |
-| Triton | Triton | Python | Triton | Auto-tuning | ✅ |
-
-## Performance Summary (B200, 8 TB/s peak)
-
-### Decode (Latest Benchmark: 2026-03-28)
-
-| Batch | Triton v5 | Time (ms) | BW (GB/s) | B200 Util. |
-|-------|-----------|-----------|-----------|------------|
-| 1 | baseline | 0.0455 | 23 | 0.3% |
-| 4 | baseline | 0.0449 | 93 | 1.2% |
-| 16 | baseline | 0.0447 | 375 | 4.7% |
-| 64 | baseline | 0.0447 | 1,502 | 18.8% |
-| **256** | baseline | 0.0959 | **2,798** | **35.0%** |
-
-### Prefill (Latest Benchmark: 2026-03-28)
-
-| Config | N | SeqLen | Time (ms) | BW (GB/s) | M tok/s |
-|--------|---|--------|-----------|-----------|---------|
-| Short | 4 | 64 | 0.085 | 62 | 3.02 |
-| Medium | 4 | 256 | 0.225 | 37 | 4.55 |
-| Long | 4 | 1024 | 0.786 | 27 | 5.21 |
-| **Many** | 16 | 64 | 0.125 | **167** | **8.18** |
-
-### Historical Best (CuTe C++ compiled)
-
-| Batch | Triton | CuTe v9 | CuTe v10 | Best |
-|-------|--------|---------|----------|------|
-| 1 | 24 GB/s | **27 GB/s** | 26 GB/s | **v9** |
-| 16 | 386 GB/s | **405 GB/s** | 403 GB/s | **v9** |
-| 64 | **1,518 GB/s** | 1,302 GB/s | 1,287 GB/s | **Triton** |
-| **256** | 2,834 GB/s | 7,585 GB/s | **7,602 GB/s** | **v10 (95%)** |
-
-**Key Insights:**
-- CuTe C++ 在 batch=256 达到 **95% B200 峰值带宽**
-- Triton 在 batch=64 胜出 (auto-tuning 优势)
-- PTX 作为 fallback，理论可达 100%
-
-## Why Can't We Use Tensor Core for Decode?
-
-```
-GDN Decode: S @ q = [128×128] × [128] → [128]
-                                  ↑
-                            矩阵-向量 (N=1)
-                            Tensor Core 要求 N≥16
-```
-
-- **Decode**: Memory-bound (AI=1 FLOP/byte) → 优化带宽
-- **Prefill**: Can be compute-bound (AI=8 with chunking) → 可用 tcgen05.mma (Blackwell)
-
-## Prefill Compute Density Optimization (v6)
-
-The key insight: **Chunking increases arithmetic intensity!**
-
-```
-                     Sequential (v5)          Chunked (v6, C=8)
-                     ───────────────          ─────────────────
-Tokens processed     1 per iteration          8 per iteration
-State access         Load once per token      Load once per 8 tokens
-Arithmetic Intensity 1 FLOP/byte              8 FLOP/byte
-Bound                Memory-bound             Compute-bound!
-```
-
-### Roofline Analysis (B200)
-
-```
-B200 Specs:
-  - FP32: 70 TFLOPS
-  - Memory BW: 8 TB/s
-  - Ridge Point: 70/8 = 8.75 FLOP/byte
-
-  CHUNK_SIZE | AI (FLOP/byte) | Status
-  -----------|----------------|--------
-      1      |      1.0       | Memory-bound ❌
-      4      |      4.0       | Transitional
-      8      |      8.0       | Near ridge ≈
-     16      |     16.0       | Compute-bound ✅
-```
-
-### Files
-
-| Directory | Decode | Prefill | Notes |
-|-----------|--------|---------|-------|
-| `cuda/` | v5-v8 | v5-v8 | 完整版本 |
-| `cute_cpp/` | v9-v10 | **v9** | SMEM swizzle + chunking |
-| `cute_dsl/` | ✅ | **✅** | MLIR-based |
-| `ptx/` | ✅ | ✅ | Fast math assembly |
-| `triton/` | ✅ | ✅ | Baseline |
-| `cutile/` | ✅ | ⚠️ | 4D限制，不推荐 |
-
-## Delta Rule (All Versions)
-
-```cpp
-// CRITICAL: Apply g FIRST, then compute old_v
-float decayed_s = g * state[idx];      // Decay first!
-old_v += decayed_s * k[d];              // Use decayed state
-// ...
-new_s = decayed_s + delta * k[d];       // Update
-```
-
-## Build
-
-```bash
-modal run scripts/build_cuda.py
-```
+- Trust `bench_modal.py` for production-facing decisions.
+- Trust `scripts/bench_cuda_real.py` for decode raw kernel ranking.
+- Trust `scripts/bench_prefill_tensorcore.py` for prefill CuTe/tcgen progress.

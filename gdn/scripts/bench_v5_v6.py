@@ -8,11 +8,41 @@ Usage:
 
 import os
 import sys
+from pathlib import Path
 
-# Add scripts directory to path for imports
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import modal
 
-from modal_config import app, cuda_image, B200_GPU, MEDIUM_TIMEOUT
+SCRIPT_DIR = Path(__file__).resolve().parent
+GDN_ROOT = SCRIPT_DIR.parent
+
+app = modal.App("gdn-kernels")
+
+cuda_image = (
+    modal.Image.debian_slim(python_version="3.11")
+    .apt_install("wget", "git")
+    .pip_install(
+        "torch>=2.4.0",
+        "triton>=3.0.0",
+        "tabulate",
+        "numpy",
+    )
+    .run_commands(
+        "wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb",
+        "dpkg -i cuda-keyring_1.1-1_all.deb",
+        "apt-get update",
+        "apt-get install -y cuda-toolkit-12-8",
+        "git clone --depth 1 --branch v3.5.1 https://github.com/NVIDIA/cutlass.git /opt/cutlass",
+    )
+    .env({
+        "PATH": "/usr/local/cuda-12.8/bin:$PATH",
+        "LD_LIBRARY_PATH": "/usr/local/cuda-12.8/lib64:$LD_LIBRARY_PATH",
+        "CUTLASS_PATH": "/opt/cutlass",
+        "CUDA_HOME": "/usr/local/cuda-12.8",
+    })
+)
+
+B200_GPU = "B200"
+MEDIUM_TIMEOUT = 600
 
 
 @app.function(image=cuda_image, gpu=B200_GPU, timeout=MEDIUM_TIMEOUT)

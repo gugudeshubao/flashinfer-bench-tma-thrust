@@ -36,6 +36,7 @@
 
 #pragma once
 
+#include <cuda.h>
 #include <cuda_runtime.h>
 #include <cuda_bf16.h>
 #include <cuda_fp16.h>
@@ -89,9 +90,7 @@ __device__ __forceinline__ void ptx_st_wb_pf(float* ptr, float val) {
 
 // Predicated select
 __device__ __forceinline__ float ptx_selp_pf(float a, float b, bool pred) {
-    float result;
-    asm volatile("selp.f32 %0, %1, %2, %3;" : "=f"(result) : "f"(a), "f"(b), "r"((int)pred));
-    return result;
+    return pred ? a : b;
 }
 
 // ============================================================
@@ -138,9 +137,13 @@ __device__ __forceinline__ float warp_reduce_sum(float val) {
 __device__ __forceinline__ uint32_t pack_bf16x2(float a, float b) {
     __nv_bfloat16 a_bf16 = __float2bfloat16(a);
     __nv_bfloat16 b_bf16 = __float2bfloat16(b);
-    uint32_t result;
-    asm volatile("mov.b32 %0, {%1, %2};" : "=r"(result) : "h"(a_bf16), "h"(b_bf16));
-    return result;
+    __nv_bfloat162 packed = __halves2bfloat162(a_bf16, b_bf16);
+    union {
+        __nv_bfloat162 vec;
+        uint32_t bits;
+    } u;
+    u.vec = packed;
+    return u.bits;
 }
 
 // mma.sync.aligned.m16n8k16.row.col.f32.bf16.bf16.f32

@@ -12,12 +12,18 @@ Usage:
 """
 
 import modal
+from pathlib import Path
 
 app = modal.App("test-gdn-correctness")
 
+GDN_ROOT = Path(__file__).resolve().parents[1]
+GDN_REMOTE_ROOT = "/gdn"
+
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install("torch", "numpy", "triton")
+    .apt_install("ninja-build", "build-essential")
+    .pip_install("torch", "numpy", "triton", "ninja")
+    .add_local_dir(GDN_ROOT, remote_path=GDN_REMOTE_ROOT)
 )
 
 
@@ -339,6 +345,218 @@ def test_gate_broadcast():
     return True
 
 
+@app.function(
+    image=image,
+    gpu="B200:1",
+    timeout=600,
+)
+def test_prefill_correctness():
+    """Run prefill correctness tests against reference, Triton, and CUDA wrapper."""
+    import importlib.util
+    import math
+    import sys
+    from pathlib import Path
+
+    import torch
+    import torch.nn.functional as F
+
+    print("=" * 70)
+    print("Prefill Correctness Tests")
+    print("=" * 70)
+    print(f"GPU: {torch.cuda.get_device_name(0)}")
+    print()
+
+    gdn_root = Path(GDN_REMOTE_ROOT)
+    sys.path.insert(0, str(gdn_root))
+
+    def load_module(module_name: str, path: Path):
+        spec = importlib.util.spec_from_file_location(module_name, path)
+        module = importlib.util.module_from_spec(spec)
+        assert spec.loader is not None
+        spec.loader.exec_module(module)
+        return module
+
+    triton_mod = load_module(
+        "gdn_prefill_solution_triton",
+        gdn_root / "prefill" / "solution" / "triton" / "kernel.py",
+    )
+    cuda_mod = load_module(
+        "gdn_prefill_solution_cuda",
+        gdn_root / "prefill" / "solution" / "cuda" / "kernel.py",
+    )
+
+    def reference_prefill(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale):
+        total_seq_len, num_q_heads, head_size = q.shape
+        num_v_heads = v.shape[1]
+        num_k_heads = k.shape[1]
+        num_sab_heads = max(num_q_heads, num_v_heads)
+        num_seqs = cu_seqlens.size(0) - 1
+        device = q.device
+
+        if scale is None or scale == 0.0:
+            scale = 1.0 / math.sqrt(head_size)
+
+        x = a.float() + dt_bias.float()
+        g = torch.exp(-torch.exp(A_log.float()) * F.softplus(x))
+        beta = torch.sigmoid(b.float())
+
+        q_exp = q.repeat_interleave(num_v_heads // num_q_heads, dim=1)
+        k_exp = k.repeat_interleave(num_v_heads // num_k_heads, dim=1)
+
+        output = torch.zeros(
+            (total_seq_len, num_sab_heads, head_size), dtype=torch.bfloat16, device=device
+        )
+        new_state = torch.zeros(
+            (num_seqs, num_sab_heads, head_size, head_size), dtype=torch.float32, device=device
+        )
+
+        for seq_idx in range(num_seqs):
+            seq_start = int(cu_seqlens[seq_idx].item())
+            seq_end = int(cu_seqlens[seq_idx + 1].item())
+            seq_len = seq_end - seq_start
+
+            if state is not None:
+                state_hkv = state[seq_idx].clone().float().transpose(-1, -2)
+            else:
+                state_hkv = torch.zeros(
+                    (num_sab_heads, head_size, head_size), dtype=torch.float32, device=device
+                )
+
+            if seq_len <= 0:
+                new_state[seq_idx] = state_hkv.transpose(-1, -2)
+                continue
+
+            for i in range(seq_len):
+                t = seq_start + i
+                q_h1k = q_exp[t].unsqueeze(1).float()
+                k_h1k = k_exp[t].unsqueeze(1).float()
+                v_h1v = v[t].unsqueeze(1).float()
+                g_h11 = g[t].unsqueeze(1).unsqueeze(2)
+                beta_h11 = beta[t].unsqueeze(1).unsqueeze(2)
+
+                old_state_hkv = g_h11 * state_hkv
+                old_v_h1v = k_h1k @ old_state_hkv
+                new_v_h1v = beta_h11 * v_h1v + (1 - beta_h11) * old_v_h1v
+                state_remove = torch.einsum("hkl,hlv->hkv", k_h1k.transpose(-1, -2), old_v_h1v)
+                state_update = torch.einsum("hkl,hlv->hkv", k_h1k.transpose(-1, -2), new_v_h1v)
+                state_hkv = old_state_hkv - state_remove + state_update
+
+                output[t] = (scale * (q_h1k @ state_hkv)).squeeze(1).to(torch.bfloat16)
+
+            new_state[seq_idx] = state_hkv.transpose(-1, -2)
+
+        return output, new_state
+
+    test_cases = [
+        {"name": "single sequence", "lengths": [32]},
+        {"name": "varlen with empty", "lengths": [0, 7, 19, 3]},
+        {"name": "mixed short batch", "lengths": [1, 2, 4, 8, 0, 5]},
+    ]
+
+    results = []
+    D = 128
+    num_q_heads = 4
+    num_v_heads = 8
+    device = "cuda"
+
+    for tc in test_cases:
+        lengths = tc["lengths"]
+        num_seqs = len(lengths)
+        total_tokens = sum(lengths)
+        name = tc["name"]
+
+        print(f"\n{'=' * 60}")
+        print(f"Test: {name} | lengths={lengths}")
+        print(f"{'=' * 60}")
+
+        torch.manual_seed(1234 + total_tokens + num_seqs)
+
+        q = (torch.randn(total_tokens, num_q_heads, D, dtype=torch.float32, device=device) * 0.1).to(torch.bfloat16)
+        k_fp32 = torch.randn(total_tokens, num_q_heads, D, dtype=torch.float32, device=device)
+        k = F.normalize(k_fp32, dim=-1).to(torch.bfloat16)
+        v = (torch.randn(total_tokens, num_v_heads, D, dtype=torch.float32, device=device) * 0.1).to(torch.bfloat16)
+        state = torch.randn(num_seqs, num_v_heads, D, D, dtype=torch.float32, device=device) * 0.01
+        A_log = torch.randn(num_v_heads, dtype=torch.float32, device=device) * 0.1 - 1.0
+        a = torch.randn(total_tokens, num_v_heads, dtype=torch.float32, device=device) * 0.1
+        dt_bias = torch.randn(num_v_heads, dtype=torch.float32, device=device) * 0.1
+        b = torch.randn(total_tokens, num_v_heads, dtype=torch.float32, device=device) * 0.1
+
+        cu_seqlens = torch.tensor(
+            [0] + [sum(lengths[: i + 1]) for i in range(len(lengths))],
+            dtype=torch.int32,
+            device=device,
+        )
+        scale = 1.0 / math.sqrt(D)
+
+        out_ref, state_ref = reference_prefill(
+            q, k, v, state.clone(), A_log, a, dt_bias, b, cu_seqlens, scale
+        )
+        out_triton, state_triton = triton_mod.kernel(
+            q, k, v, state.clone(), A_log, a, dt_bias, b, cu_seqlens, scale
+        )
+        out_cuda, state_cuda = cuda_mod.kernel(
+            q, k, v, state.clone(), A_log, a, dt_bias, b, cu_seqlens, scale
+        )
+
+        triton_out_diff = (out_triton.float() - out_ref.float()).abs().max().item()
+        triton_state_diff = (state_triton - state_ref).abs().max().item()
+        cuda_out_diff = (out_cuda.float() - out_ref.float()).abs().max().item()
+        cuda_state_diff = (state_cuda - state_ref).abs().max().item()
+
+        empty_indices = [idx for idx, length in enumerate(lengths) if length == 0]
+        empty_state_diff = 0.0
+        if empty_indices:
+            empty_state_diff = (
+                state_cuda[empty_indices] - state[empty_indices]
+            ).abs().max().item()
+
+        triton_pass = triton_out_diff < 0.02 and triton_state_diff < 5e-4
+        cuda_pass = cuda_out_diff < 0.02 and cuda_state_diff < 5e-4 and empty_state_diff < 1e-6
+
+        cuda_backend = "cuda-jit" if getattr(cuda_mod, "_cuda_module", None) is not None else "triton-fallback"
+
+        print(
+            f"  Triton: out_diff={triton_out_diff:.2e}, state_diff={triton_state_diff:.2e} "
+            f"[{'PASS' if triton_pass else 'FAIL'}]"
+        )
+        print(
+            f"  CUDA wrapper ({cuda_backend}): out_diff={cuda_out_diff:.2e}, "
+            f"state_diff={cuda_state_diff:.2e}, empty_state_diff={empty_state_diff:.2e} "
+            f"[{'PASS' if cuda_pass else 'FAIL'}]"
+        )
+
+        results.append(
+            {
+                "name": name,
+                "lengths": lengths,
+                "triton_out_diff": triton_out_diff,
+                "triton_state_diff": triton_state_diff,
+                "cuda_out_diff": cuda_out_diff,
+                "cuda_state_diff": cuda_state_diff,
+                "empty_state_diff": empty_state_diff,
+                "triton_status": "PASS" if triton_pass else "FAIL",
+                "cuda_status": "PASS" if cuda_pass else "FAIL",
+                "cuda_backend": cuda_backend,
+            }
+        )
+
+    print("\n" + "=" * 70)
+    print("PREFILL SUMMARY")
+    print("=" * 70)
+    all_pass = all(
+        r["triton_status"] == "PASS" and r["cuda_status"] == "PASS" for r in results
+    )
+    for r in results:
+        print(
+            f"{r['name']:<20} triton={r['triton_status']:<4} "
+            f"cuda={r['cuda_status']:<4} backend={r['cuda_backend']}"
+        )
+
+    print("\n" + ("All prefill tests PASSED!" if all_pass else "Some prefill tests FAILED!"))
+
+    return {"all_pass": all_pass, "results": results}
+
+
 @app.local_entrypoint()
 def main():
     """Run all correctness tests."""
@@ -352,11 +570,14 @@ def main():
     # Run gate broadcast test
     test_gate_broadcast.remote()
     
+    # Run prefill correctness tests
+    prefill_result = test_prefill_correctness.remote()
+    
     print("\n" + "=" * 70)
     print("All Tests Complete!")
     print("=" * 70)
     
-    if result["all_pass"]:
+    if result["all_pass"] and prefill_result["all_pass"]:
         print("Result: ALL PASS")
     else:
         print("Result: SOME FAILURES - review output above")

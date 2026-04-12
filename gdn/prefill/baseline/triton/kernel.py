@@ -66,6 +66,8 @@ def kernel(q, k, v, state, A_log, a, dt_bias, b, cu_seqlens, scale):
         seq_len = seq_end - seq_start
 
         if seq_len <= 0:
+            if state is not None:
+                new_state[seq_idx] = state[seq_idx].float()
             continue
 
         if state is not None:

@@ -1,86 +1,35 @@
-# Raw CUDA Kernels (v5-v8)
+# Raw CUDA Kernels
 
-Low-level CUDA C++ implementations with full control over memory and compute.
+This directory contains raw CUDA source kernels.
 
-## Why Raw CUDA?
+These files are useful for low-level decode/prefill experimentation, but they are not automatically the current production winner.
 
-| 优点 | 缺点 |
-|------|------|
-| 完全控制寄存器/SMEM | 代码冗长 |
-| 性能可预测 | 容易出错 |
-| 可使用所有 PTX 指令 | 维护成本高 |
-| 最高性能上限 | 学习曲线陡峭 |
+## Current Status
 
-## Version Evolution
+### Decode
 
-| Version | Key Optimization | Code Example |
-|---------|-----------------|--------------|
-| v5 | Baseline | `atomicAdd` reduction |
-| v6 | TMA async | `cp.async.bulk.tensor` |
-| v7 | Vectorized | `float4` loads |
-| v8 | Warp spec | Producer/consumer warps |
+- Packaged CUDA decode wrapper still centers on a legacy `v5`-style path:
+  [decode/solution/cuda/kernel.py](../../decode/solution/cuda/kernel.py)
+- Current best raw decode kernels measured on B200 come from the `v9/v10` family, not from the older raw CUDA `v5-v8` family.
 
-## Files
+### Prefill
 
-| File | Features |
-|------|----------|
-| `gdn_decode_v5.cuh` | Baseline, atomicAdd reduction |
-| `gdn_decode_v6.cuh` | TMA async loads (mbarrier) |
-| `gdn_decode_v7.cuh` | Vectorized float4, FP4 quantization |
-| `gdn_decode_v8.cuh` | Warp specialization, FP8 quantization |
-| `gdn_prefill_v5-v8.cuh` | Prefill kernel variants |
+- Packaged CUDA prefill wrapper is:
+  [prefill/solution/cuda/kernel.py](../../prefill/solution/cuda/kernel.py)
+- That wrapper is still behind the Triton production path on the official workload benchmark.
 
-## Code Examples
+## Use This Directory For
 
-### v7: Manual float4 Vectorization
+- low-level CUDA implementation experiments
+- historical comparison points
+- manual kernel design ideas
 
-```cpp
-// 手动向量化加载 (4x 带宽效率)
-float4* state_f4 = reinterpret_cast<float4*>(&state[idx]);
-float4 s = state_f4[d / 4];
+## Do Not Assume
 
-// 解包并计算
-old_v += s.x * k[d+0];
-old_v += s.y * k[d+1];
-old_v += s.z * k[d+2];
-old_v += s.w * k[d+3];
-```
+- that the highest-numbered raw CUDA file here is the current best kernel
+- that numbers previously written in this README are still current
+- that raw CUDA here beats Triton in the official benchmark
 
-### v8: Warp Specialization
+For current numbers, see:
 
-```cpp
-// Warp 角色分工
-int warp_id = threadIdx.x / 32;
-
-if (warp_id < 2) {
-    // Compute warps: 执行矩阵-向量乘法
-    compute_matvec();
-} else {
-    // Memory warp: 异步预取下一个 state
-    prefetch_next_state();
-}
-__syncthreads();  // 同步
-```
-
-## Performance (B200, batch=256)
-
-| Version | Bandwidth | vs Triton | Key Feature |
-|---------|-----------|-----------|-------------|
-| v5 | ~7,500 GB/s | 2.65x | Baseline |
-| v6 | ~7,500 GB/s | 2.65x | TMA |
-| v7 | 7,578 GB/s | 2.67x | float4 |
-| v8 | **7,605 GB/s** | **2.68x** | Warp spec |
-
-All versions achieve **~95% of B200 peak bandwidth** (8 TB/s).
-
-## vs CuTe
-
-| Aspect | Raw CUDA | CuTe |
-|--------|----------|------|
-| Swizzle | 手动 XOR 计算 | `Swizzle<3,3,3>` |
-| Layout | 手动 stride 计算 | `Layout<Shape, Stride>` |
-| TMA | 手动 mbarrier | `copy_async()` |
-| 代码量 | ~650 行/kernel | ~400 行/kernel |
-| 性能 | **95% BW** | **95% BW** |
-
-**结论**: 性能相同，但 CuTe 代码更简洁、易维护。
+- [docs/PERFORMANCE.md](../../docs/PERFORMANCE.md)
