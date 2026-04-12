@@ -46,7 +46,7 @@ except Exception:
 _MAX_KV_RANK = 512
 _MAX_ROPE_DIM = 128
 _MAX_TOPK = 128
-_MIN_PREFILL_TRITON_WORK = 131072
+_MIN_PREFILL_TRITON_WORK = 262144
 _WEIGHT_CACHE: dict[
     tuple[int, tuple[int, ...], torch.device, int],
     tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -308,9 +308,9 @@ def _next_power_of_two(x: int) -> int:
 def _pick_num_warps(topk: int, query_len: int) -> int:
     if query_len == 1:
         if topk <= 64:
-            return 1
-        if topk <= 128:
             return 2
+        if topk <= 128:
+            return 4
         return 4
     if topk <= 64:
         return 4
@@ -321,9 +321,7 @@ def _pick_num_warps(topk: int, query_len: int) -> int:
 
 def _pick_num_stages(topk: int, query_len: int) -> int:
     if query_len == 1:
-        if topk <= 64:
-            return 2
-        return 3
+        return 2
     if topk <= 128 and query_len <= 1024:
         return 2
     if topk <= 128:
@@ -389,6 +387,7 @@ def _compute_index_scores_fast(
     attn_mask_f: torch.Tensor | None,
     approximate: bool,
 ) -> torch.Tensor:
+    batch_size, query_len, num_index_heads, index_dim = index_q.shape
     index_dim = index_q.shape[-1]
     scale = index_scale if index_scale is not None else 1.0 / math.sqrt(index_dim)
     use_approx = (
@@ -399,15 +398,15 @@ def _compute_index_scores_fast(
     )
     if use_approx:
         score_dtype = index_q.dtype
-        weighted_q = torch.einsum(
-            "bsid,bsi->bsd",
-            index_q,
-            index_weights.to(dtype=index_q.dtype),
-        )
+        q_flat = index_q.reshape(batch_size * query_len, num_index_heads, index_dim).contiguous()
+        w_flat = index_weights.to(dtype=index_q.dtype).reshape(batch_size * query_len, 1, num_index_heads).contiguous()
+        weighted_q = torch.bmm(w_flat, q_flat).reshape(batch_size, query_len, index_dim)
         cache_dtype = score_dtype
     else:
         score_dtype = torch.float32
-        weighted_q = torch.einsum("bsid,bsi->bsd", index_q.float(), index_weights.float())
+        q_flat = index_q.float().reshape(batch_size * query_len, num_index_heads, index_dim).contiguous()
+        w_flat = index_weights.float().reshape(batch_size * query_len, 1, num_index_heads).contiguous()
+        weighted_q = torch.bmm(w_flat, q_flat).reshape(batch_size, query_len, index_dim)
         cache_dtype = torch.float32
 
     index_k_key = (int(index_k.data_ptr()), tuple(index_k.shape), index_k.device, cache_dtype)

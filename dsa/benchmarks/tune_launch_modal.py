@@ -18,6 +18,8 @@ image = (
 
 def _cases():
     return [
+        {"name": "prefill_256", "query_len": 256, "key_len": 256, "topk": 64, "causal": True},
+        {"name": "prefill_512", "query_len": 512, "key_len": 512, "topk": 64, "causal": True},
         {"name": "prefill_1024", "query_len": 1024, "key_len": 1024, "topk": 128, "causal": True},
         {"name": "prefill_2048", "query_len": 2048, "key_len": 2048, "topk": 128, "causal": True},
         {"name": "decode_2048", "query_len": 1, "key_len": 2048, "topk": 64, "causal": False},
