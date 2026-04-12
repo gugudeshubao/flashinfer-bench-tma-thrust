@@ -30,6 +30,8 @@ _cuda_failed = False
 _CUTE_MIN_ELEMS = 8192
 _torch_ext_module = None
 _torch_ext_failed = False
+_ptx_torch_ext_module = None
+_ptx_torch_ext_failed = False
 _HS_SCALE_CACHE_LIMIT = 8
 _ROUTE_CACHE_LIMIT = 8
 _W13_CACHE_LIMIT = 4
@@ -85,6 +87,46 @@ def _load_torch_ext_module():
     except Exception:
         _torch_ext_failed = True
         return None
+
+
+def _load_ptx_torch_ext_module():
+    global _ptx_torch_ext_module, _ptx_torch_ext_failed
+    if _ptx_torch_ext_module is not None:
+        return _ptx_torch_ext_module
+    if _ptx_torch_ext_failed:
+        return None
+
+    try:
+        from torch.utils.cpp_extension import load
+
+        src = Path(__file__).with_name("moe_cuda_ptx_torch_kernel.cu")
+        digest = hashlib.sha1(src.read_bytes()).hexdigest()[:10]
+        _ptx_torch_ext_module = load(
+            name=f"moe_cuda_ptx_torch_ext_default_{digest}",
+            sources=[str(src)],
+            extra_include_paths=[str(src.parent)],
+            extra_cuda_cflags=["-O3", "--use_fast_math"],
+            verbose=False,
+        )
+        if _ptx_torch_ext_module is None:
+            _ptx_torch_ext_failed = True
+        return _ptx_torch_ext_module
+    except Exception:
+        _ptx_torch_ext_failed = True
+        return None
+
+
+def _prewarm_torch_extensions():
+    # Best-effort preload so extension build/load cost is paid before the first
+    # measured kernel invocation when the module import itself is outside timing.
+    try:
+        _load_ptx_torch_ext_module()
+    except Exception:
+        pass
+    try:
+        _load_torch_ext_module()
+    except Exception:
+        pass
 
 
 def _detect_gemm_mode(act_fp8, act_scale, w_fp8, w_scale):
@@ -270,7 +312,9 @@ def kernel(
     local_expert_offset,
     routed_scaling_factor,
 ):
-    torch_ext = _load_torch_ext_module()
+    torch_ext = _load_ptx_torch_ext_module()
+    if torch_ext is None:
+        torch_ext = _load_torch_ext_module()
     if torch_ext is not None:
         return torch_ext.kernel(
             routing_logits,
@@ -351,3 +395,6 @@ def kernel(
         output.index_add_(0, token_idx, out_e * w_tok.unsqueeze(1))
 
     return output.to(torch.bfloat16)
+
+
+_prewarm_torch_extensions()

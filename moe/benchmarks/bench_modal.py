@@ -25,6 +25,11 @@ VARIANTS = {
         "subdir": "solution/triton",
         "language": "triton",
     },
+    "triton_py": {
+        "name": "tma-thrust-moe-py-v1",
+        "subdir": "solution/triton",
+        "language": "triton",
+    },
     "cuda": {
         "name": "tma-thrust-moe-cuda-v1",
         "subdir": "solution/cuda",
@@ -43,6 +48,14 @@ VARIANTS = {
     "cute_cpp_torch": {
         "name": "tma-thrust-moe-cute-cpp-torch-v1",
         "subdir": "solution/cute_cpp_torch",
+        "language": "cuda",
+        "binding": "torch",
+        "entry_point": "kernel.cu::kernel",
+        "dependencies": [],
+    },
+    "cuda_ptx_torch": {
+        "name": "tma-thrust-moe-cuda-ptx-torch-v1",
+        "subdir": "solution/cuda_ptx_torch",
         "language": "cuda",
         "binding": "torch",
         "entry_point": "kernel.cu::kernel",
