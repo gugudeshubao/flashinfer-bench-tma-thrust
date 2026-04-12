@@ -308,7 +308,7 @@ def _next_power_of_two(x: int) -> int:
 def _pick_num_warps(topk: int, query_len: int) -> int:
     if query_len == 1:
         if topk <= 64:
-            return 4
+            return 1
         if topk <= 128:
             return 2
         return 4
@@ -322,10 +322,12 @@ def _pick_num_warps(topk: int, query_len: int) -> int:
 def _pick_num_stages(topk: int, query_len: int) -> int:
     if query_len == 1:
         if topk <= 64:
-            return 1
-        return 2
+            return 2
+        return 3
     if topk <= 128 and query_len <= 1024:
-        return 1
+        return 2
+    if topk <= 128:
+        return 3
     return 2
 
 

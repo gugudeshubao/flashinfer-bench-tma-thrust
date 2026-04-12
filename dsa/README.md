@@ -81,14 +81,14 @@ modal run dsa/benchmarks/profile_modal.py --iters 20
 ## Current Perf Snapshot
 
 - Modal B200 smoke:
-  - prefill: `1.007x` of baseline on the 256/64 smoke shape
-  - decode: `1.264x` over baseline on the 2048/64 smoke shape
+  - prefill: `1.023x` of baseline on the 256/64 smoke shape
+  - decode: `1.249x` over baseline on the 2048/64 smoke shape
 - Modal B200 benchmark:
-  - prefill: `1.104x`, `1.013x`, `1.027x`, `2.599x`, `5.434x` on 256, 512, 1024, 2048, 4096 token cases
-  - decode: `1.133x`, `1.212x`, `1.120x` on 2048, 4096, 8192 cache cases
+  - prefill: `1.083x`, `0.969x`, `1.006x`, `2.639x`, `5.091x` on 256, 512, 1024, 2048, 4096 token cases
+  - decode: `1.758x`, `1.319x`, `1.056x` on 2048, 4096, 8192 cache cases
 - Stage profile on B200:
-  - forced-`prefill_1024_128` Triton path: prepare `0.094ms`, select `0.273ms`, kernel `0.282ms`, project `0.068ms`
-  - `decode_8192_128`: prepare `0.068ms`, select `0.147ms`, kernel `0.144ms`, project `0.050ms`
+  - forced-`prefill_1024_128` Triton path: prepare `0.083ms`, select `0.239ms`, kernel `0.263ms`, project `0.055ms`
+  - `decode_8192_128`: prepare `0.057ms`, select `0.126ms`, kernel `0.117ms`, project `0.037ms`
 
 ## Next Steps
 
