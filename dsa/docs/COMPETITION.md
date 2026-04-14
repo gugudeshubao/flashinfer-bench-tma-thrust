@@ -2,7 +2,7 @@
 
 ## Recommended Tag
 
-- `dsa-comp-auto-v1`
+- `dsa-comp-auto-v11`
 
 ## What This Tag Means
 
@@ -18,6 +18,7 @@
 modal run dsa/tests/test_modal.py
 modal run dsa/benchmarks/bench_modal.py --warmup 2 --iters 5
 modal run dsa/benchmarks/profile_modal.py --iters 20
+modal run dsa/benchmarks/profile_selection_modal.py --iters 20
 ```
 
 ## Current Modal B200 Snapshot
@@ -36,4 +37,5 @@ modal run dsa/benchmarks/profile_modal.py --iters 20
 ## Remaining Risk
 
 - The largest remaining hotspot is still prefill-side selection / metadata work on forced-Triton paths.
-- If a future tuning pass is needed, that should focus on moving `topk + selected_mask` out of Torch.
+- Selection profiling shows `weighted_q` and `topk` dominate the remaining prefill selection cost.
+- If a future tuning pass is needed, that should focus on moving prefill-side selection out of Torch.

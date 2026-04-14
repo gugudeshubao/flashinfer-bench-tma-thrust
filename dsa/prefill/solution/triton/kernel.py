@@ -398,14 +398,14 @@ def _compute_index_scores_fast(
     )
     if use_approx:
         score_dtype = index_q.dtype
-        q_flat = index_q.reshape(batch_size * query_len, num_index_heads, index_dim).contiguous()
-        w_flat = index_weights.to(dtype=index_q.dtype).reshape(batch_size * query_len, 1, num_index_heads).contiguous()
+        q_flat = index_q.reshape(batch_size * query_len, num_index_heads, index_dim)
+        w_flat = index_weights.to(dtype=index_q.dtype).reshape(batch_size * query_len, 1, num_index_heads)
         weighted_q = torch.bmm(w_flat, q_flat).reshape(batch_size, query_len, index_dim)
         cache_dtype = score_dtype
     else:
         score_dtype = torch.float32
-        q_flat = index_q.float().reshape(batch_size * query_len, num_index_heads, index_dim).contiguous()
-        w_flat = index_weights.float().reshape(batch_size * query_len, 1, num_index_heads).contiguous()
+        q_flat = index_q.float().reshape(batch_size * query_len, num_index_heads, index_dim)
+        w_flat = index_weights.float().reshape(batch_size * query_len, 1, num_index_heads)
         weighted_q = torch.bmm(w_flat, q_flat).reshape(batch_size, query_len, index_dim)
         cache_dtype = torch.float32
 

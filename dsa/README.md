@@ -65,6 +65,7 @@ python3 dsa/benchmarks/bench_local.py --prefill-seq-len 256 --decode-cache-len 2
 modal run dsa/tests/test_modal.py
 modal run dsa/benchmarks/bench_modal.py --warmup 3 --iters 10
 modal run dsa/benchmarks/profile_modal.py --iters 20
+modal run dsa/benchmarks/profile_selection_modal.py --iters 20
 ```
 
 ## Notes
@@ -89,6 +90,9 @@ modal run dsa/benchmarks/profile_modal.py --iters 20
 - Stage profile on B200:
   - forced-`prefill_1024_128` Triton path: prepare `0.085ms`, select `0.230ms`, kernel `0.259ms`, project `0.055ms`
   - `decode_8192_128`: prepare `0.057ms`, select `0.119ms`, kernel `0.110ms`, project `0.036ms`
+- Selection profile on B200:
+  - `prefill_1024_128`: weighted `4.571ms`, bmm `1.947ms`, mask `0.033ms`, topk `1.270ms`
+  - `decode_8192_128`: weighted `0.773ms`, bmm `0.039ms`, mask `0.006ms`, topk `0.049ms`
 
 ## Next Steps
 
