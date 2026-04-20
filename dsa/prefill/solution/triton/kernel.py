@@ -444,7 +444,7 @@ def _compute_index_scores_fast(
     use_weighted_q_kernel = (
         _TRITON_AVAILABLE
         and index_q.is_cuda
-        and (query_len >= 2048 or (query_len == 1 and index_k.shape[1] >= 8192))
+        and (query_len >= 2048 or (query_len == 1 and index_k.shape[1] >= 4096))
         and num_index_heads <= 16
         and index_dim <= 128
     )
