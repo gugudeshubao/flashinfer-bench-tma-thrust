@@ -59,6 +59,41 @@ _CAUSAL_BOOL_CACHE: dict[tuple[int, int, torch.device], torch.Tensor] = {}
 if _TRITON_AVAILABLE:
 
     @triton.jit
+    def _weighted_query_kernel(
+        Q_ptr,
+        W_ptr,
+        Out_ptr,
+        stride_q_row,
+        stride_q_h,
+        stride_q_d,
+        stride_w_row,
+        stride_o_row,
+        num_heads,
+        index_dim,
+        BLOCK_H: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+    ):
+        row_idx = tl.program_id(0)
+        offs_h = tl.arange(0, BLOCK_H)
+        offs_d = tl.arange(0, BLOCK_D)
+
+        q_ptrs = (
+            Q_ptr
+            + row_idx * stride_q_row
+            + offs_h[:, None] * stride_q_h
+            + offs_d[None, :] * stride_q_d
+        )
+        q_mask = (offs_h[:, None] < num_heads) & (offs_d[None, :] < index_dim)
+        q = tl.load(q_ptrs, mask=q_mask, other=0.0).to(tl.float32)
+
+        w_ptrs = W_ptr + row_idx * stride_w_row + offs_h
+        w = tl.load(w_ptrs, mask=offs_h < num_heads, other=0.0).to(tl.float32)
+
+        out = tl.sum(q * w[:, None], axis=0)
+        out_ptrs = Out_ptr + row_idx * stride_o_row + offs_d
+        tl.store(out_ptrs, out, mask=offs_d < index_dim)
+
+    @triton.jit
     def _sparse_prefill_latent_kernel_nomask(
         QN_ptr,
         QR_ptr,
@@ -305,6 +340,21 @@ def _next_power_of_two(x: int) -> int:
     return 1 << (x - 1).bit_length()
 
 
+def _pick_weighted_q_launch(num_index_heads: int, index_dim: int) -> tuple[int, int, int, int]:
+    if num_index_heads <= 8 and index_dim <= 32:
+        return 16, 128, 1, 1
+    block_h = min(16, _next_power_of_two(num_index_heads))
+    block_d = min(128, _next_power_of_two(index_dim))
+    if block_d <= 32:
+        num_warps = 1
+    elif block_d <= 64:
+        num_warps = 2
+    else:
+        num_warps = 4
+    num_stages = 1 if block_d <= 32 else 2
+    return block_h, block_d, num_warps, num_stages
+
+
 def _pick_num_warps(topk: int, query_len: int) -> int:
     if query_len == 1:
         if topk <= 64:
@@ -386,10 +436,20 @@ def _compute_index_scores_fast(
     index_scale,
     attn_mask_f: torch.Tensor | None,
     approximate: bool,
+    weighted_q_kernel_override: bool | None,
 ) -> torch.Tensor:
     batch_size, query_len, num_index_heads, index_dim = index_q.shape
     index_dim = index_q.shape[-1]
     scale = index_scale if index_scale is not None else 1.0 / math.sqrt(index_dim)
+    use_weighted_q_kernel = (
+        _TRITON_AVAILABLE
+        and index_q.is_cuda
+        and (query_len >= 2048 or (query_len == 1 and index_k.shape[1] >= 8192))
+        and num_index_heads <= 16
+        and index_dim <= 128
+    )
+    if weighted_q_kernel_override is not None:
+        use_weighted_q_kernel = bool(weighted_q_kernel_override)
     use_approx = (
         approximate
         and index_q.is_cuda
@@ -398,15 +458,67 @@ def _compute_index_scores_fast(
     )
     if use_approx:
         score_dtype = index_q.dtype
-        q_flat = index_q.reshape(batch_size * query_len, num_index_heads, index_dim)
-        w_flat = index_weights.to(dtype=index_q.dtype).reshape(batch_size * query_len, 1, num_index_heads)
-        weighted_q = torch.bmm(w_flat, q_flat).reshape(batch_size, query_len, index_dim)
+        q_flat = index_q.reshape(batch_size * query_len, num_index_heads, index_dim).contiguous()
+        w_vec = index_weights.to(dtype=index_q.dtype).reshape(batch_size * query_len, num_index_heads).contiguous()
+        if use_weighted_q_kernel:
+            block_h, block_d, num_warps, num_stages = _pick_weighted_q_launch(num_index_heads, index_dim)
+            weighted_q_flat = torch.empty(
+                batch_size * query_len,
+                index_dim,
+                device=index_q.device,
+                dtype=torch.float32,
+            )
+            _weighted_query_kernel[(batch_size * query_len,)](
+                q_flat,
+                w_vec,
+                weighted_q_flat,
+                q_flat.stride(0),
+                q_flat.stride(1),
+                q_flat.stride(2),
+                w_vec.stride(0),
+                weighted_q_flat.stride(0),
+                num_index_heads,
+                index_dim,
+                BLOCK_H=block_h,
+                BLOCK_D=block_d,
+                num_warps=num_warps,
+                num_stages=num_stages,
+            )
+            weighted_q = weighted_q_flat.to(dtype=score_dtype).reshape(batch_size, query_len, index_dim)
+        else:
+            weighted_q = (index_q * index_weights.to(dtype=index_q.dtype).unsqueeze(-1)).sum(dim=2)
         cache_dtype = score_dtype
     else:
         score_dtype = torch.float32
-        q_flat = index_q.float().reshape(batch_size * query_len, num_index_heads, index_dim)
-        w_flat = index_weights.float().reshape(batch_size * query_len, 1, num_index_heads)
-        weighted_q = torch.bmm(w_flat, q_flat).reshape(batch_size, query_len, index_dim)
+        q_flat = index_q.float().reshape(batch_size * query_len, num_index_heads, index_dim).contiguous()
+        w_vec = index_weights.float().reshape(batch_size * query_len, num_index_heads).contiguous()
+        if use_weighted_q_kernel:
+            block_h, block_d, num_warps, num_stages = _pick_weighted_q_launch(num_index_heads, index_dim)
+            weighted_q_flat = torch.empty(
+                batch_size * query_len,
+                index_dim,
+                device=index_q.device,
+                dtype=torch.float32,
+            )
+            _weighted_query_kernel[(batch_size * query_len,)](
+                q_flat,
+                w_vec,
+                weighted_q_flat,
+                q_flat.stride(0),
+                q_flat.stride(1),
+                q_flat.stride(2),
+                w_vec.stride(0),
+                weighted_q_flat.stride(0),
+                num_index_heads,
+                index_dim,
+                BLOCK_H=block_h,
+                BLOCK_D=block_d,
+                num_warps=num_warps,
+                num_stages=num_stages,
+            )
+            weighted_q = weighted_q_flat.reshape(batch_size, query_len, index_dim)
+        else:
+            weighted_q = (index_q.float() * index_weights.float().unsqueeze(-1)).sum(dim=2)
         cache_dtype = torch.float32
 
     index_k_key = (int(index_k.data_ptr()), tuple(index_k.shape), index_k.device, cache_dtype)
@@ -484,6 +596,7 @@ def _select_sparse_metadata(
     need_sparse_mask: bool,
     causal_mask: bool,
     approximate_scores: bool,
+    weighted_q_kernel_override: bool | None,
 ) -> tuple[torch.Tensor | None, torch.Tensor, torch.Tensor, torch.Tensor]:
     if topk_indices is None:
         if causal_mask:
@@ -494,6 +607,7 @@ def _select_sparse_metadata(
                 index_scale=index_scale,
                 attn_mask_f=None,
                 approximate=approximate_scores,
+                weighted_q_kernel_override=weighted_q_kernel_override,
             )
             causal_invalid = _get_causal_bool_mask(index_scores.shape[1], key_len, index_scores.device)
             fill_value = torch.finfo(index_scores.dtype).min if index_scores.dtype != torch.float32 else float("-inf")
@@ -506,6 +620,7 @@ def _select_sparse_metadata(
                 index_scale=index_scale,
                 attn_mask_f=attn_mask_f,
                 approximate=approximate_scores,
+                weighted_q_kernel_override=weighted_q_kernel_override,
             )
         if index_scores is not None:
             topk_indices = select_topk_indices(index_scores, topk)
@@ -865,6 +980,7 @@ def kernel(
     causal_mask_hint=None,
     num_warps_override=None,
     num_stages_override=None,
+    weighted_q_kernel_override=None,
     return_metadata=False,
 ):
     batch_size, query_len, num_heads, qk_nope_head_dim = q_nope.shape
@@ -931,6 +1047,7 @@ def kernel(
         need_sparse_mask=return_metadata,
         causal_mask=causal_mask,
         approximate_scores=(not return_metadata and query_len > 1),
+        weighted_q_kernel_override=weighted_q_kernel_override,
     )
 
     topk_count = topk_indices.shape[-1]

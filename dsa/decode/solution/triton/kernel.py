@@ -39,6 +39,7 @@ def kernel(
     causal_mask_hint=None,
     num_warps_override=None,
     num_stages_override=None,
+    weighted_q_kernel_override=None,
     return_metadata=False,
 ):
     return prefill_triton_kernel(
@@ -59,5 +60,6 @@ def kernel(
         causal_mask_hint=causal_mask_hint,
         num_warps_override=num_warps_override,
         num_stages_override=num_stages_override,
+        weighted_q_kernel_override=weighted_q_kernel_override,
         return_metadata=return_metadata,
     )

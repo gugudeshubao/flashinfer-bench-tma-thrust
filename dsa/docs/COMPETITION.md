@@ -2,7 +2,7 @@
 
 ## Recommended Tag
 
-- `dsa-comp-auto-v11`
+- `dsa-comp-auto-v12`
 
 ## What This Tag Means
 
@@ -19,6 +19,7 @@ modal run dsa/tests/test_modal.py
 modal run dsa/benchmarks/bench_modal.py --warmup 2 --iters 5
 modal run dsa/benchmarks/profile_modal.py --iters 20
 modal run dsa/benchmarks/profile_selection_modal.py --iters 20
+modal run dsa/benchmarks/tune_selection_modal.py --iters 20
 ```
 
 ## Current Modal B200 Snapshot
@@ -26,7 +27,7 @@ modal run dsa/benchmarks/profile_selection_modal.py --iters 20
 - Prefill benchmark:
   - `p256`: backend=`reference`, `1.067x`
   - `p512`: backend=`reference`, `1.023x`
-  - `p1024`: backend=`triton`, `1.015x`
+  - `p1024`: backend=`reference`, `1.015x`
   - `p2048`: backend=`triton`, `2.666x`
   - `p4096`: backend=`triton`, `5.414x`
 - Decode benchmark:
