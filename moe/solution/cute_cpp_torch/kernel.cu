@@ -21,6 +21,8 @@ constexpr int BLK = 128;
 constexpr int ROUTE_CACHE_LIMIT = 16;
 constexpr int SCALE_CACHE_LIMIT = 16;
 constexpr int FULL_HIDDEN_DEQUANT_MAX_SEQ = 1024;
+constexpr int GROUPED_GATHER_MIN_ROUTES = 1024;
+constexpr int WEIGHT_CACHE_LIMIT = 32;
 
 struct ScaleKey {
     uintptr_t ptr;
@@ -71,10 +73,55 @@ struct RouteKeyHash {
     }
 };
 
+struct ExpertWeightKey {
+    uintptr_t weight_impl;
+    uintptr_t scale_impl;
+    int64_t expert_idx;
+    int64_t d1;
+    int64_t d2;
+    int64_t sd1;
+    int64_t sd2;
+
+    bool operator==(const ExpertWeightKey& other) const {
+        return weight_impl == other.weight_impl &&
+               scale_impl == other.scale_impl &&
+               expert_idx == other.expert_idx &&
+               d1 == other.d1 &&
+               d2 == other.d2 &&
+               sd1 == other.sd1 &&
+               sd2 == other.sd2;
+    }
+};
+
+struct ExpertWeightKeyHash {
+    size_t operator()(const ExpertWeightKey& k) const {
+        size_t h1 = std::hash<uintptr_t>{}(k.weight_impl);
+        size_t h2 = std::hash<uintptr_t>{}(k.scale_impl);
+        size_t h3 = std::hash<int64_t>{}(k.expert_idx);
+        size_t h4 = std::hash<int64_t>{}(k.d1);
+        size_t h5 = std::hash<int64_t>{}(k.d2);
+        size_t h6 = std::hash<int64_t>{}(k.sd1);
+        size_t h7 = std::hash<int64_t>{}(k.sd2);
+        return h1 ^ (h2 << 1) ^ (h3 << 2) ^ (h4 << 3) ^ (h5 << 4) ^ (h6 << 5) ^ (h7 << 6);
+    }
+};
+
+struct WorkloadSignature {
+    uintptr_t routing_logits;
+    uintptr_t hidden_states;
+    uintptr_t hidden_states_scale;
+    int64_t t;
+};
+
 static std::unordered_map<ScaleKey, torch::Tensor, ScaleKeyHash> hs_scale_cache;
 static std::deque<ScaleKey> hs_scale_order;
 static std::unordered_map<RouteKey, RouteCacheValue, RouteKeyHash> route_cache;
 static std::deque<RouteKey> route_cache_order;
+static std::unordered_map<ExpertWeightKey, torch::Tensor, ExpertWeightKeyHash> w13_cache;
+static std::deque<ExpertWeightKey> w13_cache_order;
+static std::unordered_map<ExpertWeightKey, torch::Tensor, ExpertWeightKeyHash> w2_cache;
+static std::deque<ExpertWeightKey> w2_cache_order;
+static WorkloadSignature active_signature{0, 0, 0, -1};
 
 template <typename Key, typename Value, typename Hash>
 void cache_insert(
@@ -98,6 +145,163 @@ void cache_insert(
     }
 }
 
+torch::Tensor expand_scale_2d(torch::Tensor scale);
+
+__device__ __forceinline__ float route_sigmoid(float x) {
+    return 1.0f / (1.0f + __expf(-x));
+}
+
+template<int BLOCK_THREADS>
+__global__ void route_topk_kernel(
+    const float* __restrict__ routing_logits,
+    const float* __restrict__ routing_bias,
+    int64_t* __restrict__ topk_idx,
+    float* __restrict__ topk_weights,
+    int t,
+    float routed_scaling_factor
+) {
+    int row = blockIdx.x;
+    int tid = threadIdx.x;
+    if (row >= t) {
+        return;
+    }
+
+    __shared__ float s_val[E_GLOBAL];
+    __shared__ float s_bias[E_GLOBAL];
+    __shared__ float group_scores[N_GROUP];
+    __shared__ int selected_groups[TOPK_GROUP];
+    __shared__ int selected_experts[TOP_K];
+
+    if (tid < E_GLOBAL) {
+        float logit = routing_logits[row * E_GLOBAL + tid];
+        float sig = route_sigmoid(logit);
+        s_val[tid] = sig;
+        s_bias[tid] = sig + routing_bias[tid];
+    }
+    __syncthreads();
+
+    if (tid < N_GROUP) {
+        int base = tid * (E_GLOBAL / N_GROUP);
+        float max1 = -1.0e30f;
+        float max2 = -1.0e30f;
+        #pragma unroll
+        for (int i = 0; i < (E_GLOBAL / N_GROUP); ++i) {
+            float v = s_bias[base + i];
+            if (v > max1) {
+                max2 = max1;
+                max1 = v;
+            } else if (v > max2) {
+                max2 = v;
+            }
+        }
+        group_scores[tid] = max1 + max2;
+    }
+    __syncthreads();
+
+    if (tid == 0) {
+        float best_group_scores[TOPK_GROUP];
+        #pragma unroll
+        for (int i = 0; i < TOPK_GROUP; ++i) {
+            best_group_scores[i] = -1.0e30f;
+            selected_groups[i] = -1;
+        }
+
+        for (int g = 0; g < N_GROUP; ++g) {
+            float v = group_scores[g];
+            int insert = -1;
+            #pragma unroll
+            for (int i = 0; i < TOPK_GROUP; ++i) {
+                if (v > best_group_scores[i]) {
+                    insert = i;
+                    break;
+                }
+            }
+            if (insert >= 0) {
+                for (int j = TOPK_GROUP - 1; j > insert; --j) {
+                    best_group_scores[j] = best_group_scores[j - 1];
+                    selected_groups[j] = selected_groups[j - 1];
+                }
+                best_group_scores[insert] = v;
+                selected_groups[insert] = g;
+            }
+        }
+
+        float best_scores[TOP_K];
+        #pragma unroll
+        for (int i = 0; i < TOP_K; ++i) {
+            best_scores[i] = -1.0e30f;
+            selected_experts[i] = -1;
+        }
+
+        for (int gi = 0; gi < TOPK_GROUP; ++gi) {
+            int g = selected_groups[gi];
+            int base = g * (E_GLOBAL / N_GROUP);
+            #pragma unroll
+            for (int i = 0; i < (E_GLOBAL / N_GROUP); ++i) {
+                int exp = base + i;
+                float v = s_bias[exp];
+                int insert = -1;
+                #pragma unroll
+                for (int k = 0; k < TOP_K; ++k) {
+                    if (v > best_scores[k]) {
+                        insert = k;
+                        break;
+                    }
+                }
+                if (insert >= 0) {
+                    for (int j = TOP_K - 1; j > insert; --j) {
+                        best_scores[j] = best_scores[j - 1];
+                        selected_experts[j] = selected_experts[j - 1];
+                    }
+                    best_scores[insert] = v;
+                    selected_experts[insert] = exp;
+                }
+            }
+        }
+
+        float sum_weights = 0.0f;
+        #pragma unroll
+        for (int k = 0; k < TOP_K; ++k) {
+            sum_weights += s_val[selected_experts[k]];
+        }
+        float inv_sum = routed_scaling_factor / (sum_weights + 1e-20f);
+        #pragma unroll
+        for (int k = 0; k < TOP_K; ++k) {
+            topk_idx[row * TOP_K + k] = static_cast<int64_t>(selected_experts[k]);
+            topk_weights[row * TOP_K + k] = s_val[selected_experts[k]] * inv_sum;
+        }
+    }
+}
+
+void maybe_reset_workload_caches(
+    torch::Tensor routing_logits,
+    torch::Tensor hidden_states,
+    torch::Tensor hidden_states_scale
+) {
+    WorkloadSignature sig{
+        reinterpret_cast<uintptr_t>(routing_logits.data_ptr()),
+        reinterpret_cast<uintptr_t>(hidden_states.data_ptr()),
+        reinterpret_cast<uintptr_t>(hidden_states_scale.data_ptr()),
+        routing_logits.size(0),
+    };
+    if (sig.routing_logits == active_signature.routing_logits &&
+        sig.hidden_states == active_signature.hidden_states &&
+        sig.hidden_states_scale == active_signature.hidden_states_scale &&
+        sig.t == active_signature.t) {
+        return;
+    }
+
+    hs_scale_cache.clear();
+    hs_scale_order.clear();
+    route_cache.clear();
+    route_cache_order.clear();
+    w13_cache.clear();
+    w13_cache_order.clear();
+    w2_cache.clear();
+    w2_cache_order.clear();
+    active_signature = sig;
+}
+
 torch::Tensor get_hs_scale_th(torch::Tensor hidden_states_scale) {
     auto key = ScaleKey{
         reinterpret_cast<uintptr_t>(hidden_states_scale.data_ptr()),
@@ -114,6 +318,102 @@ torch::Tensor get_hs_scale_th(torch::Tensor hidden_states_scale) {
     auto value = hidden_states_scale.to(torch::kFloat32).permute({1, 0}).contiguous();
     cache_insert<ScaleKey, torch::Tensor, ScaleKeyHash>(hs_scale_cache, hs_scale_order, key, value, SCALE_CACHE_LIMIT);
     return hs_scale_cache.at(key);
+}
+
+torch::Tensor get_w13_deq_t(
+    torch::Tensor gemm1_weights,
+    torch::Tensor gemm1_weights_scale,
+    int64_t le
+) {
+    auto key = ExpertWeightKey{
+        reinterpret_cast<uintptr_t>(gemm1_weights.unsafeGetTensorImpl()),
+        reinterpret_cast<uintptr_t>(gemm1_weights_scale.unsafeGetTensorImpl()),
+        le,
+        gemm1_weights.size(1),
+        gemm1_weights.size(2),
+        gemm1_weights_scale.size(1),
+        gemm1_weights_scale.size(2),
+    };
+    auto it = w13_cache.find(key);
+    if (it != w13_cache.end()) {
+        w13_cache_order.erase(std::remove(w13_cache_order.begin(), w13_cache_order.end(), key), w13_cache_order.end());
+        w13_cache_order.push_back(key);
+        return it->second;
+    }
+
+    auto w13_f32 = gemm1_weights[le].to(torch::kFloat32);
+    auto s13_exp = expand_scale_2d(gemm1_weights_scale[le].to(torch::kFloat32));
+    auto value = (w13_f32 * s13_exp).transpose(0, 1).contiguous();
+    cache_insert<ExpertWeightKey, torch::Tensor, ExpertWeightKeyHash>(
+        w13_cache, w13_cache_order, key, value, WEIGHT_CACHE_LIMIT);
+    return w13_cache.at(key);
+}
+
+torch::Tensor get_w2_deq_t(
+    torch::Tensor gemm2_weights,
+    torch::Tensor gemm2_weights_scale,
+    int64_t le
+) {
+    auto key = ExpertWeightKey{
+        reinterpret_cast<uintptr_t>(gemm2_weights.unsafeGetTensorImpl()),
+        reinterpret_cast<uintptr_t>(gemm2_weights_scale.unsafeGetTensorImpl()),
+        le,
+        gemm2_weights.size(1),
+        gemm2_weights.size(2),
+        gemm2_weights_scale.size(1),
+        gemm2_weights_scale.size(2),
+    };
+    auto it = w2_cache.find(key);
+    if (it != w2_cache.end()) {
+        w2_cache_order.erase(std::remove(w2_cache_order.begin(), w2_cache_order.end(), key), w2_cache_order.end());
+        w2_cache_order.push_back(key);
+        return it->second;
+    }
+
+    auto w2_f32 = gemm2_weights[le].to(torch::kFloat32);
+    auto s2_exp = expand_scale_2d(gemm2_weights_scale[le].to(torch::kFloat32));
+    auto value = (w2_f32 * s2_exp).transpose(0, 1).contiguous();
+    cache_insert<ExpertWeightKey, torch::Tensor, ExpertWeightKeyHash>(
+        w2_cache, w2_cache_order, key, value, WEIGHT_CACHE_LIMIT);
+    return w2_cache.at(key);
+}
+
+template<int BLOCK_THREADS>
+__global__ void count_local_routes_kernel(
+    const int64_t* __restrict__ topk_idx,
+    int32_t* __restrict__ counts,
+    int total,
+    int local_start
+) {
+    int idx = blockIdx.x * BLOCK_THREADS + threadIdx.x;
+    if (idx < total) {
+        int64_t exp = topk_idx[idx];
+        if (exp >= local_start && exp < local_start + E_LOCAL) {
+            atomicAdd(&counts[exp - local_start], 1);
+        }
+    }
+}
+
+template<int BLOCK_THREADS>
+__global__ void scatter_local_routes_kernel(
+    const int64_t* __restrict__ topk_idx,
+    const float* __restrict__ topk_weights,
+    int32_t* __restrict__ cursors,
+    int64_t* __restrict__ sorted_tok,
+    float* __restrict__ sorted_w,
+    int total,
+    int local_start
+) {
+    int idx = blockIdx.x * BLOCK_THREADS + threadIdx.x;
+    if (idx < total) {
+        int64_t exp = topk_idx[idx];
+        if (exp >= local_start && exp < local_start + E_LOCAL) {
+            int64_t local_e = exp - local_start;
+            int pos = atomicAdd(&cursors[local_e], 1);
+            sorted_tok[pos] = idx / TOP_K;
+            sorted_w[pos] = topk_weights[idx];
+        }
+    }
 }
 
 RouteCacheValue prepare_route(
@@ -138,48 +438,51 @@ RouteCacheValue prepare_route(
         return it->second;
     }
 
-    auto s = 1.0 / (1.0 + torch::exp(-routing_logits.to(torch::kFloat32)));
-    auto s_b = s + routing_bias.to(torch::kFloat32).reshape({-1});
+    auto routing_logits_f = routing_logits.to(torch::kFloat32).contiguous();
+    auto routing_bias_f = routing_bias.to(torch::kFloat32).contiguous();
+    auto topk_idx = torch::empty({t, TOP_K}, torch::TensorOptions().device(routing_logits.device()).dtype(torch::kLong));
+    auto topk_weights = torch::empty({t, TOP_K}, torch::TensorOptions().device(routing_logits.device()).dtype(torch::kFloat32));
+    route_topk_kernel<256><<<t, 256, 0, at::cuda::getCurrentCUDAStream()>>>(
+        routing_logits_f.data_ptr<float>(),
+        routing_bias_f.data_ptr<float>(),
+        topk_idx.data_ptr<int64_t>(),
+        topk_weights.data_ptr<float>(),
+        static_cast<int>(t),
+        static_cast<float>(routed_scaling_factor)
+    );
+    auto flat_exp = topk_idx.reshape({-1}).contiguous();
+    auto flat_w = topk_weights.reshape({-1}).contiguous();
+    int total = static_cast<int>(flat_exp.size(0));
 
-    int64_t group_size = E_GLOBAL / N_GROUP;
-    auto grouped = s_b.view({t, N_GROUP, group_size});
-    auto top2 = std::get<0>(torch::topk(grouped, 2, 2, true, false));
-    auto g_scores = top2.sum(2);
+    auto counts = torch::zeros({E_LOCAL}, torch::TensorOptions().device(routing_logits.device()).dtype(torch::kInt));
+    constexpr int kBlock = 256;
+    int blocks = (total + kBlock - 1) / kBlock;
+    count_local_routes_kernel<kBlock><<<blocks, kBlock, 0, at::cuda::getCurrentCUDAStream()>>>(
+        flat_exp.data_ptr<int64_t>(),
+        counts.data_ptr<int32_t>(),
+        total,
+        static_cast<int>(local_start)
+    );
 
-    auto g_idx = std::get<1>(torch::topk(g_scores, TOPK_GROUP, 1, true, false));
-    auto g_mask = torch::zeros_like(g_scores);
-    g_mask.scatter_(1, g_idx, 1.0);
-    auto e_mask = g_mask.unsqueeze(2).expand({t, N_GROUP, group_size}).reshape({t, E_GLOBAL});
+    auto offsets_gpu = torch::zeros({E_LOCAL + 1}, torch::TensorOptions().device(routing_logits.device()).dtype(torch::kInt));
+    offsets_gpu.slice(0, 1, E_LOCAL + 1).copy_(counts.cumsum(0));
+    auto offsets_cpu = offsets_gpu.to(torch::kCPU);
+    int64_t total_local = static_cast<int64_t>(offsets_cpu.index({E_LOCAL}).item<int>());
 
-    auto pruned = s_b.masked_fill(e_mask == 0, std::numeric_limits<float>::lowest());
-    auto topk_idx = std::get<1>(torch::topk(pruned, TOP_K, 1, true, false));
+    auto sorted_tok = torch::empty({total_local}, torch::TensorOptions().device(routing_logits.device()).dtype(torch::kLong));
+    auto sorted_w = torch::empty({total_local}, torch::TensorOptions().device(routing_logits.device()).dtype(torch::kFloat32));
 
-    auto topk_scores = s.gather(1, topk_idx);
-    auto topk_weights = (topk_scores / (topk_scores.sum(1, true) + 1e-20)) * routed_scaling_factor;
-
-    auto flat_tok = torch::arange(t, torch::TensorOptions().device(routing_logits.device()).dtype(torch::kLong))
-        .unsqueeze(1)
-        .expand({t, TOP_K})
-        .reshape({-1});
-    auto flat_exp = topk_idx.reshape({-1});
-    auto flat_w = topk_weights.reshape({-1});
-
-    auto local_mask = (flat_exp >= local_start) & (flat_exp < local_start + E_LOCAL);
-    auto local_tok = flat_tok.index({local_mask});
-    auto local_exp = flat_exp.index({local_mask}) - local_start;
-    auto local_w = flat_w.index({local_mask});
-
-    torch::Tensor sorted_tok = local_tok;
-    torch::Tensor sorted_w = local_w;
-    auto offsets_cpu = torch::zeros({E_LOCAL + 1}, torch::TensorOptions().device(torch::kCPU).dtype(torch::kLong));
-
-    if (local_tok.numel() > 0) {
-        auto order = std::get<1>(torch::sort(local_exp, 0, false));
-        sorted_tok = local_tok.index_select(0, order);
-        auto sorted_exp = local_exp.index_select(0, order);
-        sorted_w = local_w.index_select(0, order);
-        auto counts = torch::bincount(sorted_exp.to(torch::kInt64), {}, E_LOCAL);
-        offsets_cpu.slice(0, 1, E_LOCAL + 1).copy_(counts.cumsum(0).to(torch::kCPU));
+    if (total_local > 0) {
+        auto cursors = offsets_gpu.slice(0, 0, E_LOCAL).clone();
+        scatter_local_routes_kernel<kBlock><<<blocks, kBlock, 0, at::cuda::getCurrentCUDAStream()>>>(
+            flat_exp.data_ptr<int64_t>(),
+            flat_w.data_ptr<float>(),
+            cursors.data_ptr<int32_t>(),
+            sorted_tok.data_ptr<int64_t>(),
+            sorted_w.data_ptr<float>(),
+            total,
+            static_cast<int>(local_start)
+        );
     }
 
     RouteCacheValue value{sorted_tok, sorted_w, offsets_cpu};
@@ -224,6 +527,88 @@ torch::Tensor fused_swiglu(torch::Tensor x1, torch::Tensor x2) {
     return out;
 }
 
+template<int BLOCK_THREADS>
+__global__ void weighted_scatter_add_kernel(
+    float* __restrict__ output,
+    const int64_t* __restrict__ token_idx,
+    const float* __restrict__ src,
+    const float* __restrict__ weights,
+    int cols,
+    int total
+) {
+    int idx = blockIdx.x * BLOCK_THREADS + threadIdx.x;
+    if (idx < total) {
+        int row = idx / cols;
+        int col = idx - row * cols;
+        int64_t tok = token_idx[row];
+        output[tok * cols + col] += src[idx] * weights[row];
+    }
+}
+
+template<int BLOCK_THREADS>
+__global__ void weighted_scatter_add_vec4_kernel(
+    float4* __restrict__ output,
+    const int64_t* __restrict__ token_idx,
+    const float4* __restrict__ src,
+    const float* __restrict__ weights,
+    int cols_vec4,
+    int total_vec4
+) {
+    int idx = blockIdx.x * BLOCK_THREADS + threadIdx.x;
+    if (idx < total_vec4) {
+        int row = idx / cols_vec4;
+        int col = idx - row * cols_vec4;
+        int64_t tok = token_idx[row];
+        float w = weights[row];
+        float4 v = src[idx];
+        float4& dst = output[tok * cols_vec4 + col];
+        dst.x += v.x * w;
+        dst.y += v.y * w;
+        dst.z += v.z * w;
+        dst.w += v.w * w;
+    }
+}
+
+void weighted_scatter_add(
+    torch::Tensor output,
+    torch::Tensor token_idx,
+    torch::Tensor src,
+    torch::Tensor weights
+) {
+    int rows = src.size(0);
+    int cols = src.size(1);
+    constexpr int kBlock = 256;
+
+    uintptr_t out_ptr = reinterpret_cast<uintptr_t>(output.data_ptr<float>());
+    uintptr_t src_ptr = reinterpret_cast<uintptr_t>(src.data_ptr<float>());
+    bool aligned_vec4 = ((out_ptr | src_ptr) & 0xF) == 0 && (cols % 4 == 0);
+
+    if (aligned_vec4) {
+        int cols_vec4 = cols / 4;
+        int total_vec4 = rows * cols_vec4;
+        int blocks = (total_vec4 + kBlock - 1) / kBlock;
+        weighted_scatter_add_vec4_kernel<kBlock><<<blocks, kBlock, 0, at::cuda::getCurrentCUDAStream()>>>(
+            reinterpret_cast<float4*>(output.data_ptr<float>()),
+            token_idx.data_ptr<int64_t>(),
+            reinterpret_cast<const float4*>(src.data_ptr<float>()),
+            weights.data_ptr<float>(),
+            cols_vec4,
+            total_vec4
+        );
+    } else {
+        int total = rows * cols;
+        int blocks = (total + kBlock - 1) / kBlock;
+        weighted_scatter_add_kernel<kBlock><<<blocks, kBlock, 0, at::cuda::getCurrentCUDAStream()>>>(
+            output.data_ptr<float>(),
+            token_idx.data_ptr<int64_t>(),
+            src.data_ptr<float>(),
+            weights.data_ptr<float>(),
+            cols,
+            total
+        );
+    }
+}
+
 }  // namespace
 
 torch::Tensor kernel(
@@ -241,6 +626,7 @@ torch::Tensor kernel(
     at::globalContext().setAllowTF32CuBLAS(true);
     auto device = hidden_states.device();
     int64_t t = routing_logits.size(0);
+    maybe_reset_workload_caches(routing_logits, hidden_states, hidden_states_scale);
 
     auto hs_scale_th = get_hs_scale_th(hidden_states_scale);
     bool use_full_hidden_dequant = t <= FULL_HIDDEN_DEQUANT_MAX_SEQ;
@@ -256,11 +642,27 @@ torch::Tensor kernel(
     auto offsets_cpu = route.offsets_cpu;
 
     auto output = torch::zeros({t, H}, torch::TensorOptions().device(device).dtype(torch::kFloat32));
-    const int64_t* offsets_ptr = offsets_cpu.data_ptr<int64_t>();
+    const int32_t* offsets_ptr = offsets_cpu.data_ptr<int32_t>();
+    int64_t total_local = static_cast<int64_t>(offsets_ptr[E_LOCAL]);
+    bool use_grouped_gather = total_local >= GROUPED_GATHER_MIN_ROUTES;
+    torch::Tensor a_local;
+
+    if (use_grouped_gather && total_local > 0) {
+        if (use_full_hidden_dequant) {
+            a_local = a.index_select(0, sorted_tok);
+        } else {
+            auto hs_scale_local = hs_scale_th.index_select(0, sorted_tok);
+            auto a_scale_local = hs_scale_local.unsqueeze(-1)
+                .expand({total_local, H / BLK, BLK})
+                .reshape({total_local, H})
+                .contiguous();
+            a_local = hidden_states.index_select(0, sorted_tok).to(torch::kFloat32) * a_scale_local;
+        }
+    }
 
     for (int64_t le = 0; le < E_LOCAL; ++le) {
-        int64_t s_off = offsets_ptr[le];
-        int64_t e_off = offsets_ptr[le + 1];
+        int64_t s_off = static_cast<int64_t>(offsets_ptr[le]);
+        int64_t e_off = static_cast<int64_t>(offsets_ptr[le + 1]);
         if (s_off == e_off) {
             continue;
         }
@@ -269,7 +671,9 @@ torch::Tensor kernel(
         auto w_tok = sorted_w.slice(0, s_off, e_off);
 
         torch::Tensor a_e;
-        if (use_full_hidden_dequant) {
+        if (use_grouped_gather) {
+            a_e = a_local.slice(0, s_off, e_off);
+        } else if (use_full_hidden_dequant) {
             a_e = a.index_select(0, token_idx);
         } else {
             auto hs_scale_e = hs_scale_th.index_select(0, token_idx);
@@ -280,19 +684,15 @@ torch::Tensor kernel(
             a_e = hidden_states.index_select(0, token_idx).to(torch::kFloat32) * a_scale_e;
         }
 
-        auto w13_f32 = gemm1_weights[le].to(torch::kFloat32);
-        auto s13_exp = expand_scale_2d(gemm1_weights_scale[le].to(torch::kFloat32));
-        auto g1 = torch::matmul(a_e, (w13_f32 * s13_exp).transpose(0, 1));
+        auto g1 = torch::matmul(a_e, get_w13_deq_t(gemm1_weights, gemm1_weights_scale, le));
 
         auto x1 = g1.slice(1, 0, I).contiguous();
         auto x2 = g1.slice(1, I, 2 * I).contiguous();
         auto mid = fused_swiglu(x1, x2);
 
-        auto w2_f32 = gemm2_weights[le].to(torch::kFloat32);
-        auto s2_exp = expand_scale_2d(gemm2_weights_scale[le].to(torch::kFloat32));
-        auto out_e = torch::matmul(mid, (w2_f32 * s2_exp).transpose(0, 1));
+        auto out_e = torch::matmul(mid, get_w2_deq_t(gemm2_weights, gemm2_weights_scale, le));
 
-        output.index_add_(0, token_idx, out_e * w_tok.unsqueeze(1));
+        weighted_scatter_add(output, token_idx, out_e, w_tok);
     }
 
     return output.to(torch::kBFloat16);

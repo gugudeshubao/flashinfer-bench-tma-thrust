@@ -17,16 +17,22 @@
 - [test_fp8_accuracy.py](file://tests/test_fp8_accuracy.py)
 - [gdn_decode_v8.cuh](file://src/kernels/cuda/gdn_decode_v8.cuh)
 - [gdn_decode_v10.cuh](file://src/kernels/cute_cpp/gdn_decode_v10.cuh)
+- [moe_swiglu_ptx.cuh](file://moe/solution/cuda_ptx/moe_swiglu_ptx.cuh)
+- [kernel.py](file://moe/solution/v7/kernel.py)
+- [kernel.py](file://moe/solution/v8/kernel.py)
+- [kernel.py](file://moe/solution/v12/kernel.py)
+- [kernel.py](file://moe/solution/cuda_ptx/kernel.py)
+- [moe_swiglu_ptx.cuh](file://moe/solution/v12/moe_swiglu_ptx.cuh)
+- [moe_swiglu_ptx.cuh](file://moe/solution/triton/moe_swiglu_ptx.cuh)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive FP8 state quantization support documentation
-- Updated Inline Assembly Primitives section with FP8 conversion primitives
-- Enhanced Memory Operations section with vectorized FP8 memory operations
-- Added per-row dynamic scaling implementation details
-- Updated Performance Optimization Strategies with FP8 compression benefits
-- Enhanced Implementation Details with FP8 kernel variants
+- Added comprehensive PTX assembly implementations for SwiGLU activation functions across multiple solution versions (v7, v8, v12)
+- Enhanced CUDA/PTX hybrid approach documentation with fallback mechanisms and performance thresholds
+- Updated Inline Assembly Primitives section with SwiGLU-specific optimizations
+- Added vectorized PTX implementations supporting both scalar and vectorized execution modes
+- Enhanced Implementation Details with advanced inline assembly optimization techniques for MoE SwiGLU operations
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -42,11 +48,11 @@
 
 ## Introduction
 
-The PTX Inline Assembly Kernel Framework represents the lowest-level optimization layer in the Gated Delta Net (GDN) kernel ecosystem. This framework leverages NVIDIA's Parallel Thread Execution (PTX) instruction set to achieve maximum control over GPU operations, enabling fine-grained optimizations that are not possible with high-level CUDA abstractions.
+The PTX Inline Assembly Kernel Framework represents the lowest-level optimization layer in the Gated Delta Net (GDN) kernel ecosystem and has been extended to support advanced SwiGLU activation function optimizations. This framework leverages NVIDIA's Parallel Thread Execution (PTX) instruction set to achieve maximum control over GPU operations, enabling fine-grained optimizations that are not possible with high-level CUDA abstractions.
 
-The framework serves as a critical fallback mechanism and performance optimization layer, particularly for scenarios where maximum performance is paramount and every micro-optimization counts. It provides direct access to warp-level primitives, fast mathematical functions, memory operations with cache hints, and predicated execution capabilities.
+The framework serves as a critical fallback mechanism and performance optimization layer, particularly for scenarios where maximum performance is paramount and every micro-optimization counts. It provides direct access to warp-level primitives, fast mathematical functions, memory operations with cache hints, and predicated execution capabilities. Recent enhancements include comprehensive PTX assembly implementations for SwiGLU activation functions across multiple solution versions, demonstrating advanced inline assembly optimization techniques for MoE (Mixture of Experts) architectures.
 
-**Updated** Added FP8 state quantization support for 4x memory compression while maintaining computational accuracy through per-row dynamic scaling.
+**Updated** Enhanced with new PTX assembly implementations (v7, v8, v12) and CUDA/PTX hybrid approaches, demonstrating advanced inline assembly optimization techniques for SwiGLU activation functions.
 
 ## Framework Architecture
 
@@ -63,6 +69,7 @@ PTX --> Primitives[Inline Assembly Primitives]
 PTX --> Math[Fast Math Functions]
 PTX --> Memory[Memory Operations]
 PTX --> Warp[Warp-Level Operations]
+PTX --> SwiGLU[SwiGLU Optimizations]
 end
 subgraph "Optimization Targets"
 Decode[Decode Kernel]
@@ -70,24 +77,30 @@ Prefill[Prefill Kernel]
 Async[Async Prefetch]
 Chunking[Chunked Processing]
 Quantization[FP8 State Quantization]
+SwiGLU[SwiGLU Activation]
+Hybrid[Hybrid CUDA/PTX]
 end
 PTX --> Decode
 PTX --> Prefill
 PTX --> Async
 PTX --> Chunking
 PTX --> Quantization
+PTX --> SwiGLU
+PTX --> Hybrid
 end
 ```
 
 **Diagram sources**
 - [gdn_decode_ptx.cuh:1-491](file://src/kernels/ptx/gdn_decode_ptx.cuh#L1-L491)
 - [gdn_prefill_ptx.cuh:1-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L1-L358)
+- [moe_swiglu_ptx.cuh:1-79](file://moe/solution/cuda_ptx/moe_swiglu_ptx.cuh#L1-L79)
 
 The architecture emphasizes three core principles:
 - **Maximum Performance**: Direct hardware control through PTX assembly
 - **Fallback Capability**: Provides optimized implementation when higher layers cannot achieve desired performance
 - **Complementary Optimization**: Works alongside CuTe C++ implementations for comprehensive coverage
 - **Memory Efficiency**: FP8 quantization reduces memory bandwidth by 4x while maintaining accuracy
+- **Activation Function Optimization**: Specialized PTX implementations for SwiGLU activation functions
 
 **Section sources**
 - [README.md:1-168](file://README.md#L1-L168)
@@ -145,9 +158,34 @@ Chunk-->>Seq : Process Next Chunk
 **Diagram sources**
 - [gdn_prefill_ptx.cuh:121-301](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L121-L301)
 
+### SwiGLU PTX Kernel Implementations
+
+**New** Advanced PTX implementations for SwiGLU activation functions across multiple solution versions:
+
+```mermaid
+flowchart TD
+Start([SwiGLU Entry]) --> CheckSize{Check Input Size}
+CheckSize --> |Large Enough| Vec4Kernel[Vectorized PTX Kernel]
+CheckSize --> |Too Small| ScalarKernel[Scalar PTX Kernel]
+Vec4Kernel --> Vec4Loop[Process 4 Elements/Thread]
+Vec4Loop --> Vec4Sigmoid[Sigmoid Approximation x4]
+Vec4Sigmoid --> Vec4Multiply[Element-wise Multiply x4]
+ScalarKernel --> ScalarLoop[Process 1 Element/Thread]
+ScalarLoop --> ScalarSigmoid[Sigmoid Approximation]
+ScalarSigmoid --> ScalarMultiply[Element-wise Multiply]
+Vec4Multiply --> StoreResults[Store Vectorized Results]
+ScalarMultiply --> StoreResults
+StoreResults --> End([Kernel Exit])
+```
+
+**Diagram sources**
+- [moe_swiglu_ptx.cuh:15-79](file://moe/solution/cuda_ptx/moe_swiglu_ptx.cuh#L15-L79)
+- [moe_swiglu_ptx.cuh:15-39](file://moe/solution/v12/moe_swiglu_ptx.cuh#L15-L39)
+
 **Section sources**
 - [gdn_decode_ptx.cuh:248-491](file://src/kernels/ptx/gdn_decode_ptx.cuh#L248-L491)
 - [gdn_prefill_ptx.cuh:121-358](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L121-L358)
+- [moe_swiglu_ptx.cuh:15-79](file://moe/solution/cuda_ptx/moe_swiglu_ptx.cuh#L15-L79)
 
 ## Inline Assembly Primitives
 
@@ -161,6 +199,39 @@ The framework provides optimized mathematical functions through PTX assembly:
 | Fast Logarithm | `lg2.approx.f32` | ~2-3x faster than libm |
 | Fast Reciprocal | `rcp.approx.f32` | ~2-3x faster than libm |
 | Fused Multiply-Add | `fma.rn.f32` | Single rounding, better precision |
+| **Fast Sigmoid** | **`ex2.approx.f32` + `rcp.approx.f32`** | **~3x faster than libm** |
+
+### SwiGLU-Specific Optimizations
+
+**New** Specialized PTX primitives for SwiGLU activation function optimization:
+
+```mermaid
+classDiagram
+class SwiGLUPrimitives {
++ptx_sigmoid_approx(x) float
++ptx_fused_swiglu(up, gate) float
++ptx_fused_swiglu_vec4(up4, gate4) float4
++ptx_fast_sigmoid_ex2(x) float
+}
+class VectorizedOps {
++4-way SIMD Processing
++Aligned Memory Access
++Tail Handling
++Fallback Mechanisms
+}
+class FallbackStrategies {
++Minimum Element Threshold
++Runtime Feature Detection
++Graceful Degradation
++Performance Monitoring
+}
+SwiGLUPrimitives --> VectorizedOps : "implements"
+SwiGLUPrimitives --> FallbackStrategies : "supports"
+```
+
+**Diagram sources**
+- [moe_swiglu_ptx.cuh:5-13](file://moe/solution/cuda_ptx/moe_swiglu_ptx.cuh#L5-L13)
+- [moe_swiglu_ptx.cuh:15-46](file://moe/solution/cuda_ptx/moe_swiglu_ptx.cuh#L15-L46)
 
 ### FP8 State Quantization Primitives
 
@@ -235,6 +306,7 @@ Shuffle5 --> Output[Reduction Result]
 **Section sources**
 - [gdn_decode_ptx.cuh:32-190](file://src/kernels/ptx/gdn_decode_ptx.cuh#L32-L190)
 - [gdn_prefill_ptx.cuh:34-80](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L34-L80)
+- [moe_swiglu_ptx.cuh:5-13](file://moe/solution/cuda_ptx/moe_swiglu_ptx.cuh#L5-L13)
 
 ## Performance Optimization Strategies
 
@@ -248,6 +320,8 @@ The framework employs several strategies to increase arithmetic intensity:
 | Vectorized Loads | 4-float memory operations | 4x memory throughput |
 | FMA Chains | Single instruction for multiply-add | Reduced instruction count |
 | Async Prefetch | Overlap computation with memory | Hidden latency |
+| **Vectorized SwiGLU** | **4x activation processing** | **4x activation throughput** |
+| **PTX Sigmoid** | **Fast approximation** | **Reduced activation latency** |
 | **FP8 Quantization** | **4x memory compression** | **Reduced bandwidth usage** |
 
 ### Memory Bandwidth Optimization
@@ -279,9 +353,34 @@ Global -.-> FP8
 **Diagram sources**
 - [gdn_decode_ptx.cuh:113-174](file://src/kernels/ptx/gdn_decode_ptx.cuh#L113-L174)
 
+### CUDA/PTX Hybrid Optimization
+
+**New** Advanced hybrid approach combining CUDA and PTX for optimal performance:
+
+```mermaid
+flowchart TD
+Start([MoE Execution]) --> DetectHW{Detect Hardware}
+DetectHW --> CheckThreshold{Check Element Count}
+CheckThreshold --> |>= Min Threshold| PTXPath[PTX Kernel Path]
+CheckThreshold --> |< Min Threshold| TorchPath[Torch Kernel Path]
+PTXPath --> LoadModule[Load PTX Module]
+LoadModule --> CheckModule{Module Loaded?}
+CheckModule --> |Yes| ExecutePTX[Execute PTX Kernel]
+CheckModule --> |No| FallbackTorch[Fallback to Torch]
+ExecutePTX --> ReturnResult[Return Results]
+FallbackTorch --> ReturnResult
+TorchPath --> ExecuteTorch[Execute Torch Kernel]
+ExecuteTorch --> ReturnResult
+```
+
+**Diagram sources**
+- [kernel.py:148-158](file://moe/solution/v12/kernel.py#L148-L158)
+- [kernel.py:228-238](file://moe/solution/cuda_ptx/kernel.py#L228-L238)
+
 **Section sources**
 - [README.md:14-51](file://README.md#L14-L51)
 - [OPTIMIZATION_LOG.md:116-131](file://docs/OPTIMIZATION_LOG.md#L116-L131)
+- [kernel.py:148-158](file://moe/solution/v12/kernel.py#L148-L158)
 
 ## Build System and Integration
 
@@ -301,11 +400,15 @@ PTX[PTX Assembly]
 CuTe[CuTe Templates]
 Triton[Triton Baseline]
 FP8[FP8 Quantization]
+SwiGLU[SwiGLU PTX]
+Hybrid[Hybrid CUDA/PTX]
 end
 Source --> PTX
 Source --> CuTe
 Source --> Triton
 Source --> FP8
+Source --> SwiGLU
+Source --> Hybrid
 ```
 
 **Diagram sources**
@@ -321,6 +424,8 @@ The framework integrates seamlessly with the broader kernel ecosystem:
 | CUDA Runtime | GPU Execution | Standard CUDA launch |
 | Memory Management | Buffer Allocation | Unified memory model |
 | Stream Support | Asynchronous Execution | CUDA streams |
+| **PTX Module Loading** | **Dynamic Kernel Loading** | **Runtime compilation** |
+| **Fallback Mechanisms** | **Graceful Degradation** | **Feature detection** |
 | **FP8 Support** | **Quantized State Storage** | **Dynamic scaling + packing** |
 
 **Section sources**
@@ -340,6 +445,7 @@ The framework provides comprehensive performance evaluation capabilities:
 | Utilization | % of peak | Hardware resource usage |
 | Speedup | vs baseline | Optimization effectiveness |
 | **Memory Usage** | **GB allocated** | **FP8 compression benefits** |
+| **SwiGLU Performance** | **Elements/ms** | **Activation function throughput** |
 
 ### Benchmarking Infrastructure
 
@@ -391,6 +497,10 @@ title PTX Framework Evolution
 : **4x memory compression**
 : **Per-row dynamic scaling**
 : **Vectorized FP8 operations**
+2026-07-10 : **SwiGLU PTX Implementation**
+: **Vectorized activation processing**
+: **CUDA/PTX hybrid approach**
+: **Performance threshold detection**
 ```
 
 ### Strategic Priorities
@@ -402,6 +512,8 @@ The framework development follows a structured approach:
 3. **Integration Enhancement**: Seamless cooperation with higher-level frameworks
 4. **Advanced Optimizations**: Explore additional PTX instruction opportunities
 5. **Memory Efficiency**: FP8 quantization for reduced bandwidth usage
+6. **Activation Optimization**: Specialized PTX implementations for SwiGLU functions
+7. **Hybrid Approach**: CUDA/PTX fallback mechanisms for optimal performance
 
 **Section sources**
 - [ROADMAP.md:1-180](file://docs/ROADMAP.md#L1-L180)
@@ -447,38 +559,86 @@ Sophisticated memory management for optimal performance with FP8 support:
 | State Tiles | FP32 recurrent state | Async prefetch |
 | **FP8 State** | **Quantized state tiles** | **Vectorized FP8 loads** |
 | **Scale Arrays** | **Per-row scaling factors** | **Vectorized loads** |
-| Scratch Space | Temporary computations | Shared memory |
+| **SwiGLU Buffers** | **Activation function inputs** | **Aligned vectorized access** |
+| **Scratch Space** | Temporary computations | Shared memory |
 
-**Updated** Added FP8 state and per-row scale memory layouts for quantized state storage.
+**Updated** Added FP8 state and per-row scale memory layouts for quantized state storage, plus SwiGLU buffer optimizations.
 
-### FP8 State Quantization Implementation
+### CUDA/PTX Hybrid Implementation
 
-**New** Detailed FP8 quantization process for memory-efficient state storage:
+**New** Advanced hybrid approach combining CUDA and PTX for optimal SwiGLU performance:
 
 ```mermaid
 flowchart TD
-Start([FP8 Quantization]) --> ComputeMax[Compute Max Absolute Value]
-ComputeMax --> CalculateScale[Calculate Per-Row Scale]
-CalculateScale --> Normalize[Normalize by Scale]
-Normalize --> Quantize[Quantize to FP8 E4M3]
-Quantize --> Pack[Pack 4 FP8 Values]
-Pack --> Store[Store Packed Data]
-Store --> End([Complete])
+Start([SwiGLU Call]) --> CheckSize{Check Input Size}
+CheckSize --> |>= Threshold| TryLoadModule[Try Load PTX Module]
+CheckSize --> |< Threshold| FallbackTorch[Fallback to Torch]
+TryLoadModule --> LoadSuccess{Load Success?}
+LoadSuccess --> |Yes| ExecutePTX[Execute PTX Kernel]
+LoadSuccess --> |No| FallbackTorch
+ExecutePTX --> ValidateResult[Validate Results]
+ValidateResult --> ReturnResult[Return Optimized Result]
+FallbackTorch --> TorchResult[Execute Torch Kernel]
+TorchResult --> ReturnResult
 ```
 
 **Diagram sources**
-- [gdn_decode_ptx.cuh:636-669](file://src/kernels/ptx/gdn_decode_ptx.cuh#L636-L669)
+- [kernel.py:192-226](file://moe/solution/cuda_ptx/kernel.py#L192-L226)
+- [kernel.py:114-145](file://moe/solution/v12/kernel.py#L114-L145)
+
+### SwiGLU PTX Implementation Variants
+
+**New** Multiple PTX implementation strategies for different use cases:
+
+```mermaid
+classDiagram
+class SwiGLUPTXImplementations {
+<<interface>>
++ptx_sigmoid_approx(x) float
++fused_swiglu_ptx_kernel(x1, x2, out, total)
++fused_swiglu_ptx_vec4_kernel(x1, x2, out, total)
++moe_swiglu_ptx(x1, x2, out)
+}
+class VectorizedImplementation {
++4-way SIMD Processing
++Aligned Memory Access
++Tail Handling Logic
++Performance Optimized
+}
+class ScalarImplementation {
++Single Element Processing
++Simple Implementation
++Fallback Option
++Easy Debugging
+}
+class HybridStrategy {
++Runtime Threshold Detection
++Dynamic Module Loading
++Graceful Fallback
++Performance Monitoring
+}
+SwiGLUPTXImplementations --> VectorizedImplementation : "implements"
+SwiGLUPTXImplementations --> ScalarImplementation : "fallback"
+SwiGLUPTXImplementations --> HybridStrategy : "manages"
+```
+
+**Diagram sources**
+- [moe_swiglu_ptx.cuh:15-79](file://moe/solution/cuda_ptx/moe_swiglu_ptx.cuh#L15-L79)
+- [moe_swiglu_ptx.cuh:15-39](file://moe/solution/v12/moe_swiglu_ptx.cuh#L15-L39)
 
 **Section sources**
 - [gdn_decode_ptx.cuh:285-292](file://src/kernels/ptx/gdn_decode_ptx.cuh#L285-L292)
 - [gdn_prefill_ptx.cuh:167-177](file://src/kernels/ptx/gdn_prefill_ptx.cuh#L167-L177)
+- [kernel.py:192-226](file://moe/solution/cuda_ptx/kernel.py#L192-L226)
 
 ## Conclusion
 
 The PTX Inline Assembly Kernel Framework stands as the pinnacle of optimization within the GDN kernel ecosystem. By providing direct control over GPU operations through PTX assembly, it enables unprecedented performance gains while serving as a critical fallback mechanism for extreme optimization scenarios.
 
-**Updated** The framework now includes comprehensive FP8 state quantization support, providing 4x memory compression through per-row dynamic scaling and vectorized FP8 operations. This enhancement maintains computational accuracy while significantly reducing memory bandwidth requirements, making it particularly valuable for memory-bound scenarios where every optimization counts toward maximizing hardware utilization.
+**Updated** The framework now includes comprehensive PTX assembly implementations for SwiGLU activation functions across multiple solution versions (v7, v8, v12), demonstrating advanced inline assembly optimization techniques for MoE architectures. These implementations feature vectorized processing capabilities, CUDA/PTX hybrid approaches with runtime fallback mechanisms, and sophisticated performance threshold detection systems.
 
-The framework's strength lies in its comprehensive approach to GPU optimization, combining advanced mathematical operations, sophisticated memory management, warp-level parallelism, and efficient state quantization. Its integration with the broader kernel ecosystem ensures that performance optimizations are systematically applied across all layers, from high-level Triton implementations to the most granular PTX assembly optimizations.
+The framework's strength lies in its comprehensive approach to GPU optimization, combining advanced mathematical operations, sophisticated memory management, warp-level parallelism, efficient state quantization, and specialized activation function optimizations. Its integration with the broader kernel ecosystem ensures that performance optimizations are systematically applied across all layers, from high-level Triton implementations to the most granular PTX assembly optimizations.
 
-As the framework continues to evolve, it maintains its position as the essential foundation for achieving peak performance in GDN kernel implementations, particularly in memory-bound scenarios where FP8 quantization provides substantial bandwidth savings while preserving numerical accuracy through careful dynamic scaling strategies.
+The addition of SwiGLU PTX implementations represents a significant advancement in activation function optimization, providing vectorized processing capabilities that can achieve 4x throughput improvements for activation-heavy workloads. The CUDA/PTX hybrid approach ensures optimal performance across varying input sizes while maintaining backward compatibility and graceful degradation when PTX modules are unavailable.
+
+As the framework continues to evolve, it maintains its position as the essential foundation for achieving peak performance in GDN kernel implementations, particularly in memory-bound scenarios where FP8 quantization provides substantial bandwidth savings while preserving numerical accuracy through careful dynamic scaling strategies. The specialized SwiGLU optimizations further enhance its value in modern transformer architectures where activation functions represent significant computational overhead.

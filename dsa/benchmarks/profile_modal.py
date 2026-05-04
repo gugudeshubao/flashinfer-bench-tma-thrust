@@ -101,6 +101,7 @@ def run_profile(iters: int = 20) -> dict:
             need_sparse_mask=False,
             causal_mask=inputs["attn_mask"] is not None and inputs["q_nope"].shape[1] == inputs["compressed_kv"].shape[1],
             approximate_scores=inputs["q_nope"].shape[1] > 1,
+            weighted_q_kernel_override=None,
         )
         latent = _launch_triton_latent(
             q_nope_proj=q_nope_proj,
@@ -155,6 +156,7 @@ def run_profile(iters: int = 20) -> dict:
                 need_sparse_mask=False,
                 causal_mask=inputs["attn_mask"] is not None and inputs["q_nope"].shape[1] == inputs["compressed_kv"].shape[1],
                 approximate_scores=inputs["q_nope"].shape[1] > 1,
+                weighted_q_kernel_override=None,
             )
             _sync()
             t2 = time.perf_counter()

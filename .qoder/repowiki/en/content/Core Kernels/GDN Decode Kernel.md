@@ -13,16 +13,16 @@
 - [OPTIMIZATION_LOG.md](file://gdn/docs/OPTIMIZATION_LOG.md)
 - [ROADMAP.md](file://gdn/docs/ROADMAP.md)
 - [ZHIHU_GDN_QUANTIZATION.md](file://gdn/docs/ZHIHU_GDN_QUANTIZATION.md)
+- [gdn_decode_v5.cuh](file://gdn/kernels/cuda/gdn_decode_v5.cuh)
+- [GDN_SOURCE_ARGUMENT_MAP.md](file://gdn/docs/GDN_SOURCE_ARGUMENT_MAP.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Updated project structure to reflect the new comprehensive GDN decode kernel implementation under gdn/decode/
-- Enhanced documentation with separate baseline and solution implementations across multiple backends (Triton, CUDA)
-- Added detailed coverage of kernel variants: v1 (baseline), v2 (fused delta-rule), v3 (V-dimension splitting), v4 (adaptive BLOCK_V)
-- Expanded kernel technology stack comparison including CUDA implementation with JIT compilation
-- Updated performance analysis to include comprehensive benchmarking across all kernel variants
-- Integrated new quantization research documentation and optimization logs
+- Updated CUDA kernel wrapper implementation to use embedded CUDA source directly in Python file
+- Corrected documentation to reflect the embedded source approach replacing external file dependencies
+- Updated CUDA implementation details to show the new unified approach with embedded source
+- Revised troubleshooting guidance to account for embedded source compilation
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -75,7 +75,7 @@ M["gdn/docs/ZHIHU_GDN_QUANTIZATION.md"] --> A
 - **Triton v2 kernel**: Fused delta-rule implementation with full state tile in registers, eliminating Python loop overhead and single HBM read/write per kernel launch.
 - **Triton v3 kernel**: V-dimension splitting strategy with fixed BLOCK_V=32 across 4 parallel programs for improved SM occupancy.
 - **Triton v1 baseline**: Reference implementation using PyTorch operations and GVA expansion with k-first layout conversion.
-- **CUDA solution kernel**: Python wrapper with JIT compilation support for CUDA kernel, falling back to Triton implementation if sandbox restrictions prevent compilation.
+- **CUDA solution kernel**: Python wrapper with embedded CUDA source for Modal compatibility, providing JIT compilation support with automatic fallback to Triton implementation.
 - **Configuration system**: Defines solution metadata, build specifications, and entry points for packaging and deployment.
 - **Solution packaging**: Automated packaging system that reads config.toml and packages solution/triton/kernel.py for distribution.
 - **Benchmarking infrastructure**: Comprehensive benchmarking system supporting multiple kernel variants and batch sizes on Modal B200 hardware.
@@ -239,18 +239,20 @@ These patterns enable efficient HBM bandwidth utilization and register reuse acr
 - [kernel_v2.py:65](file://gdn/decode/solution/triton/kernel_v2.py#L65)
 - [kernel_v3.py:69](file://gdn/decode/solution/triton/kernel_v3.py#L69)
 
-### CUDA Implementation with JIT Compilation
-**Updated** The CUDA solution provides a robust fallback mechanism with automatic compilation detection:
+### CUDA Implementation with Embedded Source
+**Updated** The CUDA solution provides a robust fallback mechanism with embedded source compilation:
 
-- **JIT Compilation**: Attempts to compile CUDA kernel via torch.utils.cpp_extension.load_inline with fast math optimizations.
+- **Embedded CUDA Source**: The CUDA kernel source is embedded directly in the Python file as a string literal (`CUDA_SOURCE = r''' ... '''`) for Modal compatibility and simplified deployment.
+- **JIT Compilation**: Attempts to compile CUDA kernel via torch.utils.cpp_extension.load_inline with fast math optimizations and embedded source.
+- **Automatic Compilation**: The embedded source eliminates external file dependencies and simplifies the compilation process.
 - **Fallback Mechanism**: Automatically falls back to Triton implementation if sandbox restrictions prevent CUDA compilation.
 - **Wrapper Functionality**: Provides unified interface that works regardless of compilation success.
 - **Performance**: CUDA implementation can achieve superior performance when compilation succeeds, with Triton fallback ensuring reliability.
 
 **Section sources**
-- [kernel.py:25-92](file://gdn/decode/solution/cuda/kernel.py#L25-L92)
-- [kernel.py:157-193](file://gdn/decode/solution/cuda/kernel.py#L157-L193)
-- [kernel.py:220-248](file://gdn/decode/solution/cuda/kernel.py#L220-L248)
+- [kernel.py:18-242](file://gdn/decode/solution/cuda/kernel.py#L18-L242)
+- [kernel.py:248-311](file://gdn/decode/solution/cuda/kernel.py#L248-L311)
+- [kernel.py:418-467](file://gdn/decode/solution/cuda/kernel.py#L418-L467)
 
 ### Solution Packaging and Configuration
 **Updated** The solution packaging system provides automated deployment capabilities:
@@ -312,24 +314,26 @@ The Triton implementation provides multiple optimization levels with progressive
 - [kernel.py:1-136](file://gdn/decode/solution/triton/kernel.py#L1-L136)
 
 ### CUDA Implementation
-**Updated** Robust CUDA implementation with fallback capabilities:
+**Updated** Robust CUDA implementation with embedded source and fallback capabilities:
 
 **Key Features:**
-- **JIT Compilation**: Automatic CUDA kernel compilation with fast math flags
+- **Embedded CUDA Source**: CUDA kernel source embedded directly in Python file as string literal for simplified deployment
+- **JIT Compilation**: Automatic CUDA kernel compilation with fast math flags using embedded source
 - **Fallback Detection**: Graceful degradation to Triton implementation when needed
 - **Unified Interface**: Consistent API across compilation success/failure scenarios
 - **Memory Management**: Proper state handling and tensor contiguity requirements
 
 **Implementation Details:**
-- Uses torch.utils.cpp_extension.load_inline for dynamic compilation
+- Uses embedded CUDA source string for dynamic compilation
 - Wraps CUDA kernel with C++ wrapper for Python binding
 - Supports BLOCK_V parameter for performance tuning
 - Handles dtype conversions for compatibility
+- Eliminates external file dependencies for Modal compatibility
 
 **Section sources**
-- [kernel.py:25-92](file://gdn/decode/solution/cuda/kernel.py#L25-L92)
-- [kernel.py:157-193](file://gdn/decode/solution/cuda/kernel.py#L157-L193)
-- [kernel.py:220-248](file://gdn/decode/solution/cuda/kernel.py#L220-L248)
+- [kernel.py:18-242](file://gdn/decode/solution/cuda/kernel.py#L18-L242)
+- [kernel.py:248-311](file://gdn/decode/solution/cuda/kernel.py#L248-L311)
+- [kernel.py:418-467](file://gdn/decode/solution/cuda/kernel.py#L418-L467)
 
 ### Benchmarking and Evaluation System
 **Updated** Comprehensive evaluation framework supporting multiple kernel variants:
@@ -338,7 +342,7 @@ The Triton implementation provides multiple optimization levels with progressive
 - **Multi-Variant Testing**: Compares solution vs baseline across all kernel implementations
 - **Batch Size Analysis**: Tests performance across 1, 16, 64, 256, and 512 batch sizes
 - **Correctness Validation**: Automatic verification with error metric reporting
-- **Hardware Optimization**: Specifically tuned for Modal B200 B200 GPU architecture
+- **Hardware Optimization**: Specifically tuned for Modal B200 GPU architecture
 
 **Evaluation Metrics:**
 - Latency measurements in milliseconds
@@ -400,8 +404,10 @@ N --> G
   - Leverage technology-specific optimizations: Triton auto-tuning, CUDA JIT compilation, Python baseline for reference.
   - **Enhanced**: Implement adaptive BLOCK_V selection across batch sizes for optimal SM occupancy.
   - **Enhanced**: Provide fallback mechanisms for reliability across different deployment environments.
+  - **Enhanced**: Use embedded CUDA source for simplified deployment and reduced external dependencies.
 - **Memory latency hiding**: All implementations now feature mechanisms to overlap memory transfers with computation, reducing stall time and improving overall throughput.
 - **Batch size optimization**: The v4 implementation provides optimal performance across the entire batch spectrum through adaptive BLOCK_V selection.
+- **Compilation efficiency**: The embedded CUDA source approach eliminates external file dependencies and simplifies the compilation process.
 
 These strategies are validated by comprehensive benchmarking across all kernel variants and implemented with progressive optimization levels from reference implementation to production-ready solutions.
 
@@ -417,6 +423,7 @@ These strategies are validated by comprehensive benchmarking across all kernel v
 - **Scaling factor**: If scale is None or zero, the kernel defaults to 1/sqrt(D).
 - **GVA mismatch**: Verify that num_v_heads equals twice num_q_heads for the intended GVA sharing scheme.
 - **CUDA compilation issues**: The CUDA implementation includes automatic fallback to Triton if JIT compilation fails in sandbox environments.
+- **Embedded source compilation**: The embedded CUDA source approach eliminates external file dependencies but may fail if sandbox restrictions prevent compilation.
 - **BLOCK_V selection**: The v4 implementation automatically selects optimal BLOCK_V based on batch size; manual override available if needed.
 - **Memory alignment**: Ensure proper tensor contiguity for optimal performance across all kernel variants.
 - **Benchmark configuration**: Verify correct configuration in config.toml for packaging and deployment.
@@ -426,9 +433,9 @@ These strategies are validated by comprehensive benchmarking across all kernel v
 **Section sources**
 - [kernel.py:108-109](file://gdn/decode/solution/triton/kernel.py#L108-L109)
 - [kernel.py:117-123](file://gdn/decode/solution/triton/kernel.py#L117-L123)
-- [kernel.py:220-248](file://gdn/decode/solution/cuda/kernel.py#L220-L248)
+- [kernel.py:418-467](file://gdn/decode/solution/cuda/kernel.py#L418-L467)
 - [pack_solution.py:20-57](file://gdn/decode/scripts/pack_solution.py#L20-L57)
 - [bench_modal.py:42-81](file://gdn/benchmarks/bench_modal.py#L42-L81)
 
 ## Conclusion
-The GDN Decode Kernel implementation has evolved into a comprehensive multi-backend solution with separate baseline and solution directories, supporting Triton, CUDA, and reference Python implementations. The solution provides multiple optimization levels from reference implementation to production-ready kernels with adaptive batch sizing and optimal SM occupancy. The v4 Triton implementation offers the best balance of performance and development efficiency, while the CUDA implementation provides robust fallback capabilities with automatic compilation detection. The extensive benchmarking infrastructure enables comprehensive performance analysis across multiple kernel variants and batch sizes, supporting deployment decisions across different hardware and software environments. The modular design with clear separation of concerns enables easy maintenance, extension, and deployment of GDN decode kernels across diverse use cases and performance requirements.
+The GDN Decode Kernel implementation has evolved into a comprehensive multi-backend solution with separate baseline and solution directories, supporting Triton, CUDA, and reference Python implementations. The solution provides multiple optimization levels from reference implementation to production-ready kernels with adaptive batch sizing and optimal SM occupancy. The v4 Triton implementation offers the best balance of performance and development efficiency, while the CUDA implementation provides robust fallback capabilities with automatic compilation detection and embedded source compilation. The extensive benchmarking infrastructure enables comprehensive performance analysis across multiple kernel variants and batch sizes, supporting deployment decisions across different hardware and software environments. The modular design with clear separation of concerns enables easy maintenance, extension, and deployment of GDN decode kernels across diverse use cases and performance requirements. The embedded CUDA source approach represents a significant improvement in deployment simplicity and reliability, particularly in constrained environments like Modal.

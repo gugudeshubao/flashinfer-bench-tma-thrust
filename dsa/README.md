@@ -83,14 +83,14 @@ modal run dsa/benchmarks/tune_selection_modal.py --iters 20
 ## Current Perf Snapshot
 
 - Modal B200 smoke:
-  - prefill: `1.038x` of baseline on the 256/64 smoke shape
-  - decode: `1.341x` over baseline on the 2048/64 smoke shape
+  - prefill: `1.032x` of baseline on the 256/64 smoke shape
+  - decode: `1.188x` over baseline on the 2048/64 smoke shape
 - Modal B200 benchmark:
-  - prefill: `1.067x`, `1.023x`, `1.015x`, `2.666x`, `5.414x` on 256, 512, 1024, 2048, 4096 token cases
-  - decode: `1.219x`, `1.334x`, `1.247x` on 2048, 4096, 8192 cache cases
+  - prefill: `1.095x`, `0.987x`, `1.027x`, `2.574x`, `5.377x` on 256, 512, 1024, 2048, 4096 token cases
+  - decode: `1.065x`, `1.084x`, `1.118x` on 2048, 4096, 8192 cache cases
 - Stage profile on B200:
-  - forced-`prefill_1024_128` Triton path: prepare `0.085ms`, select `0.230ms`, kernel `0.259ms`, project `0.055ms`
-  - `decode_8192_128`: prepare `0.057ms`, select `0.119ms`, kernel `0.110ms`, project `0.036ms`
+  - forced-`prefill_1024_128` Triton path: prepare `0.051ms`, select `0.157ms`, kernel `0.217ms`, project `0.033ms`
+  - `decode_8192_128`: prepare `0.034ms`, select `0.094ms`, kernel `0.064ms`, project `0.024ms`
 - Selection profile on B200:
   - `prefill_1024_128`: weighted `4.158ms`, bmm `1.630ms`, mask `0.043ms`, topk `1.232ms`
   - `decode_8192_128`: weighted `0.765ms`, bmm `0.055ms`, mask `0.007ms`, topk `0.053ms`

@@ -1,5 +1,5 @@
 """
-Modal benchmark runner for GDN kernels (decode + prefill).
+Modal benchmark runner for Gated DeltaNet linear attention kernels (decode + prefill).
 
 Usage:
     modal run gdn/benchmarks/bench_modal.py              # run both (solution only)

@@ -1,5 +1,7 @@
 # GDN Performance Snapshot
 
+GDN = Gated DeltaNet linear attention.
+
 All numbers below were rerun on Modal B200 on 2026-04-12 unless noted otherwise.
 
 ## Terminology

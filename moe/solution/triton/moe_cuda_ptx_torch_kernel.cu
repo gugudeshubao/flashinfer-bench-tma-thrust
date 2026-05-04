@@ -1,6 +1,7 @@
 #include <torch/extension.h>
 #include <ATen/Context.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <c10/util/Float8_e4m3fn.h>
 #include <cuda_runtime.h>
 #include <algorithm>
 #include <deque>
@@ -21,6 +22,7 @@ constexpr int BLK = 128;
 constexpr int ROUTE_CACHE_LIMIT = 16;
 constexpr int SCALE_CACHE_LIMIT = 16;
 constexpr int FULL_HIDDEN_DEQUANT_MAX_SEQ = 1024;
+constexpr int FUSED_GATHER_DEQUANT_MIN_SEQ = 8192;
 constexpr int GROUPED_GATHER_MIN_ROUTES = 1024;
 
 struct ScaleKey {
@@ -360,24 +362,72 @@ __global__ void dequantize_transpose_tiled_kernel(
     }
 }
 
-torch::Tensor dequantize_weight_tiled_t(torch::Tensor weight_fp32, torch::Tensor scale_fp32) {
-    int rows = static_cast<int>(weight_fp32.size(0));
-    int cols = static_cast<int>(weight_fp32.size(1));
+template<int TILE_DIM, int BLOCK_ROWS>
+__global__ void dequantize_transpose_tiled_fp8_kernel(
+    const c10::Float8_e4m3fn* __restrict__ weight,
+    const float* __restrict__ scale,
+    float* __restrict__ out_t,
+    int rows,
+    int cols,
+    int scale_cols
+) {
+    __shared__ float tile[TILE_DIM][TILE_DIM + 1];
+
+    int x = blockIdx.x * TILE_DIM + threadIdx.x;
+    int y = blockIdx.y * TILE_DIM + threadIdx.y;
+    float s = scale[(blockIdx.y / (BLK / TILE_DIM)) * scale_cols + (blockIdx.x / (BLK / TILE_DIM))];
+
+    #pragma unroll
+    for (int j = 0; j < TILE_DIM; j += BLOCK_ROWS) {
+        int yy = y + j;
+        if (x < cols && yy < rows) {
+            tile[threadIdx.y + j][threadIdx.x] = static_cast<float>(weight[yy * cols + x]) * s;
+        }
+    }
+
+    __syncthreads();
+
+    x = blockIdx.y * TILE_DIM + threadIdx.x;
+    y = blockIdx.x * TILE_DIM + threadIdx.y;
+
+    #pragma unroll
+    for (int j = 0; j < TILE_DIM; j += BLOCK_ROWS) {
+        int yy = y + j;
+        if (x < rows && yy < cols) {
+            out_t[yy * rows + x] = tile[threadIdx.x][threadIdx.y + j];
+        }
+    }
+}
+
+torch::Tensor dequantize_weight_tiled_t(torch::Tensor weight, torch::Tensor scale_fp32) {
+    int rows = static_cast<int>(weight.size(0));
+    int cols = static_cast<int>(weight.size(1));
     int scale_cols = static_cast<int>(scale_fp32.size(1));
-    auto out_t = torch::empty({cols, rows}, weight_fp32.options());
+    auto out_t = torch::empty({cols, rows}, torch::TensorOptions().device(weight.device()).dtype(torch::kFloat32));
 
     constexpr int kTile = 32;
     constexpr int kBlockRows = 8;
     dim3 block(kTile, kBlockRows);
     dim3 grid((cols + kTile - 1) / kTile, (rows + kTile - 1) / kTile);
-    dequantize_transpose_tiled_kernel<kTile, kBlockRows><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        weight_fp32.data_ptr<float>(),
-        scale_fp32.data_ptr<float>(),
-        out_t.data_ptr<float>(),
-        rows,
-        cols,
-        scale_cols
-    );
+    if (weight.scalar_type() == at::ScalarType::Float8_e4m3fn) {
+        dequantize_transpose_tiled_fp8_kernel<kTile, kBlockRows><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+            weight.data_ptr<c10::Float8_e4m3fn>(),
+            scale_fp32.data_ptr<float>(),
+            out_t.data_ptr<float>(),
+            rows,
+            cols,
+            scale_cols
+        );
+    } else {
+        dequantize_transpose_tiled_kernel<kTile, kBlockRows><<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+            weight.data_ptr<float>(),
+            scale_fp32.data_ptr<float>(),
+            out_t.data_ptr<float>(),
+            rows,
+            cols,
+            scale_cols
+        );
+    }
     return out_t;
 }
 
@@ -413,6 +463,85 @@ torch::Tensor gather_rows(torch::Tensor src, torch::Tensor token_idx) {
             total
         );
     }
+    return dst;
+}
+
+template<int BLOCK_THREADS>
+__global__ void dequant_hidden_fp8_kernel(
+    const c10::Float8_e4m3fn* __restrict__ src,
+    const float* __restrict__ scale,
+    float* __restrict__ dst,
+    int cols,
+    int scale_cols,
+    int total
+) {
+    int idx = blockIdx.x * BLOCK_THREADS + threadIdx.x;
+    if (idx < total) {
+        int row = idx / cols;
+        int col = idx - row * cols;
+        float v = static_cast<float>(src[idx]);
+        float s = scale[row * scale_cols + (col / BLK)];
+        dst[idx] = v * s;
+    }
+}
+
+torch::Tensor dequant_hidden_fp8(torch::Tensor src, torch::Tensor scale) {
+    int rows = src.size(0);
+    int cols = src.size(1);
+    int scale_cols = scale.size(1);
+    auto dst = torch::empty({rows, cols}, torch::TensorOptions().device(src.device()).dtype(torch::kFloat32));
+    constexpr int kBlock = 256;
+    int total = rows * cols;
+    int blocks = (total + kBlock - 1) / kBlock;
+    dequant_hidden_fp8_kernel<kBlock><<<blocks, kBlock, 0, at::cuda::getCurrentCUDAStream()>>>(
+        src.data_ptr<c10::Float8_e4m3fn>(),
+        scale.data_ptr<float>(),
+        dst.data_ptr<float>(),
+        cols,
+        scale_cols,
+        total
+    );
+    return dst;
+}
+
+template<int BLOCK_THREADS>
+__global__ void gather_dequant_rows_fp8_kernel(
+    const c10::Float8_e4m3fn* __restrict__ src,
+    const float* __restrict__ scale,
+    const int32_t* __restrict__ token_idx,
+    float* __restrict__ dst,
+    int cols,
+    int scale_cols,
+    int total
+) {
+    int idx = blockIdx.x * BLOCK_THREADS + threadIdx.x;
+    if (idx < total) {
+        int row = idx / cols;
+        int col = idx - row * cols;
+        int src_row = token_idx[row];
+        float v = static_cast<float>(src[src_row * cols + col]);
+        float s = scale[src_row * scale_cols + (col / BLK)];
+        dst[idx] = v * s;
+    }
+}
+
+torch::Tensor gather_dequant_rows_fp8(torch::Tensor src, torch::Tensor scale, torch::Tensor token_idx) {
+    int rows = token_idx.size(0);
+    int cols = src.size(1);
+    int scale_cols = scale.size(1);
+    auto dst = torch::empty({rows, cols}, torch::TensorOptions().device(src.device()).dtype(torch::kFloat32));
+    constexpr int kBlock = 256;
+    int total = rows * cols;
+    int blocks = (total + kBlock - 1) / kBlock;
+    gather_dequant_rows_fp8_kernel<kBlock><<<blocks, kBlock, 0, at::cuda::getCurrentCUDAStream()>>>(
+        src.data_ptr<c10::Float8_e4m3fn>(),
+        scale.data_ptr<float>(),
+        token_idx.data_ptr<int32_t>(),
+        dst.data_ptr<float>(),
+        cols,
+        scale_cols,
+        total
+    );
     return dst;
 }
 
@@ -713,8 +842,12 @@ torch::Tensor kernel(
     bool use_full_hidden_dequant = t <= FULL_HIDDEN_DEQUANT_MAX_SEQ;
     torch::Tensor a;
     if (use_full_hidden_dequant) {
-        auto a_scale_exp = hs_scale_th.unsqueeze(-1).expand({t, H / BLK, BLK}).reshape({t, H}).contiguous();
-        a = hidden_states.to(torch::kFloat32) * a_scale_exp;
+        if (hidden_states.scalar_type() == at::ScalarType::Float8_e4m3fn) {
+            a = dequant_hidden_fp8(hidden_states, hs_scale_th);
+        } else {
+            auto a_scale_exp = hs_scale_th.unsqueeze(-1).expand({t, H / BLK, BLK}).reshape({t, H}).contiguous();
+            a = hidden_states.to(torch::kFloat32) * a_scale_exp;
+        }
     }
     int64_t local_start = local_expert_offset;
     auto route = prepare_route(routing_logits, routing_bias, local_start, routed_scaling_factor);
@@ -726,11 +859,16 @@ torch::Tensor kernel(
     const int32_t* offsets_ptr = offsets_cpu.data_ptr<int32_t>();
     int64_t total_local = static_cast<int64_t>(offsets_ptr[E_LOCAL]);
     bool use_grouped_gather = total_local >= GROUPED_GATHER_MIN_ROUTES;
+    bool use_fused_gather_dequant = (!use_full_hidden_dequant) &&
+        (t >= FUSED_GATHER_DEQUANT_MIN_SEQ) &&
+        (hidden_states.scalar_type() == at::ScalarType::Float8_e4m3fn);
     torch::Tensor a_local;
 
     if (use_grouped_gather && total_local > 0) {
         if (use_full_hidden_dequant) {
             a_local = gather_rows(a, sorted_tok);
+        } else if (use_fused_gather_dequant) {
+            a_local = gather_dequant_rows_fp8(hidden_states, hs_scale_th, sorted_tok);
         } else {
             auto sorted_tok_i64 = sorted_tok.to(torch::kLong);
             auto hs_scale_local = hs_scale_th.index_select(0, sorted_tok_i64);
@@ -757,6 +895,8 @@ torch::Tensor kernel(
             a_e = a_local.slice(0, s_off, e_off);
         } else if (use_full_hidden_dequant) {
             a_e = gather_rows(a, token_idx);
+        } else if (use_fused_gather_dequant) {
+            a_e = gather_dequant_rows_fp8(hidden_states, hs_scale_th, token_idx);
         } else {
             auto token_idx_i64 = token_idx.to(torch::kLong);
             auto hs_scale_e = hs_scale_th.index_select(0, token_idx_i64);
@@ -768,15 +908,15 @@ torch::Tensor kernel(
         }
 
         auto w13_t = dequantize_weight_tiled_t(
-            gemm1_weights[le].to(torch::kFloat32).contiguous(),
+            gemm1_weights[le].contiguous(),
             gemm1_weights_scale[le].to(torch::kFloat32).contiguous()
         );
         auto g1 = torch::mm(a_e, w13_t);
 
-        auto mid = (g1.size(0) <= 4) ? fused_swiglu_packed_precise(g1) : fused_swiglu_packed(g1);
+        auto mid = fused_swiglu_packed(g1);
 
         auto w2_t = dequantize_weight_tiled_t(
-            gemm2_weights[le].to(torch::kFloat32).contiguous(),
+            gemm2_weights[le].contiguous(),
             gemm2_weights_scale[le].to(torch::kFloat32).contiguous()
         );
         auto out_e = torch::mm(mid, w2_t);

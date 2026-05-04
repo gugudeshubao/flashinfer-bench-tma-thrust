@@ -4,6 +4,9 @@
 **Referenced Files in This Document**
 - [gdn/kernels/README.md](file://gdn/kernels/README.md)
 - [gdn/kernels/ptx/gdn_prefill_ptx.cuh](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh)
+- [gdn/kernels/cuda/gdn_prefill_v5.cuh](file://gdn/kernels/cuda/gdn_prefill_v5.cuh)
+- [gdn/kernels/cuda/gdn_prefill_v6.cuh](file://gdn/kernels/cuda/gdn_prefill_v6.cuh)
+- [gdn/kernels/cuda/gdn_prefill_v6_chunked.cuh](file://gdn/kernels/cuda/gdn_prefill_v6_chunked.cuh)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh](file://gdn/kernels/cuda/gdn_prefill_v7.cuh)
 - [gdn/kernels/cuda/gdn_prefill_v8.cuh](file://gdn/kernels/cuda/gdn_prefill_v8.cuh)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh)
@@ -21,12 +24,12 @@
 ## Update Summary
 **Changes Made**
 - Updated file paths from `src/kernels/` to `gdn/kernels/` throughout the documentation
-- Added comprehensive coverage of the new PTX kernel optimization with TMA double-buffering and cp.async prefetch
-- Documented the sophisticated Tensor Core utilization for Blackwell (sm_100) architecture
-- Added detailed analysis of the new kernel variants (v7, v8, v9, v10) with their specific optimizations
+- Added comprehensive coverage of the new CUDA kernel wrapper with embedded source code
+- Documented the Modal compatibility improvements through inline CUDA source embedding
+- Added detailed analysis of the new CUDA kernel architecture with embedded source code
+- Enhanced documentation of the hybrid approach combining CUDA JIT compilation with Triton fallback
+- Updated architecture diagrams to reflect the new embedded source code structure
 - Removed references to experimental mma.sync prefill kernel (Iteration 3) and placeholder Iteration 4 implementation
-- Enhanced documentation of chunked processing strategies and memory bandwidth optimization
-- Updated architecture diagrams to reflect the latest kernel implementations
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -44,6 +47,8 @@ This document provides a comprehensive technical guide to the GDN Prefill Kernel
 
 The kernel implements batched sequential token processing for initial token generation in variable-length sequence processing, contrasting with the decode kernel's single-token approach. The latest implementations feature sophisticated optimizations including TMA double-buffering, cp.async prefetch, and comprehensive Tensor Core utilization for Blackwell (sm_100) architecture.
 
+**Updated** The CUDA kernel wrapper now embeds complete CUDA source code directly in Python files (200+ lines of embedded CUDA C++ code) instead of relying on external .cuh files, enabling seamless Modal compatibility and simplified deployment.
+
 The prefill kernel handles grouped value attention (GVA) with 4 query heads, 4 key heads, and 8 value heads, processing sequences with k-last state layout [N, H, V=128, K=128]. The implementation includes adaptive BLOCK_V sizing for optimal SM occupancy and supports both memory-bound and compute-bound processing modes through chunked operations.
 
 ## Project Structure
@@ -57,6 +62,8 @@ PTXKernel["gdn_prefill_ptx.cuh<br/>TMA double-buffering + Tensor Cores"]
 PTXLauncher["PTX Launchers<br/>gdn_prefill_ptx_launch()<br/>gdn_prefill_ptx_mma_launch()"]
 end
 subgraph "CUDA C++ Implementations"
+CUDA_V5["v5: Embedded Source + JIT Compilation"]
+CUDA_V6["v6: Chunked Processing"]
 CUDA_V7["v7: TMA + FP4 + Double Buffering"]
 CUDA_V8["v8: Pipelining + Persistent Kernel"]
 CUDA_V9["v9: SMEM Swizzle + Chunking"]
@@ -72,13 +79,15 @@ CUTILE["cuTile (Limited)<br/>Tile-based API"]
 end
 end
 PTXKernel --> PTXLauncher
-CUDA_V7 --> CUDA_V8 --> CUDA_V9 --> CUDA_V10
+CUDA_V5 --> CUDA_V6 --> CUDA_V7 --> CUDA_V8 --> CUDA_V9 --> CUDA_V10
 CUTE_CPP --> CUTE_DSL
 ```
 
 **Diagram sources**
 - [gdn/kernels/README.md:1-170](file://gdn/kernels/README.md#L1-L170)
 - [gdn/kernels/ptx/gdn_prefill_ptx.cuh:235-871](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L235-L871)
+- [gdn/kernels/cuda/gdn_prefill_v5.cuh:1-549](file://gdn/kernels/cuda/gdn_prefill_v5.cuh#L1-L549)
+- [gdn/kernels/cuda/gdn_prefill_v6.cuh:1-550](file://gdn/kernels/cuda/gdn_prefill_v6.cuh#L1-L550)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh:1-549](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L1-L549)
 - [gdn/kernels/cuda/gdn_prefill_v8.cuh:1-550](file://gdn/kernels/cuda/gdn_prefill_v8.cuh#L1-L550)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:1-356](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L1-L356)
@@ -87,6 +96,8 @@ CUTE_CPP --> CUTE_DSL
 **Section sources**
 - [gdn/kernels/README.md:1-170](file://gdn/kernels/README.md#L1-L170)
 - [gdn/kernels/ptx/gdn_prefill_ptx.cuh:1-871](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L1-L871)
+- [gdn/kernels/cuda/gdn_prefill_v5.cuh:1-549](file://gdn/kernels/cuda/gdn_prefill_v5.cuh#L1-L549)
+- [gdn/kernels/cuda/gdn_prefill_v6.cuh:1-550](file://gdn/kernels/cuda/gdn_prefill_v6.cuh#L1-L550)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh:1-549](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L1-L549)
 - [gdn/kernels/cuda/gdn_prefill_v8.cuh:1-550](file://gdn/kernels/cuda/gdn_prefill_v8.cuh#L1-L550)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:1-356](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L1-L356)
@@ -96,11 +107,13 @@ CUTE_CPP --> CUTE_DSL
 The GDN prefill kernel consists of several key components working together for efficient batched sequence processing:
 
 - **PTX Inline Assembly Kernel**: Sophisticated implementation with TMA double-buffering, cp.async prefetch, and comprehensive Tensor Core utilization for Blackwell (sm_100)
-- **CUDA C++ Implementations**: Multiple versions (v7-v10) with progressive optimizations including TMA, FP4 quantization, double buffering, pipelining, and chunked processing
+- **CUDA C++ Implementations**: Multiple versions (v5-v10) with progressive optimizations including embedded source code, TMA, FP4 quantization, double buffering, pipelining, and chunked processing
 - **CuTe C++ Implementations**: Template-based optimizations with SMEM swizzling and TiledMMA support for Tensor Core integration
 - **Triton Baseline**: Reference implementation for correctness verification
 - **cuTile Implementation**: Limited support due to 4D access pattern constraints
 - **Trace Definition**: JSON specification for benchmarking framework integration
+
+**Updated** The CUDA kernel wrapper now embeds complete CUDA source code directly in Python files, providing seamless Modal compatibility and simplified deployment. The embedded source includes the complete CUDA kernel implementation with template-based optimizations and launch functions.
 
 Key implementation characteristics:
 - Grouped Value Attention: num_q_heads=4, num_v_heads=8 with qk_h = h // 2 mapping
@@ -108,21 +121,28 @@ Key implementation characteristics:
 - Head size D=128 with BLOCK_V=16 or 32 depending on batch size
 - Scale defaults to 1/sqrt(D) when not provided
 - Adaptive BLOCK_V: 16 for N <= 4 sequences, 32 for larger batches
-- **Updated** Advanced optimizations: TMA double-buffering, cp.async prefetch, Tensor Core utilization, chunked processing
+- **Updated** Advanced optimizations: TMA double-buffering, cp.async prefetch, Tensor Core utilization, chunked processing, and embedded source code for Modal compatibility
 
 **Section sources**
 - [gdn/kernels/ptx/gdn_prefill_ptx.cuh:1-871](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L1-L871)
+- [gdn/kernels/cuda/gdn_prefill_v5.cuh:1-549](file://gdn/kernels/cuda/gdn_prefill_v5.cuh#L1-L549)
+- [gdn/kernels/cuda/gdn_prefill_v6.cuh:1-550](file://gdn/kernels/cuda/gdn_prefill_v6.cuh#L1-L550)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh:1-549](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L1-L549)
 - [gdn/kernels/cuda/gdn_prefill_v8.cuh:1-550](file://gdn/kernels/cuda/gdn_prefill_v8.cuh#L1-L550)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:1-356](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L1-L356)
 - [gdn/kernels/cute_cpp/gdn_prefill_v10.cuh:1-390](file://gdn/kernels/cute_cpp/gdn_prefill_v10.cuh#L1-L390)
 
 ## Architecture Overview
-The GDN prefill kernel architecture implements batched sequential processing with multiple optimization strategies, now featuring sophisticated PTX inline assembly and Tensor Core support:
+The GDN prefill kernel architecture implements batched sequential processing with multiple optimization strategies, now featuring sophisticated PTX inline assembly, embedded CUDA source code, and Tensor Core support:
 
 ```mermaid
 graph TB
 subgraph "Prefill Kernel Architecture"
+subgraph "Embedded CUDA Source"
+CUDA_WRAPPER["CUDA Wrapper<br/>Embedded Source Code<br/>Modal Compatibility"]
+CUDA_KERNEL["CUDA Kernel<br/>Template-based Optimizations<br/>JIT Compilation"]
+CUDA_LAUNCH["Launch Functions<br/>Dynamic BLOCK_V Selection"]
+end
 subgraph "PTX Inline Assembly"
 PTXKernel["PTX Kernel<br/>TMA Double-Buffering<br/>cp.async Prefetch<br/>Tensor Core MMA"]
 PTXPrimitives["PTX Primitives<br/>Fast Math + FMA<br/>mbarrier + TMA"]
@@ -140,6 +160,7 @@ StateUpdate["Delta Rule Update<br/>rank-1 S updates"]
 OutputComp["Output Computation<br/>scale × S × q"]
 end
 end
+CUDA_WRAPPER --> CUDA_KERNEL --> CUDA_LAUNCH --> SeqScan --> GateCalc --> StateUpdate --> OutputComp
 PTXKernel --> PTXPrimitives --> SeqScan --> GateCalc --> StateUpdate --> OutputComp
 CUDA_V7 --> SeqScan --> GateCalc --> StateUpdate --> OutputComp
 CUDA_V8 --> SeqScan --> GateCalc --> StateUpdate --> OutputComp
@@ -149,6 +170,7 @@ CUDA_V10 --> SeqScan --> GateCalc --> StateUpdate --> OutputComp
 
 **Diagram sources**
 - [gdn/kernels/ptx/gdn_prefill_ptx.cuh:235-871](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L235-L871)
+- [gdn/kernels/cuda/gdn_prefill_v5.cuh:91-549](file://gdn/kernels/cuda/gdn_prefill_v5.cuh#L91-L549)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh:91-549](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L91-L549)
 - [gdn/kernels/cuda/gdn_prefill_v8.cuh:81-550](file://gdn/kernels/cuda/gdn_prefill_v8.cuh#L81-L550)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:84-356](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L84-L356)
@@ -176,6 +198,7 @@ Where ⊙ represents element-wise operations and ⊗ represents outer product op
 
 **Section sources**
 - [gdn/kernels/ptx/gdn_prefill_ptx.cuh:67-222](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L67-L222)
+- [gdn/kernels/cuda/gdn_prefill_v5.cuh:185-261](file://gdn/kernels/cuda/gdn_prefill_v5.cuh#L185-L261)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh:185-261](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L185-L261)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:193-251](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L193-L251)
 
@@ -190,10 +213,11 @@ The prefill kernel processes tokens sequentially within each sequence using cumu
    - Compute output for current token
 3. **State Persistence**: Store final state slice for each sequence
 
-**Updated** The PTX implementation now features sophisticated double-buffering schemes for shared memory and cp.async prefetch for improved memory bandwidth utilization.
+**Updated** The CUDA wrapper now features sophisticated double-buffering schemes for shared memory and cp.async prefetch for improved memory bandwidth utilization, with the complete CUDA source code embedded directly in the Python file for seamless Modal compatibility.
 
 **Section sources**
 - [gdn/kernels/ptx/gdn_prefill_ptx.cuh:305-405](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L305-L405)
+- [gdn/kernels/cuda/gdn_prefill_v5.cuh:166-262](file://gdn/kernels/cuda/gdn_prefill_v5.cuh#L166-L262)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh:166-262](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L166-L262)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:170-267](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L170-L267)
 
@@ -210,13 +234,36 @@ The kernel maintains state in k-last layout [N, H, V, K] with the following char
 - BLOCK_V=16 for small batches (N ≤ 4), BLOCK_V=32 for larger batches
 - **Updated** Sophisticated shared memory layouts with swizzling for bank conflict avoidance
 - **Updated** TMA double-buffering for asynchronous memory operations
+- **Updated** Embedded source code eliminates external dependency issues for Modal deployment
 
 **Section sources**
 - [gdn/kernels/ptx/gdn_prefill_ptx.cuh:474-510](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L474-L510)
+- [gdn/kernels/cuda/gdn_prefill_v5.cuh:143-153](file://gdn/kernels/cuda/gdn_prefill_v5.cuh#L143-L153)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh:143-153](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L143-L153)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:148-165](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L148-L165)
 
 ## Implementation Variants
+
+### Embedded CUDA Source Wrapper
+
+**CUDA Wrapper with Embedded Source Code:**
+- **Major Innovation**: Complete CUDA source code embedded directly in Python file (200+ lines)
+- **Modal Compatibility**: Eliminates external .cuh file dependencies for seamless deployment
+- **JIT Compilation**: Dynamic compilation with error handling and fallback to Triton
+- **Template-based Kernels**: Multiple BLOCK_V sizes (16 and 32) for optimal performance
+- **Hybrid Approach**: CUDA JIT compilation with automatic Triton fallback
+
+**Key Features:**
+- Embedded CUDA source with complete kernel implementation
+- Template specialization for different BLOCK_V values
+- Launch functions with dynamic shared memory allocation
+- Error handling for JIT compilation failures
+- Automatic fallback to Triton implementation
+- Support for both bfloat16 and float32 data types
+
+**Section sources**
+- [gdn/prefill/solution/cuda/kernel.py:18-228](file://gdn/prefill/solution/cuda/kernel.py#L18-L228)
+- [gdn/prefill/solution/cuda/kernel.py:234-298](file://gdn/prefill/solution/cuda/kernel.py#L234-L298)
 
 ### PTX Inline Assembly Kernel
 
@@ -238,6 +285,19 @@ The kernel maintains state in k-last layout [N, H, V, K] with the following char
 - [gdn/kernels/ptx/gdn_prefill_ptx.cuh:1-871](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L1-L871)
 
 ### CUDA C++ Implementation Progression
+
+**Version 5 (gdn_prefill_v5.cuh):**
+- **Embedded Source**: Complete CUDA source code embedded in Python wrapper
+- **JIT Compilation**: Dynamic compilation with error handling
+- **Template Specialization**: BLOCK_V=16 and BLOCK_V=32 variants
+- **Launch Functions**: Dynamic shared memory allocation
+- **Modal Compatibility**: Seamless deployment without external dependencies
+
+**Version 6 (gdn_prefill_v6.cuh):**
+- **Chunked Processing**: Enables mat-mat operations for Tensor Cores
+- **Matrix Operations**: Optimized for compute-bound processing
+- **Persistent Kernels**: Long sequence handling with chunking
+- **Triple Buffering**: Enhanced memory bandwidth utilization
 
 **Version 7 (gdn_prefill_v7.cuh):**
 - TMA-ready shared memory with 128B alignment
@@ -271,6 +331,8 @@ The kernel maintains state in k-last layout [N, H, V, K] with the following char
 - Advanced arithmetic intensity optimization
 
 **Section sources**
+- [gdn/kernels/cuda/gdn_prefill_v5.cuh:1-549](file://gdn/kernels/cuda/gdn_prefill_v5.cuh#L1-L549)
+- [gdn/kernels/cuda/gdn_prefill_v6.cuh:1-550](file://gdn/kernels/cuda/gdn_prefill_v6.cuh#L1-L550)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh:1-549](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L1-L549)
 - [gdn/kernels/cuda/gdn_prefill_v8.cuh:1-550](file://gdn/kernels/cuda/gdn_prefill_v8.cuh#L1-L550)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:1-356](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L1-L356)
@@ -328,9 +390,11 @@ The prefill kernel supports different processing modes with varying arithmetic i
 - **Updated** TMA double-buffering for asynchronous memory operations
 - **Updated** cp.async prefetch for improved bandwidth utilization
 - **Updated** SMEM swizzling for bank conflict avoidance
+- **Updated** Embedded source code eliminates external dependency overhead
 
 **Section sources**
 - [gdn/kernels/ptx/gdn_prefill_ptx.cuh:105-132](file://gdn/kernels/ptx/gdn_prefill_ptx.cuh#L105-L132)
+- [gdn/kernels/cuda/gdn_prefill_v5.cuh:130-153](file://gdn/kernels/cuda/gdn_prefill_v5.cuh#L130-L153)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh:130-153](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L130-L153)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:132-165](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L132-L165)
 
@@ -368,12 +432,16 @@ The baseline Triton implementation serves as a reference for correctness testing
 ## Conclusion
 The GDN Prefill Kernel implementation under `gdn/kernels/` represents a comprehensive approach to batched sequence processing with multiple advanced backend variants and optimization strategies. The evolution from simple sequential processing to sophisticated PTX inline assembly with Tensor Core support demonstrates careful consideration of GPU architecture constraints and performance optimization.
 
+**Updated** The most significant enhancement is the transition to embedded CUDA source code in the Python wrapper, which provides seamless Modal compatibility and simplifies deployment. This change eliminates the need for external .cuh files and enables dynamic JIT compilation with automatic fallback to Triton implementations.
+
 The current implementation provides:
+- **Embedded CUDA Source**: Complete kernel source code embedded in Python for Modal compatibility
+- **Hybrid Compilation**: CUDA JIT compilation with automatic Triton fallback
 - **PTX Inline Assembly**: Sophisticated TMA double-buffering, cp.async prefetch, and Tensor Core utilization
-- **CUDA C++ Progression**: From basic optimizations (v7) to advanced Tensor Core integration (v10)
+- **CUDA C++ Progression**: From basic optimizations (v5) to advanced Tensor Core integration (v10)
 - **CuTe C++ Templates**: SMEM swizzling and TiledMMA support for optimal performance
 - **Multiple Backend Options**: Flexibility across different optimization frameworks
 - **Clear Separation**: Well-organized directory structure with `gdn/kernels/` path
 - **Integration**: Seamless integration with the flashinfer-bench framework
 
-**Updated** Future enhancements planned include further optimization of the PTX kernel for specific hardware targets, expansion of Tensor Core utilization, and continued refinement of chunked processing strategies for improved arithmetic intensity and memory bandwidth utilization.
+**Updated** Future enhancements planned include further optimization of the embedded CUDA kernel for specific hardware targets, expansion of Tensor Core utilization, and continued refinement of chunked processing strategies for improved arithmetic intensity and memory bandwidth utilization.

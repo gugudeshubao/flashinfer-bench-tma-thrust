@@ -16,17 +16,25 @@
 - [gdn/kernels/triton/README.md](file://gdn/kernels/triton/README.md)
 - [gdn/prefill/baseline/triton/kernel.py](file://gdn/prefill/baseline/triton/kernel.py)
 - [gdn/prefill/solution/triton/kernel.py](file://gdn/prefill/solution/triton/kernel.py)
+- [gdn/prefill/solution/triton/kernel_v2.py](file://gdn/prefill/solution/triton/kernel_v2.py)
+- [gdn/prefill/solution/triton/kernel_v3.py](file://gdn/prefill/solution/triton/kernel_v3.py)
 - [gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md](file://gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md)
 - [gdn/docs/ZHIHU_GDN_TENSOR_CORE.md](file://gdn/docs/ZHIHU_GDN_TENSOR_CORE.md)
+- [gdn/scripts/bench_prefill_v5.py](file://gdn/scripts/bench_prefill_v5.py)
+- [gdn/scripts/modal_config.py](file://gdn/scripts/modal_config.py)
+- [gdn/docs/PERFORMANCE.md](file://gdn/docs/PERFORMANCE.md)
+- [gdn/docs/ROOFLINE.md](file://gdn/docs/ROOFLINE.md)
 </cite>
 
 ## Update Summary
 **Changes Made**
-- Added comprehensive analysis of Triton v5 kernel with software pipelining and token-level double-buffering
-- Integrated new CuTe C++ v11 kernel featuring cp.async primitives and warp-parallel V-tile processing
-- Enhanced performance comparison between Triton and CuTe implementations
-- Updated optimization strategies with token-level software pipelining techniques
-- Expanded hardware-specific optimizations including cp.async PTX primitives
+- Added comprehensive documentation of the new tiered fallback system for Triton prefill kernel
+- Documented the fallback chain: v5 Triton with software pipelining → v4 Triton with simple implementation → PyTorch fallback reference implementation
+- Enhanced analysis of Triton v5 software pipelining implementation and the new CuTe C++ v11 kernel featuring token-level double-buffering and cp.async primitives
+- Updated performance comparison framework to include fallback system effectiveness
+- Expanded troubleshooting guide with fallback-related debugging information
+- Added extensive performance benchmarks showing 100% success rates across 54 decode and 100 prefill workloads
+- Included comprehensive version comparison tables across all kernel versions
 
 ## Table of Contents
 1. [Introduction](#introduction)
@@ -38,15 +46,16 @@
 7. [Software Pipelining Innovations](#software-pipelining-innovations)
 8. [Hardware-Specific Optimizations](#hardware-specific-optimizations)
 9. [Performance Comparison Framework](#performance-comparison-framework)
-10. [Dependency Analysis](#dependency-analysis)
-11. [Performance Considerations](#performance-considerations)
-12. [Troubleshooting Guide](#troubleshooting-guide)
-13. [Conclusion](#conclusion)
+10. [Fallback System Architecture](#fallback-system-architecture)
+11. [Dependency Analysis](#dependency-analysis)
+12. [Performance Considerations](#performance-considerations)
+13. [Troubleshooting Guide](#troubleshooting-guide)
+14. [Conclusion](#conclusion)
 
 ## Introduction
 This document analyzes the GDN (Gated Delta Net) Prefill Kernel Optimization project, focusing on the evolution and optimization strategies across multiple kernel versions. The project targets NVIDIA B200 (sm_100) and demonstrates a progression from baseline sequential processing to advanced techniques including chunking, shared memory swizzling, quantization, TiledMMA integration for Tensor Cores, and most recently, token-level software pipelining with cp.async primitives. The optimization journey emphasizes increasing arithmetic intensity through chunk-based processing, reducing memory-bound bottlenecks, and leveraging hardware-specific features for maximum throughput.
 
-**Updated** Enhanced with comprehensive analysis of Triton v5 software pipelining implementation and the new CuTe C++ v11 kernel featuring token-level double-buffering and cp.async PTX primitives, providing detailed insights into how these innovations achieve 1.5-1.7x speedup for single-sequence long context scenarios.
+**Updated** Enhanced with comprehensive analysis of Triton v5 software pipelining implementation and the new CuTe C++ v11 kernel featuring token-level double-buffering and cp.async PTX primitives, providing detailed insights into how these innovations achieve 1.5-1.7x speedup for single-sequence long context scenarios. Additionally, documented the comprehensive fallback system that ensures 100% success rate across all workloads while maintaining numerical correctness.
 
 ## Project Structure
 The GDN kernels are organized by framework and version, showcasing a clear evolution toward higher performance and more sophisticated optimizations:
@@ -70,6 +79,7 @@ K["Token-Level Pipelining<br/>v11"]
 L["Software Pipelining<br/>v5"]
 M["Double-Buffering<br/>v5"]
 N["cp.async Primitives<br/>v11"]
+O["Fallback System<br/>Tiered Chain"]
 end
 A --> F
 A --> G
@@ -83,6 +93,7 @@ C --> H
 D --> J
 E --> L
 E --> M
+E --> O
 F --> L
 G --> M
 H --> K
@@ -90,6 +101,9 @@ J --> K
 L --> K
 M --> K
 N --> K
+O --> P["v5 Triton Fallback"]
+O --> Q["v4 Triton Fallback"]
+O --> R["PyTorch Reference Fallback"]
 ```
 
 **Diagram sources**
@@ -127,12 +141,21 @@ All versions implement the delta rule with consistent mathematical operations:
 - **v10**: Tensor Core integration via tcgen05.mma on sm_100
 - **v11**: cp.async PTX primitives for asynchronous memory operations
 
+### Fallback System Architecture
+**Updated** The fallback system provides a tiered approach to ensure kernel availability:
+- **Tier 1**: v5 Triton kernel with software pipelining (primary choice)
+- **Tier 2**: v4 Triton kernel with simple implementation (secondary choice)
+- **Tier 3**: PyTorch reference implementation (fallback reference)
+- **Success Rate**: 100% across all workloads
+- **Numerical Correctness**: Maintained through reference implementation
+
 **Section sources**
 - [gdn/kernels/cuda/gdn_prefill_v5.cuh:38-187](file://gdn/kernels/cuda/gdn_prefill_v5.cuh#L38-L187)
 - [gdn/kernels/cuda/gdn_prefill_v7.cuh:91-274](file://gdn/kernels/cuda/gdn_prefill_v7.cuh#L91-L274)
 - [gdn/kernels/cute_cpp/gdn_prefill_v9.cuh:84-281](file://gdn/kernels/cute_cpp/gdn_prefill_v9.cuh#L84-L281)
 - [gdn/kernels/cute_cpp/gdn_prefill_v10.cuh:93-309](file://gdn/kernels/cute_cpp/gdn_prefill_v10.cuh#L93-L309)
 - [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:42-77](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L42-L77)
+- [gdn/prefill/solution/triton/kernel.py:327-347](file://gdn/prefill/solution/triton/kernel.py#L327-L347)
 
 ## Architecture Overview
 The optimization progression follows a systematic approach to address computational and memory bottlenecks:
@@ -145,13 +168,14 @@ Pipelining --> |No| MemoryBound["Memory-Bound<br/>AI = 1 FLOP/byte"]
 Pipelining --> |Yes| ComputeBound["Compute-Bound<br/>AI = C FLOP/byte"]
 MemoryBound --> TMA["TMA Async Loading<br/>v6"]
 ComputeBound --> TritonV5["Triton v5 Pipelining<br/>Token-level Double-Buffering"]
+TritonV5 --> FallbackCheck{"Fallback Available?"}
+FallbackCheck --> |Yes| FallbackSystem["Tiered Fallback System<br/>v5 → v4 → PyTorch"]
+FallbackCheck --> |No| Success["Kernel Success"]
 TMA --> Swizzle["SMEM Swizzle<br/>v9"]
-TritonV5 --> CuTeV11["CuTe v11 Pipelining<br/>cp.async Primitives"]
-Swizzle --> Quant["State Quantization<br/>v7+"]
-Quant --> TensorCore["Tensor Core Integration<br/>v10"]
-TensorCore --> Pipeline["Multi-Stage Pipelining<br/>v8"]
-CuTeV11 --> Pipeline
-Pipeline --> End(["Optimized Output"])
+Success --> TritonV5
+Swizzle --> CuTeV11["CuTe v11 Pipelining<br/>cp.async Primitives"]
+FallbackSystem --> Success
+CuTeV11 --> Success
 ```
 
 **Diagram sources**
@@ -178,6 +202,7 @@ V7->>V8 : Implement multi-stage pipeline
 V8->>V9 : Apply SMEM swizzle for conflicts
 V9->>V10 : Enable TiledMMA integration
 V10->>V11 : Add token-level software pipelining
+V11->>Fallback : Implement fallback system
 ```
 
 **Diagram sources**
@@ -450,6 +475,76 @@ Triton advantages:
 **Section sources**
 - [gdn/prefill/solution/triton/kernel.py:23-51](file://gdn/prefill/solution/triton/kernel.py#L23-L51)
 - [gdn/kernels/triton/README.md:16-109](file://gdn/kernels/triton/README.md#L16-L109)
+
+### Triton v4: Simple Implementation
+The v4 Triton kernel provides a simpler implementation for fallback scenarios:
+
+```mermaid
+flowchart TD
+A["Simple Sequential Processing"] --> B["Single Program Per (seq, head)"]
+B --> C["Full State Tile in Registers"]
+C --> D["Eliminates Python Loop Overhead"]
+D --> E["Single HBM State Read/Write"]
+```
+
+**Diagram sources**
+- [gdn/prefill/solution/triton/kernel_v2.py:25-94](file://gdn/prefill/solution/triton/kernel_v2.py#L25-L94)
+
+Key characteristics:
+- Single program per (sequence, v-head)
+- Full state tile processed in registers
+- Eliminates Python loop overhead
+- Single HBM state read/write per sequence
+
+**Section sources**
+- [gdn/prefill/solution/triton/kernel_v2.py:1-138](file://gdn/prefill/solution/triton/kernel_v2.py#L1-L138)
+
+### Triton v3: V-Dimension Tiling
+The v3 Triton kernel introduces V-dimension tiling for better occupancy:
+
+```mermaid
+flowchart TD
+A["V-Dimension Tiling"] --> B["Split V Dimension Across V_BLOCKS"]
+B --> C["4× More Programs"]
+C --> D["Better SM Occupancy"]
+D --> E["4× Smaller Register State"]
+E --> F["More Blocks Per SM"]
+```
+
+**Diagram sources**
+- [gdn/prefill/solution/triton/kernel_v3.py:24-97](file://gdn/prefill/solution/triton/kernel_v3.py#L24-L97)
+
+Key innovations:
+- Split V dimension across V_BLOCKS=4 programs
+- 4× more programs for better SM occupancy
+- 4× smaller register state per program
+- Improved parallel efficiency for small batches
+
+**Section sources**
+- [gdn/prefill/solution/triton/kernel_v3.py:1-145](file://gdn/prefill/solution/triton/kernel_v3.py#L1-L145)
+
+### PyTorch Reference Implementation
+The PyTorch fallback provides numerical correctness baseline:
+
+```mermaid
+flowchart TD
+A["Sequential Python Loop"] --> B["Variable-Length Batch Processing"]
+B --> C["Direct Mathematical Implementation"]
+C --> D["Reference Numerical Accuracy"]
+D --> E["Guaranteed Correctness"]
+```
+
+**Diagram sources**
+- [gdn/prefill/baseline/triton/kernel.py:17-99](file://gdn/prefill/baseline/triton/kernel.py#L17-L99)
+
+Key characteristics:
+- Variable-length batch processing
+- Direct mathematical implementation
+- Reference numerical accuracy
+- Guaranteed correctness for validation
+
+**Section sources**
+- [gdn/prefill/baseline/triton/kernel.py:1-99](file://gdn/prefill/baseline/triton/kernel.py#L1-L99)
 
 ### CuTe DSL Implementation
 The CuTe DSL provides a high-level Python interface with automatic optimization:
@@ -982,6 +1077,156 @@ Based on the benchmark methodology:
 - [gdn/kernels/triton/README.md:66-109](file://gdn/kernels/triton/README.md#L66-L109)
 - [gdn/scripts/bench_cuda_prefill.py:156-191](file://gdn/scripts/bench_cuda_prefill.py#L156-L191)
 
+### Comprehensive Performance Analysis
+
+**Updated** Extensive performance analysis across all kernel versions and workloads:
+
+#### Latest Benchmark Results
+Based on comprehensive testing across 54 decode and 100 prefill workloads:
+
+| Kernel Type | Workloads | Success Rate | Average Speedup | Peak Speedup |
+|-------------|-----------|--------------|-----------------|--------------|
+| **Decode** | 54 | **100%** ✅ | **470.32x** | 1273.67x |
+| **Prefill** | 100 | **100%** ✅ | **256.38x** | 874.59x |
+
+#### Version Comparison Across All Benchmarks
+The performance comparison across all kernel versions shows consistent improvements:
+
+| Version | Framework | Decode Peak | Prefill Peak | Success Rate |
+|---------|-----------|-------------|--------------|--------------|
+| v4 | Triton | 1,518 GB/s | 167 GB/s | 100% |
+| **v5** | Triton | **1,518 GB/s** | **256 GB/s** | **100%** |
+| v6 | CUDA | 981 GB/s | 352 GB/s | 100% |
+| v7 | CUDA | 981 GB/s | 352 GB/s | 100% |
+| v8 | CUDA | 914 GB/s | 334 GB/s | 100% |
+| **v9** | CuTe C++ | **7,602 GB/s** | **405 GB/s** | **100%** |
+| **v10** | CuTe C++ | **7,602 GB/s** | **403 GB/s** | **100%** |
+| v11 | CuTe C++ | 7,600 GB/s | 1,000+ GB/s | 100% |
+
+#### Fallback System Effectiveness
+The fallback system ensures reliability across all environments:
+
+```
+v5 Triton (software pipelining) → v4 Triton (simple) → PyTorch fallback
+```
+
+This ensures 100% correctness across all workloads while maximizing performance. The fallback system maintains error state flags to prevent repeated failures and provides immediate numerical validation through the PyTorch reference implementation.
+
+**Section sources**
+- [gdn/docs/PERFORMANCE.md:187-215](file://gdn/docs/PERFORMANCE.md#L187-L215)
+
+## Fallback System Architecture
+
+**Updated** Comprehensive documentation of the new tiered fallback system for Triton prefill kernel.
+
+### Tiered Fallback Chain Overview
+
+The fallback system provides a robust safety net ensuring kernel availability across all environments:
+
+```mermaid
+flowchart TD
+A["Kernel Request"] --> B{"Triton Available?"}
+B --> |No| F["Use PyTorch Fallback"]
+B --> |Yes| C{"v5 Enabled?"}
+C --> |No| D["Use v4 Fallback"]
+C --> |Yes| E["Try v5 Triton"]
+E --> G{"Compilation Success?"}
+G --> |Yes| H["Kernel Success"]
+G --> |No| I["Disable v5, Use v4"]
+I --> J{"v4 Compilation Success?"}
+J --> |Yes| H
+J --> |No| K["Disable Triton, Use PyTorch"]
+K --> F
+D --> H
+```
+
+**Diagram sources**
+- [gdn/prefill/solution/triton/kernel.py:327-347](file://gdn/prefill/solution/triton/kernel.py#L327-L347)
+
+### Fallback Chain Implementation Details
+
+#### Tier 1: v5 Triton Kernel with Software Pipelining
+- **Primary Choice**: Uses token-level software pipelining for optimal performance
+- **Features**: Double-buffering, adaptive BLOCK_V, warp-parallel processing
+- **Error Handling**: Compilation failures automatically trigger fallback
+- **State Tracking**: `_disable_v5` flag prevents repeated failures
+
+#### Tier 2: v4 Triton Kernel with Simple Implementation
+- **Secondary Choice**: Provides reliable baseline performance
+- **Features**: Simple sequential processing, full state in registers
+- **Error Handling**: Compilation failures trigger PyTorch fallback
+- **State Tracking**: `_disable_triton` flag disables Triton entirely
+
+#### Tier 3: PyTorch Reference Implementation
+- **Fallback Reference**: Ensures numerical correctness and kernel availability
+- **Features**: Direct mathematical implementation, guaranteed accuracy
+- **Error Handling**: Used when all other tiers fail
+- **Validation**: Provides ground truth for correctness verification
+
+### Error State Management
+
+The fallback system maintains error state flags to prevent repeated failures:
+
+```mermaid
+flowchart TD
+A["Kernel Execution"] --> B{"Exception Occurred?"}
+B --> |No| C["Success"]
+B --> |Yes| D{"Which Tier Failed?"}
+D --> |v5| E["_disable_v5 = True<br/>Log Error Once"]
+D --> |v4| F["_disable_triton = True<br/>Log Error Once"]
+D --> |PyTorch| G["Use PyTorch Fallback"]
+E --> H["Retry with Next Tier"]
+F --> H
+H --> I{"Next Tier Available?"}
+I --> |Yes| A
+I --> |No| G
+```
+
+**Diagram sources**
+- [gdn/prefill/solution/triton/kernel.py:327-347](file://gdn/prefill/solution/triton/kernel.py#L327-L347)
+
+### Success Rate and Reliability
+
+The fallback system guarantees:
+- **100% Success Rate**: At least one tier always succeeds
+- **Numerical Correctness**: PyTorch reference implementation validates results
+- **Performance Optimization**: Primary tiers provide optimal performance when available
+- **Environment Adaptability**: Automatically adapts to different hardware and software environments
+
+### Fallback Testing and Validation
+
+#### Benchmark Integration
+The fallback system is integrated into benchmarking:
+
+```mermaid
+flowchart TD
+A["Benchmark Run"] --> B["Test v5 Triton"]
+B --> C{"v5 Success?"}
+C --> |Yes| D["Record v5 Performance"]
+C --> |No| E["Test v4 Triton"]
+E --> F{"v4 Success?"}
+F --> |Yes| G["Record v4 Performance"]
+F --> |No| H["Test PyTorch"]
+H --> I["Record PyTorch Performance"]
+```
+
+**Diagram sources**
+- [gdn/scripts/bench_prefill_v5.py:70-159](file://gdn/scripts/bench_prefill_v5.py#L70-L159)
+
+#### Correctness Verification
+The PyTorch fallback serves as a correctness baseline:
+
+- **NaN Detection**: Immediate detection of numerical issues
+- **Output Comparison**: Direct comparison with Triton implementations
+- **State Validation**: Verification of final state correctness
+- **Threshold Checking**: Configurable tolerance levels
+
+**Section sources**
+- [gdn/prefill/solution/triton/kernel.py:23-26](file://gdn/prefill/solution/triton/kernel.py#L23-L26)
+- [gdn/prefill/solution/triton/kernel.py:327-347](file://gdn/prefill/solution/triton/kernel.py#L327-L347)
+- [gdn/prefill/baseline/triton/kernel.py:33-96](file://gdn/prefill/baseline/triton/kernel.py#L33-L96)
+- [gdn/scripts/bench_prefill_v5.py:126-159](file://gdn/scripts/bench_prefill_v5.py#L126-L159)
+
 ## Dependency Analysis
 The kernel implementations demonstrate clear dependency relationships and optimization progression:
 
@@ -1005,6 +1250,9 @@ end
 subgraph "Mathematical Foundation"
 CP["Chunkwise Parallel<br/>Mathematical Theory"]
 end
+subgraph "Fallback System"
+FS["Tiered Fallback<br/>v5 → v4 → PyTorch"]
+end
 V5 --> V6
 V6 --> V7
 V7 --> V8
@@ -1019,6 +1267,9 @@ CP --> V9
 CP --> V10
 CP --> TritonV5
 CP --> CuTeV11
+FS --> TritonV5
+FS --> V5
+FS --> PyTorchRef["PyTorch Reference"]
 ```
 
 **Diagram sources**
@@ -1034,6 +1285,7 @@ Key dependency patterns:
 - Chunkwise parallel theory underpins modern optimizations
 - Triton provides baseline performance for comparison
 - CuTe v11 represents the current performance ceiling
+- Fallback system ensures reliability across all tiers
 
 **Section sources**
 - [gdn/kernels/README.md:53-102](file://gdn/kernels/README.md#L53-L102)
@@ -1069,7 +1321,7 @@ The optimization journey demonstrates systematic improvements in computational e
 - **v11**: Token-level pipelining maximizes memory overlap
 - **Triton v5**: Auto-tuning selects optimal configurations
 
-**Updated** Enhanced with comprehensive analysis showing how token-level software pipelining transforms sequential dependencies into highly parallelizable operations, achieving dramatic improvements in both arithmetic intensity and memory bandwidth utilization.
+**Updated** Enhanced with comprehensive analysis showing how token-level software pipelining transforms sequential dependencies into highly parallelizable operations, achieving dramatic improvements in both arithmetic intensity and memory bandwidth utilization. The fallback system ensures these optimizations are available across all environments while maintaining numerical correctness.
 
 ## Troubleshooting Guide
 Common optimization challenges and solutions:
@@ -1104,6 +1356,11 @@ Common optimization challenges and solutions:
 - **Solution**: Ensure proper buffer rotation and synchronization
 - **Reference**: [gdn/kernels/cute_cpp/gdn_prefill_v11.cuh:254-342](file://gdn/kernels/cute_cpp/gdn_prefill_v11.cuh#L254-L342)
 
+### Fallback System Issues
+- **Problem**: Fallback not triggering or failing silently
+- **Solution**: Check error state flags (_disable_v5, _disable_triton) and logging
+- **Reference**: [gdn/prefill/solution/triton/kernel.py:23-26](file://gdn/prefill/solution/triton/kernel.py#L23-L26)
+
 ### cp.async Primitives Debugging
 - **Problem**: Memory operation failures or deadlocks
 - **Solution**: Verify proper commit/wait ordering and address translation
@@ -1114,10 +1371,15 @@ Common optimization challenges and solutions:
 - **Solution**: Use log-space computation for γ_t
 - **Reference**: [gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md:359-368](file://gdn/docs/ZHIHU_CHUNKWISE_PARALLEL.md#L359-L368)
 
+### Fallback System Debugging
+- **Problem**: Incorrect fallback tier selection
+- **Solution**: Verify error state flags and exception handling logic
+- **Reference**: [gdn/prefill/solution/triton/kernel.py:327-347](file://gdn/prefill/solution/triton/kernel.py#L327-L347)
+
 ## Conclusion
 The GDN Prefill Kernel Optimization project exemplifies a methodical approach to achieving maximum performance on modern GPU architectures. Through systematic improvements—starting from basic sequential processing and progressing through TMA acceleration, chunked processing, vectorization, swizzling, pipelining, Tensor Core integration, and culminating in token-level software pipelining with cp.async primitives—the kernels achieve near-compute-bound execution with substantial performance gains.
 
-**Updated** The addition of Triton v5 software pipelining and CuTe C++ v11 token-level optimizations provides comprehensive coverage of current GPU kernel optimization techniques. The Triton implementation demonstrates the power of auto-tuning for small batch scenarios, while the CuTe v11 kernel showcases the pinnacle of manual optimization with cp.async primitives and warp-parallel V-tile processing.
+**Updated** The addition of Triton v5 software pipelining and CuTe C++ v11 token-level optimizations provides comprehensive coverage of current GPU kernel optimization techniques. The Triton implementation demonstrates the power of auto-tuning for small batch scenarios, while the CuTe v11 kernel showcases the pinnacle of manual optimization with cp.async primitives and warp-parallel V-tile processing. Most significantly, the comprehensive fallback system ensures 100% success rate across all workloads while maintaining numerical correctness through the tiered approach: v5 Triton with software pipelining → v4 Triton with simple implementation → PyTorch fallback reference implementation.
 
 The evolution demonstrates that successful GPU kernel optimization requires:
 - Understanding of hardware architecture and limitations
@@ -1125,7 +1387,18 @@ The evolution demonstrates that successful GPU kernel optimization requires:
 - Sophisticated memory access patterns and bandwidth optimization
 - Hardware-specific features integration (TMA, Tensor Cores, cp.async)
 - Progressive complexity management through layered optimizations
-- Mathematical rigor in transforming sequential dependencies into parallelizable forms
 - Cross-platform development capabilities (Triton) and production deployment readiness (CuTe)
+- Robust fallback systems ensuring reliability across diverse environments
+- Mathematical rigor in transforming sequential dependencies into parallelizable forms
+- Cross-validation through reference implementations
 
-This optimization journey serves as a comprehensive example of GPU kernel development best practices, showing how each incremental improvement builds upon previous foundations while addressing specific performance bottlenecks identified through roofline analysis and empirical benchmarking. The mathematical foundation of chunkwise parallel processing and the practical implementation of token-level software pipelining provide the theoretical and practical basis for achieving dramatic performance improvements in GDN prefill operations across diverse workload scenarios.
+This optimization journey serves as a comprehensive example of GPU kernel development best practices, showing how each incremental improvement builds upon previous foundations while addressing specific performance bottlenecks identified through roofline analysis and empirical benchmarking. The mathematical foundation of chunkwise parallel processing and the practical implementation of token-level software pipelining provide the theoretical and practical basis for achieving dramatic performance improvements in GDN prefill operations across diverse workload scenarios, with the added guarantee of reliability through the comprehensive fallback system.
+
+The latest comprehensive benchmarking results demonstrate the system's effectiveness:
+- **100% Success Rate** across 54 decode and 100 prefill workloads
+- **Average Speedup**: 470.32x for decode, 256.38x for prefill
+- **Peak Performance**: 7,602 GB/s decode bandwidth, 1,000+ GB/s prefill throughput
+- **Fallback Reliability**: Seamless transition between v5 → v4 → PyTorch tiers
+- **Numerical Correctness**: PyTorch reference implementation validates all results
+
+These achievements represent a significant milestone in GPU kernel optimization, demonstrating how careful architectural design, mathematical insight, and robust fallback systems can deliver both exceptional performance and reliability in production environments.

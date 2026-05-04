@@ -1852,6 +1852,7 @@ def run_chunked_prefill_module():
         {"name": "N1_L64", "lengths": [64], "chunk_size": 64},
         {"name": "N4_L32", "lengths": [32, 32, 32, 32], "chunk_size": 64},
         {"name": "grouped_varlen", "lengths": [32, 32, 64, 64], "chunk_size": 64},
+        {"name": "unique_varlen", "lengths": [32, 64, 128, 256], "chunk_size": 64},
     ]:
         lengths = cfg["lengths"]
         num_seqs = len(lengths)
@@ -2342,6 +2343,87 @@ def run_chunked_prefill_sweep():
     gpu=B200_GPU,
     timeout=LONG_TIMEOUT,
 )
+def run_chunked_prefill_profile():
+    import math
+    import sys
+
+    import torch
+    import torch.nn.functional as F
+
+    sys.path.insert(0, GDN_REMOTE_ROOT)
+    from prefill.solution.cuda.chunked_proto import profile_kernel, recommend_chunk_size
+
+    device = "cuda"
+    D = 128
+    scale = 1.0 / math.sqrt(D)
+    results = []
+
+    for cfg in [
+        {"name": "N1_L64", "lengths": [64]},
+        {"name": "N4_L32", "lengths": [32, 32, 32, 32]},
+        {"name": "grouped_varlen", "lengths": [32, 32, 64, 64]},
+        {"name": "unique_varlen", "lengths": [32, 64, 128, 256]},
+    ]:
+        lengths = cfg["lengths"]
+        num_seqs = len(lengths)
+        total_tokens = sum(lengths)
+
+        torch.manual_seed(901 + total_tokens)
+        q = (torch.randn(total_tokens, 4, D, device=device, dtype=torch.float32) * 0.1).to(torch.bfloat16)
+        k = F.normalize(torch.randn(total_tokens, 4, D, device=device, dtype=torch.float32), dim=-1).to(torch.bfloat16)
+        v = (torch.randn(total_tokens, 8, D, device=device, dtype=torch.float32) * 0.1).to(torch.bfloat16)
+        state = torch.randn(num_seqs, 8, D, D, device=device, dtype=torch.float32) * 0.01
+        A_log = torch.randn(8, device=device, dtype=torch.float32) * 0.1 - 1.0
+        a = torch.randn(total_tokens, 8, device=device, dtype=torch.float32) * 0.1
+        dt_bias = torch.randn(8, device=device, dtype=torch.float32) * 0.1
+        b = torch.randn(total_tokens, 8, device=device, dtype=torch.float32) * 0.1
+        offsets = [0]
+        for length in lengths:
+            offsets.append(offsets[-1] + length)
+        cu_seqlens = torch.tensor(offsets, device=device, dtype=torch.int32)
+
+        # Warm up JIT/library paths so profile numbers do not include one-time compile cost.
+        profile_kernel(
+            q,
+            k,
+            v,
+            state,
+            A_log,
+            a,
+            dt_bias,
+            b,
+            cu_seqlens,
+            scale,
+            chunk_size=0,
+        )
+
+        _, _, profile = profile_kernel(
+            q,
+            k,
+            v,
+            state,
+            A_log,
+            a,
+            dt_bias,
+            b,
+            cu_seqlens,
+            scale,
+            chunk_size=0,
+        )
+        profile["name"] = cfg["name"]
+        profile["lengths"] = lengths
+        profile["recommended_chunk_size"] = recommend_chunk_size(cu_seqlens)
+        results.append(profile)
+        print(profile)
+
+    return {"status": "ok", "results": results}
+
+
+@app.function(
+    image=cuda_image,
+    gpu=B200_GPU,
+    timeout=LONG_TIMEOUT,
+)
 def probe_cutlass_sm100():
     from pathlib import Path
 
@@ -2495,6 +2577,8 @@ def main(mode: str = "bench"):
         result = run_chunked_prefill_module.remote()
     elif mode == "chunkmodule_nobatched":
         result = run_chunked_prefill_module_no_strided_batched.remote()
+    elif mode == "chunkprofile":
+        result = run_chunked_prefill_profile.remote()
     elif mode == "chunksweep":
         result = run_chunked_prefill_sweep.remote()
     elif mode == "mma":

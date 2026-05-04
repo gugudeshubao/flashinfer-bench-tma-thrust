@@ -47,6 +47,7 @@ _MAX_KV_RANK = 512
 _MAX_ROPE_DIM = 128
 _MAX_TOPK = 128
 _MIN_PREFILL_TRITON_WORK = 262144
+_ENABLE_TRITON_SELECTION_KERNEL = False
 _WEIGHT_CACHE: dict[
     tuple[int, tuple[int, ...], torch.device, int],
     tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -57,6 +58,79 @@ _CAUSAL_BOOL_CACHE: dict[tuple[int, int, torch.device], torch.Tensor] = {}
 
 
 if _TRITON_AVAILABLE:
+
+    @triton.jit
+    def _selection_topk_batch1_causal_kernel(
+        Q_ptr,
+        K_ptr,
+        W_ptr,
+        Out_ptr,
+        scale,
+        stride_q_s,
+        stride_q_h,
+        stride_q_d,
+        stride_k_t,
+        stride_w_s,
+        stride_o_s,
+        key_len,
+        num_heads,
+        index_dim,
+        BLOCK_H: tl.constexpr,
+        BLOCK_D: tl.constexpr,
+        TOPK: tl.constexpr,
+    ):
+        q_idx = tl.program_id(0)
+
+        offs_h = tl.arange(0, BLOCK_H)
+        offs_d = tl.arange(0, BLOCK_D)
+        offs_t = tl.arange(0, TOPK)
+
+        q_ptrs = (
+            Q_ptr
+            + q_idx * stride_q_s
+            + offs_h[:, None] * stride_q_h
+            + offs_d[None, :] * stride_q_d
+        )
+        q_mask = (offs_h[:, None] < num_heads) & (offs_d[None, :] < index_dim)
+        q = tl.load(q_ptrs, mask=q_mask, other=0.0).to(tl.float32)
+
+        w_ptrs = W_ptr + q_idx * stride_w_s + offs_h
+        w = tl.load(w_ptrs, mask=offs_h < num_heads, other=0.0).to(tl.float32)
+        weighted_q = tl.sum(q * w[:, None], axis=0)  # [BLOCK_D]
+
+        best = tl.zeros((TOPK,), dtype=tl.uint64)
+
+        for t_start in tl.range(0, key_len, TOPK):
+            idx = t_start + offs_t
+            k_ptrs = K_ptr + idx[:, None] * stride_k_t + offs_d[None, :]
+            k_mask = (idx[:, None] < key_len) & (offs_d[None, :] < index_dim)
+            k = tl.load(k_ptrs, mask=k_mask, other=0.0).to(tl.float32)
+
+            scores = tl.sum(k * weighted_q[None, :], axis=1) * scale
+            valid = (idx < key_len) & (idx <= q_idx)
+            scores = tl.where(valid, scores, float("-inf"))
+
+            bits_i = tl.cast(scores, tl.int32, bitcast=True)
+            bits_u = tl.cast(bits_i, tl.uint32, bitcast=True)
+            sign = bits_u >> 31
+            mask_u = tl.where(
+                sign != 0,
+                tl.full((TOPK,), 0xffffffff, tl.uint32),
+                tl.full((TOPK,), 0x80000000, tl.uint32),
+            )
+            sortable = bits_u ^ mask_u
+            inv_idx = tl.full((TOPK,), 0xffffffff, tl.uint32) - tl.cast(idx, tl.uint32)
+            packed = (tl.cast(sortable, tl.uint64) << 32) | tl.cast(inv_idx, tl.uint64)
+            packed = tl.where(valid, packed, tl.zeros((TOPK,), dtype=tl.uint64))
+
+            merged = tl.cat(best, packed)
+            merged = tl.sort(merged, descending=True)
+            best = merged[:TOPK]
+
+        low = tl.cast(best & 0xffffffff, tl.uint32)
+        out_idx = tl.full((TOPK,), 0xffffffff, tl.uint32) - low
+        out_ptrs = Out_ptr + q_idx * stride_o_s + offs_t
+        tl.store(out_ptrs, tl.cast(out_idx, tl.int32))
 
     @triton.jit
     def _weighted_query_kernel(
@@ -358,7 +432,7 @@ def _pick_weighted_q_launch(num_index_heads: int, index_dim: int) -> tuple[int, 
 def _pick_num_warps(topk: int, query_len: int) -> int:
     if query_len == 1:
         if topk <= 64:
-            return 2
+            return 1
         if topk <= 128:
             return 4
         return 4
@@ -426,6 +500,10 @@ def _prepare_query_and_value(
     ).contiguous()
     q_rope = q_pe.float().contiguous()
     return q_nope_proj, q_rope, value_proj_t
+
+
+def _is_power_of_two(x: int) -> bool:
+    return x > 0 and (x & (x - 1)) == 0
 
 
 def _compute_index_scores_fast(
@@ -548,6 +626,61 @@ def _get_causal_bool_mask(query_len: int, key_len: int, device: torch.device) ->
     return mask
 
 
+def _compute_topk_indices_triton_batch1_causal(
+    *,
+    index_q: torch.Tensor,
+    index_k: torch.Tensor,
+    index_weights: torch.Tensor,
+    topk: int,
+    index_scale,
+) -> torch.Tensor | None:
+    if not _TRITON_AVAILABLE:
+        return None
+
+    batch_size, query_len, num_index_heads, index_dim = index_q.shape
+    key_len = index_k.shape[1]
+
+    if batch_size != 1 or not index_q.is_cuda:
+        return None
+    if topk > _MAX_TOPK or not _is_power_of_two(topk):
+        return None
+    if num_index_heads > 16 or index_dim > 128:
+        return None
+
+    block_h = min(16, _next_power_of_two(num_index_heads))
+    block_d = min(128, _next_power_of_two(index_dim))
+    scale = index_scale if index_scale is not None else 1.0 / math.sqrt(index_dim)
+
+    q = index_q.squeeze(0).contiguous()
+    k = index_k.squeeze(0).contiguous()
+    w = index_weights.squeeze(0).contiguous()
+    out = torch.empty((query_len, topk), device=index_q.device, dtype=torch.int32)
+
+    _selection_topk_batch1_causal_kernel[(query_len,)](
+        q,
+        k,
+        w,
+        out,
+        float(scale),
+        q.stride(0),
+        q.stride(1),
+        q.stride(2),
+        k.stride(0),
+        w.stride(0),
+        out.stride(0),
+        key_len,
+        num_index_heads,
+        index_dim,
+        BLOCK_H=block_h,
+        BLOCK_D=block_d,
+        TOPK=topk,
+        num_warps=4,
+        num_stages=1,
+    )
+
+    return out.unsqueeze(0)
+
+
 def _is_standard_causal_mask(
     attn_mask: torch.Tensor | None,
     *,
@@ -599,7 +732,16 @@ def _select_sparse_metadata(
     weighted_q_kernel_override: bool | None,
 ) -> tuple[torch.Tensor | None, torch.Tensor, torch.Tensor, torch.Tensor]:
     if topk_indices is None:
-        if causal_mask:
+        if _ENABLE_TRITON_SELECTION_KERNEL and causal_mask and not need_sparse_mask and topk is not None:
+            topk_indices = _compute_topk_indices_triton_batch1_causal(
+                index_q=index_q,
+                index_k=index_k,
+                index_weights=index_weights,
+                topk=int(topk),
+                index_scale=index_scale,
+            )
+            index_scores = None
+        elif causal_mask:
             index_scores = _compute_index_scores_fast(
                 index_q=index_q,
                 index_k=index_k,

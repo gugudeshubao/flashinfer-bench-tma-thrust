@@ -1,6 +1,8 @@
 # GDN Kernels
 
-Gated Delta Net kernels for NVIDIA B200.
+GDN = Gated DeltaNet linear attention.
+
+This directory contains Gated DeltaNet linear attention kernels for NVIDIA B200.
 
 This repo currently has:
 

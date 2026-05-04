@@ -39,9 +39,9 @@
 
 ---
 
-## 1. 背景：什么是 Gated Delta Net (GDN)？
+## 1. 背景：什么是 Gated DeltaNet (GDN)？
 
-GDN (Gated Delta Net，门控增量网络) 是一种**线性注意力变体**，用于替代标准 Transformer 的 Softmax Attention。相比 Softmax Attention 的 O(L²) 复杂度，GDN 使用递归状态实现 O(L) 复杂度。
+GDN (Gated DeltaNet，门控增量网络) 是一种**线性注意力机制**，用于替代标准 Transformer 的 Softmax Attention。相比 Softmax Attention 的 O(L²) 复杂度，GDN 使用递归状态实现 O(L) 复杂度。
 
 其核心是一个**递归状态更新** (Recurrent State Update)：
 

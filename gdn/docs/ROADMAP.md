@@ -1,5 +1,7 @@
 # GDN Roadmap
 
+GDN = Gated DeltaNet linear attention.
+
 Current performance source of truth lives in [PERFORMANCE.md](./PERFORMANCE.md).
 
 ## Current Reality
